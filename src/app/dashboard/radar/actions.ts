@@ -87,7 +87,7 @@ export async function enrichAndPush(radarId: string, sequenceId?: string) {
 
   const { data: lead } = await supabase
     .from("radar_leads")
-    .select("id, cnpj, razao_social, nome_fantasia, uf, municipio, cnae, contato_principal, email, telefone, converted_contact_id")
+    .select("id, cnpj, razao_social, nome_fantasia, uf, municipio, cnae, tier, contato_principal, email, telefone, converted_contact_id")
     .eq("id", radarId)
     .maybeSingle();
   if (!lead) return { error: "Lead não encontrado." };
@@ -137,6 +137,18 @@ export async function enrichAndPush(radarId: string, sequenceId?: string) {
   if (error) return { error: error.message };
 
   await supabase.from("radar_leads").update({ converted_contact_id: (contact as any).id }).eq("id", radarId);
+
+  // tier vira TAG (dinâmica) — cria a tag se não existir e aplica ao contato
+  const tier = (L.tier as string | null)?.trim();
+  if (tier) {
+    let { data: tag } = await supabase.from("tags").select("id").eq("name", tier).maybeSingle();
+    if (!tag) {
+      const color = tier === "T1" ? "#12B76A" : tier === "T2" ? "#4A3AFF" : tier === "T3" ? "#F79009" : "#667085";
+      const { data: created } = await supabase.from("tags").insert({ tenant_id, name: tier, color }).select("id").maybeSingle();
+      tag = created;
+    }
+    if (tag) await supabase.from("contact_tags").upsert({ tenant_id, contact_id: (contact as any).id, tag_id: (tag as any).id }, { onConflict: "contact_id,tag_id", ignoreDuplicates: true });
+  }
 
   if (sequenceId) {
     const { enrollContact } = await import("@/app/dashboard/cadencias/actions");

@@ -226,3 +226,25 @@ export async function sendAllEmailTasks() {
   revalidatePath("/dashboard");
   return { ok: true, sent, failed };
 }
+
+// Conclui várias tarefas de uma vez (fila sequencial por tipo — ex.: todos os LinkedIn).
+export async function completeTasks(ids: string[]) {
+  const { supabase, tenant_id } = await ctx();
+  if (!ids.length) return { ok: true, done: 0 };
+  const list = ids.slice(0, 300);
+  // pega os contatos para pontuar
+  const { data: tks } = await supabase.from("tasks").select("id, contact_id").in("id", list);
+  const { error } = await supabase
+    .from("tasks")
+    .update({ status: "done", completed_at: new Date().toISOString() })
+    .in("id", list)
+    .eq("status", "pending");
+  if (error) return { error: error.message };
+  if (tenant_id) {
+    for (const t of ((tks as any[]) || [])) {
+      if (t.contact_id) await scoreEvent(supabase, { tenant_id, contact_id: t.contact_id, type: "task_done" });
+    }
+  }
+  revalidatePath("/dashboard");
+  return { ok: true, done: list.length };
+}

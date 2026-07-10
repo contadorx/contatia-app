@@ -57,11 +57,13 @@ export default async function Propostas() {
                     </a>
                   )}
                   {d.storage_path && !d.url && (
-                    <span className="inline-flex items-center gap-2 text-xs text-subtle">
-                      <span className="rounded bg-brand-soft px-1.5 py-0.5 text-brand-dark">PDF</span>
-                      <ViewDocButton documentId={d.id} />
+                    <span className="inline-flex items-center gap-1 text-xs text-subtle">
+                      <span className="rounded bg-brand-soft px-1.5 py-0.5 text-brand-dark">PDF</span> arquivo privado
                     </span>
                   )}
+                  <div className="mt-1">
+                    <ViewDocButton documentId={d.id} hasFile={!!d.storage_path} />
+                  </div>
                 </div>
               </div>
               <ShareControl documentId={d.id} contacts={contactList} />

@@ -150,3 +150,14 @@ export async function saveSignature(signature: string) {
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
+
+// Define a retenção de arquivos (meses) do workspace. Owner.
+export async function saveRetention(months: number) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const m = Math.max(0, Math.min(120, Number(months) || 0));
+  const { error } = await supabase.from("tenants").update({ file_retention_months: m }).eq("id", tenant_id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/config");
+  return { ok: true };
+}

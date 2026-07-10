@@ -6,6 +6,7 @@ import AiSettingsForm from "@/components/AiSettingsForm";
 import WhatsAppConnect from "@/components/WhatsAppConnect";
 import BusinessProfileForm from "@/components/BusinessProfileForm";
 import SignatureForm from "@/components/SignatureForm";
+import RetentionForm from "@/components/RetentionForm";
 import ConfigTabs from "@/components/ConfigTabs";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ export default async function Config() {
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("inbound_token, ai_model, ai_api_key, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature")
+    .select("inbound_token, ai_model, ai_api_key, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature, file_retention_months")
     .maybeSingle();
   const inboundToken = (tenant as any)?.inbound_token as string | undefined;
   const aiModel = ((tenant as any)?.ai_model as string) || "";
@@ -63,6 +64,12 @@ export default async function Config() {
           <p className="text-sm text-subtle">Modelo e chave usados pelo &ldquo;Gerar cadência com IA&rdquo;. Definidos aqui, valem sem mexer no ambiente.</p>
           <div className="card mt-2 p-5">
             <AiSettingsForm currentModel={aiModel} hasKey={aiHasKey} />
+          </div>
+
+          <p className="mt-6 text-sm font-semibold">Retenção de arquivos</p>
+          <p className="text-sm text-subtle">Por quanto tempo os PDFs de proposta ficam guardados. Após o prazo, o arquivo é expurgado (o registro do documento permanece). LGPD e economia de storage.</p>
+          <div className="card mt-2 p-5">
+            <RetentionForm initial={Number((tenant as any)?.file_retention_months ?? 6)} />
           </div>
         </div>
 

@@ -50,6 +50,21 @@ export async function uploadDocument(form: FormData) {
 }
 
 // Gera uma URL assinada temporária para o dono ver o PDF do Storage.
+// Exclui um documento e o arquivo no Storage (se houver).
+export async function deleteDocument(documentId: string) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { data: doc } = await supabase.from("documents").select("storage_path").eq("id", documentId).maybeSingle();
+  const path = (doc as any)?.storage_path as string | undefined;
+  if (path) {
+    await supabase.storage.from("proposals").remove([path]);
+  }
+  const { error } = await supabase.from("documents").delete().eq("id", documentId);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/propostas");
+  return { ok: true };
+}
+
 export async function viewDocument(documentId: string) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };

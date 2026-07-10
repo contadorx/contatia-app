@@ -176,33 +176,34 @@ export default function PipelineBoard({
       )}
 
       <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-2.5">
-        <input className="input py-1 text-xs" style={{ maxWidth: 180 }} value={fBusca} onChange={(e) => setFBusca(e.target.value)} placeholder="Buscar negócio/contato" />
-        <div className="flex gap-1">
+        <input className="input py-1 text-xs" style={{ width: 160, flex: "0 0 auto" }} value={fBusca} onChange={(e) => setFBusca(e.target.value)} placeholder="Buscar negócio/contato" />
+        <div className="flex shrink-0 gap-1">
           {(["todos", "com", "sem"] as const).map((v) => (
-            <button key={v} className={`rounded-lg px-2.5 py-1 text-xs font-medium ${fCad === v ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`} onClick={() => setFCad(v)}>
+            <button key={v} className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium ${fCad === v ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`} onClick={() => setFCad(v)}>
               {v === "todos" ? "Todos" : v === "com" ? "Em cadência" : "Sem cadência"}
             </button>
           ))}
         </div>
         {cadences.length > 0 && (
-          <select className="input py-1 text-xs" value={fCadName} onChange={(e) => setFCadName(e.target.value)}>
+          <select className="input py-1 text-xs" style={{ width: 150, flex: "0 0 auto" }} value={fCadName} onChange={(e) => setFCadName(e.target.value)}>
             <option value="">Qualquer cadência</option>
             {cadences.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         )}
         {allTags.length > 0 && (
-          <select className="input py-1 text-xs" value={fTag} onChange={(e) => setFTag(e.target.value)}>
+          <select className="input py-1 text-xs" style={{ width: 130, flex: "0 0 auto" }} value={fTag} onChange={(e) => setFTag(e.target.value)}>
             <option value="">Todas as tags</option>
             {allTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         )}
         {hasFilter && (
-          <button className="text-xs text-subtle hover:text-ink" onClick={() => { setFTag(""); setFCad("todos"); setFCadName(""); setFBusca(""); }}>limpar</button>
+          <button className="shrink-0 text-xs text-subtle hover:text-ink" onClick={() => { setFTag(""); setFCad("todos"); setFCadName(""); setFBusca(""); }}>limpar</button>
         )}
-        <span className="ml-auto text-xs text-subtle">{filtered.length} de {opps.length}</span>
+        <span className="shrink-0 text-xs text-subtle">{filtered.length} de {opps.length}</span>
       </div>
 
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(150px, 1fr))` }}>
+      <div className="overflow-x-auto">
+      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(150px, 1fr))`, minWidth: stages.length > 4 ? stages.length * 160 : undefined }}>
         {stages.map((st) => {
           const colOpps = filtered.filter((o) => o.stage_id === st.id);
           const colTotal = colOpps.reduce((s, o) => s + Number(o.value_mrr || 0), 0);
@@ -262,6 +263,7 @@ export default function PipelineBoard({
             </div>
           );
         })}
+      </div>
       </div>
     </div>
   );

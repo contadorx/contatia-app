@@ -5,6 +5,7 @@ import { HOT_THRESHOLD } from "@/lib/scoring";
 import EnrollButton from "@/components/EnrollButton";
 import ContactReplyButton from "@/components/ContactReplyButton";
 import NoteComposer from "@/components/NoteComposer";
+import ContactCadences from "@/components/ContactCadences";
 import { channelLabel, type Channel } from "@/lib/cadence";
 
 export const dynamic = "force-dynamic";
@@ -94,17 +95,19 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <EnrollButton contactId={c.id} sequences={(sequences as { id: string; name: string }[]) || []} />
           <ContactReplyButton contactId={c.id} />
-          {activeEnr ? (
-            <span className="text-xs text-subtle">Em cadência: {activeEnr.sequences?.name || "—"}</span>
-          ) : enr.some((e) => e.status === "replied") ? (
-            <span className="text-xs text-signal">Sequência pausada (respondeu)</span>
-          ) : null}
         </div>
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         {/* Próximos toques + reuniões */}
         <div className="space-y-6">
+          <div>
+            <h2 className="mb-3 font-display text-lg font-bold">Cadências</h2>
+            <div className="card p-4">
+              <ContactCadences enrollments={enr} />
+            </div>
+          </div>
+
           <div>
             <h2 className="mb-3 font-display text-lg font-bold">Próximos toques</h2>
             <div className="card divide-y divide-line">

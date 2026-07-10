@@ -109,5 +109,31 @@ export async function GET(req: Request) {
     /* automações de tempo não devem quebrar o cron de respostas */
   }
 
-  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, autoRan, errors });
+  // ---- Expurgo de arquivos por retenção (LGPD + custo de storage) ----
+  let purged = 0;
+  try {
+    const { data: tnts } = await admin.from("tenants").select("id, file_retention_months");
+    for (const t of (tnts as any[]) || []) {
+      const months = Number(t.file_retention_months) || 0;
+      if (!months) continue; // 0/null = nunca expurga
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - months);
+      const { data: docs } = await admin
+        .from("documents")
+        .select("id, storage_path")
+        .eq("tenant_id", t.id)
+        .not("storage_path", "is", null)
+        .lt("created_at", cutoff.toISOString())
+        .limit(200);
+      for (const d of (docs as any[]) || []) {
+        await admin.storage.from("proposals").remove([d.storage_path]);
+        await admin.from("documents").update({ storage_path: null }).eq("id", d.id);
+        purged++;
+      }
+    }
+  } catch {
+    /* expurgo não deve quebrar o cron */
+  }
+
+  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, autoRan, purged, errors });
 }

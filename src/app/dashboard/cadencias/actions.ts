@@ -221,3 +221,20 @@ export async function saveAsTemplate(sequenceId: string, description?: string) {
   revalidatePath("/dashboard/cadencias");
   return { ok: true };
 }
+
+// Pausa uma inscrição específica (e pula as tarefas pendentes dela).
+export async function pauseEnrollment(enrollmentId: string) {
+  const { supabase } = await ctx();
+  await supabase.from("enrollments").update({ status: "paused" }).eq("id", enrollmentId);
+  await supabase.from("tasks").update({ status: "skipped" }).eq("enrollment_id", enrollmentId).eq("status", "pending");
+  revalidatePath("/dashboard/contatos", "layout");
+  return { ok: true };
+}
+
+// Retoma uma inscrição pausada (reativa; novas tarefas só nos próximos passos).
+export async function resumeEnrollment(enrollmentId: string) {
+  const { supabase } = await ctx();
+  await supabase.from("enrollments").update({ status: "active" }).eq("id", enrollmentId);
+  revalidatePath("/dashboard/contatos", "layout");
+  return { ok: true };
+}

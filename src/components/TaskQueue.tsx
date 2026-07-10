@@ -1,7 +1,7 @@
 "use client";
 
 import { useTransition, useState, useEffect, useRef, useCallback } from "react";
-import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask, sendAllEmailTasks } from "@/app/dashboard/task-actions";
+import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask, sendAllEmailTasks, completeTasks } from "@/app/dashboard/task-actions";
 import { channelLabel, waLink, type Channel } from "@/lib/cadence";
 
 type Task = {
@@ -94,6 +94,18 @@ export default function TaskQueue({
       else setBulkMsg(`✓ ${res.sent} e-mails enviados${res.failed ? `, ${res.failed} falharam (cap diário/sem caixa)` : ""}.`);
     });
   }
+  // conclui todos os toques visíveis (fila sequencial por tipo)
+  function completeVisible() {
+    setErr(null);
+    setBulkMsg(null);
+    const ids = tasks.filter((t) => t.channel !== "email").map((t) => t.id);
+    if (!ids.length) return;
+    start(async () => {
+      const res = (await completeTasks(ids)) as { done?: number; error?: string };
+      if (res?.error) setErr(res.error);
+      else setBulkMsg(`✓ ${res.done} toque(s) marcados como feitos.`);
+    });
+  }
   function act(fn: () => Promise<unknown>) {
     start(async () => { await fn(); });
   }
@@ -163,7 +175,7 @@ export default function TaskQueue({
             </button>
           ))}
         </div>
-        <select className="input py-1 text-xs" value={canal} onChange={(e) => setCanal(e.target.value)}>
+        <select className="input py-1 text-xs" style={{ width: 150, flex: "0 0 auto" }} value={canal} onChange={(e) => setCanal(e.target.value)}>
           <option value="todos">Todos os canais</option>
           <option value="email">E-mail</option>
           <option value="whatsapp">WhatsApp</option>
@@ -171,18 +183,18 @@ export default function TaskQueue({
           <option value="linkedin">LinkedIn</option>
         </select>
         {cadences.length > 0 && (
-          <select className="input py-1 text-xs" value={cadFilter} onChange={(e) => setCadFilter(e.target.value)}>
+          <select className="input py-1 text-xs" style={{ width: 150, flex: "0 0 auto" }} value={cadFilter} onChange={(e) => setCadFilter(e.target.value)}>
             <option value="">Todas as cadências</option>
             {cadences.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         )}
         {allTags.length > 0 && (
-          <select className="input py-1 text-xs" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
+          <select className="input py-1 text-xs" style={{ width: 130, flex: "0 0 auto" }} value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
             <option value="">Todas as tags</option>
             {allTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         )}
-        <span className="ml-auto text-xs text-subtle">{tasks.length} na visão</span>
+        <span className="shrink-0 text-xs text-subtle">{tasks.length} na visão</span>
       </div>
 
       {tasks.length === 0 && (
@@ -194,6 +206,11 @@ export default function TaskQueue({
         {pendingEmails > 0 && (
           <button className="btn-brand py-1.5 text-sm" onClick={sendAll} disabled={pending}>
             {pending ? "Enviando..." : `Enviar todos os e-mails (${pendingEmails})`}
+          </button>
+        )}
+        {canal !== "todos" && canal !== "email" && tasks.length > 0 && (
+          <button className="btn-ghost py-1.5 text-sm" onClick={completeVisible} disabled={pending}>
+            Marcar todos os {canal === "whatsapp" ? "WhatsApp" : canal === "call" ? "de ligação" : "de LinkedIn"} como feitos ({tasks.length})
           </button>
         )}
         <span className="text-xs text-subtle">
