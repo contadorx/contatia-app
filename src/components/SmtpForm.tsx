@@ -3,6 +3,13 @@
 import { useState, useTransition } from "react";
 import { saveSmtpAccount, testSmtp } from "@/app/dashboard/config/actions";
 
+const PRESETS: { id: string; label: string; host: string; port: number; secure: boolean; hint: string }[] = [
+  { id: "brevo", label: "Brevo (recomendado)", host: "smtp-relay.brevo.com", port: 587, secure: false, hint: "Usuário = e-mail de login do Brevo. Senha = chave SMTP (painel: SMTP & API → SMTP → Generate a new SMTP key). Remetente precisa ser um domínio verificado." },
+  { id: "gmail_smtp", label: "Gmail (senha de app)", host: "smtp.gmail.com", port: 587, secure: false, hint: "Exige verificação em 2 etapas. Senha = senha de app (não a senha normal)." },
+  { id: "outlook", label: "Outlook / Microsoft 365", host: "smtp.office365.com", port: 587, secure: false, hint: "Usuário = seu e-mail completo. Pode exigir SMTP AUTH habilitado no admin." },
+  { id: "hostgator", label: "HostGator / cPanel", host: "mail.SEUDOMINIO.com.br", port: 465, secure: true, hint: "Troque SEUDOMINIO. Reputação/limite baixos — evite para cadência em volume; prefira o Brevo." },
+];
+
 export default function SmtpForm() {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({
@@ -15,8 +22,20 @@ export default function SmtpForm() {
     smtp_pass: "",
   });
   const [msg, setMsg] = useState<string | null>(null);
+  const [presetHint, setPresetHint] = useState<string | null>(null);
   const [test, setTest] = useState<{ ok?: boolean; error?: string; hint?: string } | null>(null);
   const [pending, start] = useTransition();
+
+  function applyPreset(id: string) {
+    const p = PRESETS.find((x) => x.id === id);
+    if (!p) {
+      setPresetHint(null);
+      return;
+    }
+    setF((s) => ({ ...s, smtp_host: p.host, smtp_port: p.port, smtp_secure: p.secure }));
+    setPresetHint(p.hint);
+    setTest(null);
+  }
 
   function up(k: string, v: string | number | boolean) {
     setF((s) => ({ ...s, [k]: v }));
@@ -40,7 +59,7 @@ export default function SmtpForm() {
         let hint: string | undefined;
         if (/wrong version number|SSL routines/i.test(err))
           hint = f.smtp_secure
-            ? "Descasamento SSL/porta: desmarque o SSL e use a porta 587 (STARTTLS)."
+            ? "Descasamento SSL/porta OU a porta 465 está bloqueada na saída (comum). Se for o SMTP do seu próprio domínio, o caminho confiável é o Brevo (587, sem SSL) — clique no preset Brevo acima."
             : "Descasamento SSL/porta: marque o SSL e use a porta 465.";
         else if (/getaddrinfo|ENOTFOUND|EAI_AGAIN|EBUSY/i.test(err))
           hint = "Host não encontrado. Confira o endereço (HostGator costuma ser mail.SEUDOMINIO; Brevo é smtp-relay.brevo.com).";
@@ -74,6 +93,20 @@ export default function SmtpForm() {
   return (
     <div className="card p-5">
       <p className="mb-3 text-sm font-semibold">Caixa SMTP — Outlook, servidor próprio, ou Gmail com senha de app</p>
+
+      <div className="mb-4 rounded-xl bg-muted p-3">
+        <label className="label">Preset (preenche host/porta/SSL)</label>
+        <select className="input mt-1" defaultValue="" onChange={(e) => applyPreset(e.target.value)}>
+          <option value="">Escolher provedor…</option>
+          {PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+        {presetHint && <p className="mt-2 text-xs text-subtle">{presetHint}</p>}
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className="label">E-mail remetente *</label>
