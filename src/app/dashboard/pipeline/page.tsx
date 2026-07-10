@@ -19,19 +19,24 @@ export default async function Pipeline() {
   const oppList = (opps as any[]) || [];
   const contactIds = Array.from(new Set(oppList.map((o) => o.primary_contact_id).filter(Boolean)));
 
-  // última atividade + cadência ativa por contato (o "momento" do negócio)
+  // última atividade + cadência ativa + tags por contato (o "momento" do negócio)
   const lastActivity: Record<string, { type: string; created_at: string }> = {};
   const activeCadence: Record<string, string> = {};
+  const tagsByContact: Record<string, { id: string; name: string; color: string }[]> = {};
   if (contactIds.length) {
-    const [{ data: evs }, { data: enrs }] = await Promise.all([
+    const [{ data: evs }, { data: enrs }, { data: cts }] = await Promise.all([
       supabase.from("events").select("contact_id, type, created_at").in("contact_id", contactIds as string[]).order("created_at", { ascending: false }).limit(800),
       supabase.from("enrollments").select("contact_id, status, sequences(name)").in("contact_id", contactIds as string[]).eq("status", "active"),
+      supabase.from("contact_tags").select("contact_id, tags(id, name, color)").in("contact_id", contactIds as string[]),
     ]);
     for (const e of (evs as any[]) || []) {
       if (!lastActivity[e.contact_id]) lastActivity[e.contact_id] = { type: e.type, created_at: e.created_at };
     }
     for (const en of (enrs as any[]) || []) {
       if (!activeCadence[en.contact_id]) activeCadence[en.contact_id] = en.sequences?.name || "";
+    }
+    for (const ct of (cts as any[]) || []) {
+      if (ct.tags) (tagsByContact[ct.contact_id] ||= []).push(ct.tags);
     }
   }
 
@@ -59,8 +64,11 @@ export default async function Pipeline() {
       contact_score: o.contacts?.score ?? 0,
       last_activity: la ? `${EVENT_LABEL[la.type] || la.type} · ${rel(la.created_at)}` : null,
       active_cadence: cid ? activeCadence[cid] || null : null,
+      tags: cid ? tagsByContact[cid] || [] : [],
     };
   });
+
+  const { data: allTags } = await supabase.from("tags").select("id, name, color").order("name", { ascending: true });
 
   return (
     <div>
@@ -73,6 +81,7 @@ export default async function Pipeline() {
           opportunities={opportunities}
           contacts={(contacts as { id: string; name: string }[]) || []}
           accounts={(accounts as { id: string; name: string }[]) || []}
+          allTags={(allTags as any[]) || []}
         />
       </div>
     </div>

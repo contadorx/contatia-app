@@ -11,9 +11,13 @@ type Task = {
   generated_content: string | null;
   due_date: string;
   contact_id: string | null;
+  cadence?: string | null;
+  tags?: { id: string; name: string; color: string }[];
+  is_future?: boolean;
   contacts: { name: string; company: string | null; phone: string | null; email: string | null; score: number | null } | null;
 };
 type LastActivity = Record<string, { type: string; created_at: string; text?: string }>;
+type Tag = { id: string; name: string; color: string };
 
 const chanStyle: Record<Channel, string> = {
   email: "bg-brand-soft text-brand-dark",
@@ -43,19 +47,37 @@ function rel(iso: string) {
 }
 
 export default function TaskQueue({
-  tasks,
+  tasks: allTasks,
   hotThreshold,
   lastActivity = {},
+  allTags = [],
 }: {
   tasks: Task[];
   hotThreshold: number;
   lastActivity?: LastActivity;
+  allTags?: Tag[];
 }) {
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   const [focus, setFocus] = useState(0);
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  // filtros
+  const [periodo, setPeriodo] = useState<"hoje" | "3dias" | "todos">("hoje");
+  const [canal, setCanal] = useState<string>("todos");
+  const [tagFilter, setTagFilter] = useState<string>("");
+
+  const cadences = Array.from(new Set(allTasks.map((t) => t.cadence).filter(Boolean))) as string[];
+  const [cadFilter, setCadFilter] = useState<string>("");
+
+  const tasks = allTasks.filter((t) => {
+    if (periodo === "hoje" && t.is_future) return false;
+    if (canal !== "todos" && t.channel !== canal) return false;
+    if (tagFilter && !(t.tags || []).some((tg) => tg.id === tagFilter)) return false;
+    if (cadFilter && t.cadence !== cadFilter) return false;
+    return true;
+  });
 
   const pendingEmails = tasks.filter((t) => t.channel === "email").length;
 
@@ -119,7 +141,7 @@ export default function TaskQueue({
     rowRefs.current[focus]?.scrollIntoView({ block: "nearest" });
   }, [focus]);
 
-  if (!tasks.length)
+  if (!allTasks.length)
     return (
       <div className="card p-10 text-center text-sm text-subtle">
         Nada na fila hoje. Inscreva contatos numa cadência para gerar toques.
@@ -128,6 +150,45 @@ export default function TaskQueue({
 
   return (
     <div className="space-y-2">
+      {/* filtros */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-2.5">
+        <div className="flex gap-1">
+          {(["hoje", "3dias", "todos"] as const).map((p) => (
+            <button
+              key={p}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium ${periodo === p ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}
+              onClick={() => setPeriodo(p)}
+            >
+              {p === "hoje" ? "Hoje + atrasados" : p === "3dias" ? "Próx. 3 dias" : "Todos"}
+            </button>
+          ))}
+        </div>
+        <select className="input py-1 text-xs" value={canal} onChange={(e) => setCanal(e.target.value)}>
+          <option value="todos">Todos os canais</option>
+          <option value="email">E-mail</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="call">Ligação</option>
+          <option value="linkedin">LinkedIn</option>
+        </select>
+        {cadences.length > 0 && (
+          <select className="input py-1 text-xs" value={cadFilter} onChange={(e) => setCadFilter(e.target.value)}>
+            <option value="">Todas as cadências</option>
+            {cadences.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+        {allTags.length > 0 && (
+          <select className="input py-1 text-xs" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
+            <option value="">Todas as tags</option>
+            {allTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        )}
+        <span className="ml-auto text-xs text-subtle">{tasks.length} na visão</span>
+      </div>
+
+      {tasks.length === 0 && (
+        <div className="card p-8 text-center text-sm text-subtle">Nenhum toque nesta visão. Ajuste os filtros acima.</div>
+      )}
+
       {/* barra de atalhos + envio em lote */}
       <div className="flex flex-wrap items-center gap-3">
         {pendingEmails > 0 && (

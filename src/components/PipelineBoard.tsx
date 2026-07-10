@@ -15,6 +15,7 @@ type Opp = {
   contact_score?: number;
   last_activity?: string | null;
   active_cadence?: string | null;
+  tags?: { id: string; name: string; color: string }[];
 };
 type Contact = { id: string; name: string };
 type Account = { id: string; name: string };
@@ -27,16 +28,25 @@ export default function PipelineBoard({
   opportunities,
   contacts,
   accounts,
+  allTags = [],
 }: {
   stages: Stage[];
   opportunities: Opp[];
   contacts: Contact[];
   accounts: Account[];
+  allTags?: { id: string; name: string; color: string }[];
 }) {
   const [opps, setOpps] = useState<Opp[]>(opportunities);
   const [dragId, setDragId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [pending, start] = useTransition();
+
+  // filtros
+  const [fTag, setFTag] = useState("");
+  const [fCad, setFCad] = useState<"todos" | "com" | "sem">("todos");
+  const [fBusca, setFBusca] = useState("");
+  const cadences = Array.from(new Set(opps.map((o) => o.active_cadence).filter(Boolean))) as string[];
+  const [fCadName, setFCadName] = useState("");
 
   // form
   const [title, setTitle] = useState("");
@@ -97,6 +107,21 @@ export default function PipelineBoard({
 
   const total = opps.filter((o) => o.status === "open").reduce((s, o) => s + Number(o.value_mrr || 0), 0);
 
+  // aplica filtros
+  const filtered = opps.filter((o) => {
+    if (fTag && !(o.tags || []).some((t) => t.id === fTag)) return false;
+    if (fCad === "com" && !o.active_cadence) return false;
+    if (fCad === "sem" && o.active_cadence) return false;
+    if (fCadName && o.active_cadence !== fCadName) return false;
+    if (fBusca) {
+      const q = fBusca.toLowerCase();
+      const hay = `${o.title} ${o.contact_name || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const hasFilter = !!(fTag || fCad !== "todos" || fCadName || fBusca);
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
@@ -150,9 +175,36 @@ export default function PipelineBoard({
         </div>
       )}
 
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-2.5">
+        <input className="input py-1 text-xs" style={{ maxWidth: 180 }} value={fBusca} onChange={(e) => setFBusca(e.target.value)} placeholder="Buscar negócio/contato" />
+        <div className="flex gap-1">
+          {(["todos", "com", "sem"] as const).map((v) => (
+            <button key={v} className={`rounded-lg px-2.5 py-1 text-xs font-medium ${fCad === v ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`} onClick={() => setFCad(v)}>
+              {v === "todos" ? "Todos" : v === "com" ? "Em cadência" : "Sem cadência"}
+            </button>
+          ))}
+        </div>
+        {cadences.length > 0 && (
+          <select className="input py-1 text-xs" value={fCadName} onChange={(e) => setFCadName(e.target.value)}>
+            <option value="">Qualquer cadência</option>
+            {cadences.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+        {allTags.length > 0 && (
+          <select className="input py-1 text-xs" value={fTag} onChange={(e) => setFTag(e.target.value)}>
+            <option value="">Todas as tags</option>
+            {allTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        )}
+        {hasFilter && (
+          <button className="text-xs text-subtle hover:text-ink" onClick={() => { setFTag(""); setFCad("todos"); setFCadName(""); setFBusca(""); }}>limpar</button>
+        )}
+        <span className="ml-auto text-xs text-subtle">{filtered.length} de {opps.length}</span>
+      </div>
+
       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(150px, 1fr))` }}>
         {stages.map((st) => {
-          const colOpps = opps.filter((o) => o.stage_id === st.id);
+          const colOpps = filtered.filter((o) => o.stage_id === st.id);
           const colTotal = colOpps.reduce((s, o) => s + Number(o.value_mrr || 0), 0);
           return (
             <div
