@@ -11,6 +11,10 @@ type Opp = {
   stage_id: string | null;
   status: string;
   contact_name: string | null;
+  contact_id?: string | null;
+  contact_score?: number;
+  last_activity?: string | null;
+  active_cadence?: string | null;
 };
 type Contact = { id: string; name: string };
 type Account = { id: string; name: string };
@@ -175,8 +179,29 @@ export default function PipelineBoard({
                     style={{ background: st.is_won ? "var(--tw-signal,#12B76A)" : "#4A3AFF", marginBottom: 6 }}
                   />
                   <p className="text-xs font-semibold leading-tight">{o.title}</p>
-                  {o.contact_name && <p className="mt-0.5 text-[11px] text-subtle">{o.contact_name}</p>}
+                  {o.contact_name && (
+                    <p className="mt-0.5 flex items-center gap-1 text-[11px] text-subtle">
+                      {o.contact_id ? (
+                        <a href={`/dashboard/contatos/${o.contact_id}`} className="text-brand-dark hover:underline" onMouseDown={(e) => e.stopPropagation()} draggable={false}>
+                          {o.contact_name}
+                        </a>
+                      ) : (
+                        o.contact_name
+                      )}
+                      {(o.contact_score ?? 0) >= 25 && <span className="rounded-full bg-warn/15 px-1 py-0.5 text-[9px] font-bold text-warn">QUENTE</span>}
+                    </p>
+                  )}
                   <p className="mt-1 text-[11px] font-bold text-brand-dark">{brl(Number(o.value_mrr))}/mês</p>
+                  {(o.last_activity || o.active_cadence) && (
+                    <div className="mt-1.5 border-t border-line pt-1.5">
+                      {o.last_activity && <p className="text-[10px] text-subtle">↳ {o.last_activity}</p>}
+                      {o.active_cadence && (
+                        <p className="mt-0.5 truncate text-[10px]">
+                          <span className="rounded bg-brand-soft px-1 py-0.5 text-brand-dark">em cadência: {o.active_cadence}</span>
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
               {colOpps.length > 0 && (
