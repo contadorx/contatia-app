@@ -65,9 +65,12 @@ export default async function Config() {
             <AiSettingsForm currentModel={aiModel} hasKey={aiHasKey} />
           </div>
 
-          <p className="mt-6 text-sm font-semibold">Produtos & Serviços</p>
-          <p className="text-sm text-subtle">Seu catálogo do que você vende, para vincular às oportunidades e medir receita por produto.</p>
+          <p className="mt-6 text-sm font-semibold">Produtos & Serviços</p>          <p className="text-sm text-subtle">Seu catálogo do que você vende, para vincular às oportunidades e medir receita por produto.</p>
           <a href="/dashboard/config/produtos" className="btn-ghost mt-2 inline-flex">Gerenciar catálogo →</a>
+
+          <p className="mt-6 text-sm font-semibold">Entregabilidade & reputação</p>
+          <p className="text-sm text-subtle">E-mails que devolveram, marcaram spam ou pediram descadastro são bloqueados automaticamente para proteger seu domínio.</p>
+          <a href="/dashboard/config/supressao" className="btn-ghost mt-2 inline-flex">Ver lista de supressão →</a>
 
           <p className="mt-6 text-sm font-semibold">Retenção de arquivos</p>
           <p className="text-sm text-subtle">Os PDFs de proposta ficam guardados por um prazo definido pelo seu <b>plano</b>. Depois do prazo, o arquivo é automaticamente excluído (o registro do documento permanece no histórico) — por LGPD e economia de armazenamento.</p>

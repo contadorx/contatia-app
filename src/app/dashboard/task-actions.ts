@@ -103,6 +103,19 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   const to = (task as any).contacts?.email as string | undefined;
   if (!to) return { error: "Contato sem e-mail." };
 
+  // proteção de reputação: não envia para e-mail suprimido (bounce/spam/unsubscribe)
+  const { data: supp } = await supabase
+    .from("email_suppressions")
+    .select("reason")
+    .eq("tenant_id", tenant_id)
+    .eq("email", to.toLowerCase())
+    .maybeSingle();
+  if (supp) {
+    // marca a task como pulada para não insistir e proteger o domínio
+    await supabase.from("tasks").update({ status: "skipped" }).eq("id", taskId);
+    return { error: `E-mail na lista de supressão (${(supp as any).reason}). Envio bloqueado para proteger sua reputação.` };
+  }
+
   const { data: acct } = await supabase
     .from("email_accounts")
     .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap")
