@@ -18,6 +18,32 @@ async function ctx() {
   return { supabase, tenant_id: (data?.tenant_id as string) || null, user_id: user?.id };
 }
 
+// Remove o evento do Google Calendar vinculado à reunião (se houver) e limpa os campos.
+async function removeGoogleEvent(supabase: any, meetingId: string) {
+  try {
+    const { data: m } = await supabase.from("meetings").select("google_event_id").eq("id", meetingId).maybeSingle();
+    const eventId = (m as any)?.google_event_id as string | undefined;
+    if (!eventId) return;
+    const { data: acct } = await supabase
+      .from("email_accounts")
+      .select("oauth_refresh_token")
+      .eq("provider", "gmail")
+      .eq("is_active", true)
+      .not("oauth_refresh_token", "is", null)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    const refresh = (acct as any)?.oauth_refresh_token as string | undefined;
+    if (refresh) {
+      const { deleteCalendarEvent } = await import("@/lib/gcal");
+      await deleteCalendarEvent(refresh, eventId);
+    }
+    await supabase.from("meetings").update({ google_event_id: null, google_event_link: null }).eq("id", meetingId);
+  } catch {
+    /* falha no Google não deve bloquear a ação */
+  }
+}
+
 export async function scheduleMeeting(input: {
   contact_id: string;
   title: string;
@@ -141,6 +167,11 @@ export async function setMeetingStatus(id: string, status: string, contactId?: s
   const { error } = await supabase.from("meetings").update(patch).eq("id", id);
   if (error) return { error: error.message };
 
+  // remarcada/no-show: o evento naquele horário não vale mais → remove do Google Calendar
+  if (status === "no_show" || status === "remarcada") {
+    await removeGoogleEvent(supabase, id);
+  }
+
   // no-show → cadência de resgate automática (um toque de retomada em 1 dia)
   if (status === "no_show" && tenant_id && contactId) {
     const { data: contact } = await supabase
@@ -183,6 +214,11 @@ export async function recordOutcome(input: {
     .update({ status, outcome_status: input.outcome_status, outcome: input.outcome?.trim() || null })
     .eq("id", input.id);
   if (error) return { error: error.message };
+
+  // remarcar/sem interesse: a reunião naquele horário não vale mais → remove do Google Calendar
+  if (input.outcome_status === "remarcar" || input.outcome_status === "sem_interesse") {
+    await removeGoogleEvent(supabase, input.id);
+  }
 
   // registra na timeline do contato
   if (input.contact_id) {

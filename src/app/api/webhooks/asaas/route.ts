@@ -28,16 +28,24 @@ export async function POST(req: Request) {
   const payId = payment?.id as string | undefined;
   const dueDate = payment?.dueDate as string | undefined;
   const value = Number(payment?.value) || 0;
+  const invoiceUrl = (payment?.invoiceUrl || payment?.bankSlipUrl) as string | undefined;
+  const description = payment?.description as string | undefined;
 
   if (!event) return NextResponse.json({ ok: true, ignored: "sem evento" });
 
   // 1) casa uma FATURA da central por asaas_payment_id (fluxo link de pagamento)
   if (payId) {
-    const { data: inv } = await admin.from("platform_invoices").select("id, tenant_id").eq("asaas_payment_id", payId).maybeSingle();
+    const { data: inv } = await admin.from("platform_invoices").select("id, tenant_id, payment_link").eq("asaas_payment_id", payId).maybeSingle();
     if (inv) {
+      if (event === "PAYMENT_CREATED") {
+        // fatura já existe na central: garante o link salvo (caso tenha nascido sem link)
+        if (invoiceUrl && !(inv as any).payment_link) {
+          await admin.from("platform_invoices").update({ payment_link: invoiceUrl }).eq("id", (inv as any).id);
+        }
+        return NextResponse.json({ ok: true, event, invoice: (inv as any).id, note: "link garantido" });
+      }
       if (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") {
         await admin.from("platform_invoices").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", (inv as any).id);
-        // reflete na assinatura do tenant
         const base = dueDate ? new Date(dueDate) : new Date();
         base.setMonth(base.getMonth() + 1);
         await admin.from("tenants").update({ subscription_status: "active", current_period_end: base.toISOString().slice(0, 10), ...(value ? { mrr: value } : {}) }).eq("id", (inv as any).tenant_id);
@@ -46,6 +54,24 @@ export async function POST(req: Request) {
         await admin.from("tenants").update({ subscription_status: "past_due" }).eq("id", (inv as any).tenant_id);
       }
       return NextResponse.json({ ok: true, event, invoice: (inv as any).id });
+    }
+
+    // 1b) PAYMENT_CREATED de cobrança que NÃO existe na central (ex.: assinatura recorrente
+    //     gerou a fatura do mês no Asaas) → cria o registro casando pelo cliente.
+    if (event === "PAYMENT_CREATED" && custId) {
+      const { data: t } = await admin.from("tenants").select("id").eq("asaas_customer_id", custId).maybeSingle();
+      if (t) {
+        await admin.from("platform_invoices").insert({
+          tenant_id: (t as any).id,
+          amount: value,
+          description: description || "Assinatura Contatia",
+          due_date: dueDate || null,
+          payment_link: invoiceUrl || null,
+          asaas_payment_id: payId,
+          status: "pending",
+        });
+        return NextResponse.json({ ok: true, event, note: "fatura criada a partir do Asaas" });
+      }
     }
   }
 
