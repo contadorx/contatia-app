@@ -63,3 +63,32 @@ export async function deleteAccount(id: string) {
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
+
+// Testa a conexão SMTP com os dados do formulário (sem salvar). Devolve o erro
+// exato do servidor — pra acertar host/porta/SSL ANTES de disparar a cadência.
+export async function testSmtp(input: {
+  smtp_host: string;
+  smtp_port: number;
+  smtp_secure: boolean;
+  smtp_user: string;
+  smtp_pass: string;
+}) {
+  if (!input.smtp_host?.trim() || !input.smtp_user?.trim()) {
+    return { error: "Preencha host e usuário para testar." };
+  }
+  const nodemailer = (await import("nodemailer")).default;
+  const transport = nodemailer.createTransport({
+    host: input.smtp_host.trim(),
+    port: Number(input.smtp_port) || 587,
+    secure: !!input.smtp_secure,
+    auth: { user: input.smtp_user.trim(), pass: input.smtp_pass || "" },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+  });
+  try {
+    await transport.verify();
+    return { ok: true };
+  } catch (e: any) {
+    return { error: e?.message || "Falha na conexão." };
+  }
+}
