@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import AddContactToAccount from "@/components/AddContactToAccount";
 import EditAccountButton from "@/components/EditAccountButton";
+import AccountTags from "@/components/AccountTags";
 
 export const dynamic = "force-dynamic";
 
@@ -20,14 +21,17 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
 
   if (!account) notFound();
 
-  const [{ data: contacts }, { data: opps }, { data: freeContacts }] = await Promise.all([
+  const [{ data: contacts }, { data: opps }, { data: freeContacts }, { data: accountTags }, { data: allTags }] = await Promise.all([
     supabase.from("contacts").select("id, name, email, phone, role_title").eq("account_id", params.id),
     supabase.from("opportunities").select("id, title, value_mrr, status").eq("account_id", params.id),
     supabase.from("contacts").select("id, name").is("account_id", null).order("created_at", { ascending: false }).limit(200),
+    supabase.from("account_tags").select("tags(id, name, color)").eq("account_id", params.id),
+    supabase.from("tags").select("id, name, color").order("name", { ascending: true }),
   ]);
 
   const cs = (contacts as any[]) || [];
   const os = (opps as any[]) || [];
+  const myTags = ((accountTags as any[]) || []).map((r) => r.tags).filter(Boolean);
 
   return (
     <div>
@@ -41,6 +45,9 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
           <p className="mt-1 text-sm text-subtle">
             {[account.uf, account.cnpj, account.domain].filter(Boolean).join(" · ") || "—"}
           </p>
+          <div className="mt-2">
+            <AccountTags accountId={account.id} tags={myTags} allTags={(allTags as any[]) || []} />
+          </div>
         </div>
         <EditAccountButton account={account as any} />
       </div>

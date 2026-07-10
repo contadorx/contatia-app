@@ -4,15 +4,23 @@ import AccountTools from "@/components/AccountTools";
 
 export const dynamic = "force-dynamic";
 
-export default async function Contas() {
+export default async function Contas({ searchParams }: { searchParams: { tag?: string } }) {
   const supabase = createClient();
   const { data: accounts } = await supabase
     .from("accounts")
-    .select("id, name, uf, cnpj, domain, contacts(count), opportunities(count)")
+    .select("id, name, uf, cnpj, domain, contacts(count), opportunities(count), account_tags(tags(id, name, color))")
     .order("created_at", { ascending: false })
     .limit(300);
 
-  const rows = (accounts as any[]) || [];
+  const { data: allTags } = await supabase.from("tags").select("id, name, color").order("name", { ascending: true });
+
+  let rows = ((accounts as any[]) || []).map((a) => ({
+    ...a,
+    tags: ((a.account_tags as any[]) || []).map((r) => r.tags).filter(Boolean),
+  }));
+
+  const tagFilter = searchParams.tag || "";
+  if (tagFilter) rows = rows.filter((a) => a.tags.some((t: any) => t.id === tagFilter));
 
   return (
     <div>
@@ -23,14 +31,33 @@ export default async function Contas() {
         <AccountTools />
       </div>
 
+      {/* filtro por tag */}
+      {((allTags as any[]) || []).length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-subtle">Filtrar:</span>
+          <Link href="/dashboard/contas" className={`rounded-full px-2 py-0.5 text-xs font-medium ${!tagFilter ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}>Todas</Link>
+          {((allTags as any[]) || []).map((t) => (
+            <Link
+              key={t.id}
+              href={`/dashboard/contas?tag=${t.id}`}
+              className="rounded-full px-2 py-0.5 text-xs font-medium"
+              style={tagFilter === t.id ? { background: t.color, color: "#fff" } : { background: `${t.color}20`, color: t.color }}
+            >
+              {t.name}
+            </Link>
+          ))}
+        </div>
+      )}
+
       <div className="card mt-6 overflow-hidden">
         {!rows.length ? (
-          <div className="p-10 text-center text-sm text-subtle">Nenhuma empresa ainda. Crie a primeira acima.</div>
+          <div className="p-10 text-center text-sm text-subtle">{tagFilter ? "Nenhuma empresa com essa tag." : "Nenhuma empresa ainda. Crie a primeira acima."}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="border-b border-line text-left text-subtle">
               <tr>
                 <th className="px-4 py-3 font-medium">Empresa</th>
+                <th className="px-4 py-3 font-medium">Tags</th>
                 <th className="px-4 py-3 font-medium">UF</th>
                 <th className="px-4 py-3 font-medium">Contatos</th>
                 <th className="px-4 py-3 font-medium">Oportunidades</th>
@@ -44,6 +71,14 @@ export default async function Contas() {
                       {a.name}
                     </Link>
                     {a.domain && <span className="ml-2 text-xs text-subtle">{a.domain}</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="flex flex-wrap gap-1">
+                      {a.tags.map((t: any) => (
+                        <span key={t.id} className="rounded-full px-1.5 py-0.5 text-[11px] font-medium" style={{ background: `${t.color}20`, color: t.color }}>{t.name}</span>
+                      ))}
+                      {!a.tags.length && <span className="text-xs text-subtle">—</span>}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-subtle">{a.uf || "—"}</td>
                   <td className="px-4 py-3 text-subtle">{a.contacts?.[0]?.count ?? 0}</td>

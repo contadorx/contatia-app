@@ -82,3 +82,26 @@ export async function bulkTag(contactIds: string[], tagId: string) {
   revalidatePath("/dashboard/contatos");
   return { ok: true, count: contactIds.length };
 }
+
+// ---- Tags de EMPRESA (account_tags) ----
+export async function addTagToAccount(accountId: string, tagId: string) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { error } = await supabase.from("account_tags").upsert(
+    { tenant_id, account_id: accountId, tag_id: tagId },
+    { onConflict: "account_id,tag_id", ignoreDuplicates: true }
+  );
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/contas/${accountId}`);
+  revalidatePath("/dashboard/contas");
+  return { ok: true };
+}
+
+export async function removeTagFromAccount(accountId: string, tagId: string) {
+  const { supabase } = await ctx();
+  const { error } = await supabase.from("account_tags").delete().eq("account_id", accountId).eq("tag_id", tagId);
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/contas/${accountId}`);
+  revalidatePath("/dashboard/contas");
+  return { ok: true };
+}
