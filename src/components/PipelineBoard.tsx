@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { createOpportunity, moveOpportunity } from "@/app/dashboard/pipeline/actions";
+import { createOpportunity, moveOpportunity, updateOpportunity, deleteOpportunity } from "@/app/dashboard/pipeline/actions";
 
 type Stage = { id: string; name: string; position: number; is_won: boolean; is_lost: boolean };
 type Opp = {
@@ -12,6 +12,7 @@ type Opp = {
   status: string;
   contact_name: string | null;
   contact_id?: string | null;
+  account_id?: string | null;
   contact_score?: number;
   last_activity?: string | null;
   active_cadence?: string | null;
@@ -39,6 +40,7 @@ export default function PipelineBoard({
   const [opps, setOpps] = useState<Opp[]>(opportunities);
   const [dragId, setDragId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editOpp, setEditOpp] = useState<{ id: string; title: string; value_mrr: string; contact_id: string; account_id: string } | null>(null);
   const [pending, start] = useTransition();
 
   // filtros
@@ -231,7 +233,40 @@ export default function PipelineBoard({
                     className="h-0.5 rounded"
                     style={{ background: st.is_won ? "var(--tw-signal,#12B76A)" : "#4A3AFF", marginBottom: 6 }}
                   />
-                  <p className="text-xs font-semibold leading-tight">{o.title}</p>
+                  <div className="flex items-start justify-between gap-1">
+                    <p className="text-xs font-semibold leading-tight">{o.title}</p>
+                    <button
+                      className="shrink-0 text-[11px] text-subtle hover:text-brand-dark"
+                      title="Editar"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => { e.stopPropagation(); setEditOpp({ id: o.id, title: o.title, value_mrr: String(o.value_mrr || ""), contact_id: o.contact_id || "", account_id: (o as any).account_id || "" }); }}
+                    >✎</button>
+                  </div>
+                  {editOpp?.id === o.id && (
+                    <div className="mt-2 rounded-lg border border-line bg-muted p-2" onMouseDown={(e) => e.stopPropagation()} draggable={false}>
+                      <input className="input py-1 text-xs" value={editOpp.title} onChange={(e) => setEditOpp({ ...editOpp, title: e.target.value })} placeholder="Título" />
+                      <input className="input mt-1 py-1 text-xs" type="number" value={editOpp.value_mrr} onChange={(e) => setEditOpp({ ...editOpp, value_mrr: e.target.value })} placeholder="Valor/mês" />
+                      <select className="input mt-1 py-1 text-xs" value={editOpp.contact_id} onChange={(e) => setEditOpp({ ...editOpp, contact_id: e.target.value })}>
+                        <option value="">— sem contato</option>
+                        {contacts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                      <select className="input mt-1 py-1 text-xs" value={editOpp.account_id} onChange={(e) => setEditOpp({ ...editOpp, account_id: e.target.value })}>
+                        <option value="">— sem empresa</option>
+                        {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      </select>
+                      <div className="mt-2 flex items-center gap-2">
+                        <button className="btn-brand py-1 text-[11px]" disabled={pending} onClick={() => start(async () => {
+                          await updateOpportunity(o.id, { title: editOpp.title, value_mrr: Number(editOpp.value_mrr), primary_contact_id: editOpp.contact_id || null, account_id: editOpp.account_id || null });
+                          setOpps((prev) => prev.map((x) => x.id === o.id ? { ...x, title: editOpp.title, value_mrr: Number(editOpp.value_mrr) || 0, contact_id: editOpp.contact_id || null } as any : x));
+                          setEditOpp(null);
+                        })}>Salvar</button>
+                        <button className="text-[11px] text-subtle hover:text-ink" onClick={() => setEditOpp(null)}>cancelar</button>
+                        <button className="ml-auto text-[11px] text-subtle hover:text-danger" onClick={() => start(async () => {
+                          if (confirm("Excluir esta oportunidade?")) { await deleteOpportunity(o.id); setOpps((prev) => prev.filter((x) => x.id !== o.id)); setEditOpp(null); }
+                        })}>excluir</button>
+                      </div>
+                    </div>
+                  )}
                   {o.contact_name && (
                     <p className="mt-0.5 flex items-center gap-1 text-[11px] text-subtle">
                       {o.contact_id ? (
