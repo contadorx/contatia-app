@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import SmtpForm from "@/components/SmtpForm";
 import { DomainHealthPanel } from "@/components/DomainHealthPanel";
+import { BookingSettings } from "@/components/BookingSettings";
 import AccountRowActions from "@/components/AccountRowActions";
 import WebToLeadSnippet from "@/components/WebToLeadSnippet";
 import AiSettingsForm from "@/components/AiSettingsForm";
@@ -27,7 +28,7 @@ export default async function Config() {
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("inbound_token, ai_model, ai_api_key, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature, file_retention_months, platform_plans(name, file_retention_months)")
+    .select("inbound_token, ai_model, ai_api_key, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature, file_retention_months, booking_enabled, booking_duration_min, booking_days, booking_start_hour, booking_end_hour, booking_title, platform_plans(name, file_retention_months)")
     .maybeSingle();
   const inboundToken = (tenant as any)?.inbound_token as string | undefined;
   const aiModel = ((tenant as any)?.ai_model as string) || "";
@@ -178,6 +179,22 @@ export default async function Config() {
             ) : (
               <p className="text-sm text-subtle">Token de captação indisponível. Rode a migration 0005 para gerá-lo.</p>
             )}
+          </div>
+
+          <p className="mt-6 text-sm font-semibold">Link público de agendamento</p>
+          <p className="text-sm text-subtle">Deixe o lead escolher o horário direto na sua agenda — sem vai-e-vem. A reunião entra no seu pipeline e no Google Calendar (se conectado).</p>
+          <div className="mt-2">
+            <BookingSettings
+              token={inboundToken || null}
+              initial={{
+                enabled: !!(tenant as any)?.booking_enabled,
+                duration: Number((tenant as any)?.booking_duration_min ?? 30),
+                days: (tenant as any)?.booking_days || "1,2,3,4,5",
+                startHour: Number((tenant as any)?.booking_start_hour ?? 9),
+                endHour: Number((tenant as any)?.booking_end_hour ?? 18),
+                title: (tenant as any)?.booking_title || "",
+              }}
+            />
           </div>
         </div>
       </ConfigTabs>

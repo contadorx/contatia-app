@@ -151,6 +151,25 @@ export async function saveSignature(signature: string) {
   return { ok: true };
 }
 
+export async function saveBookingSettings(input: {
+  enabled: boolean; duration: number; days: string; startHour: number; endHour: number; title: string;
+}) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  if (Number(input.startHour) >= Number(input.endHour)) return { error: "A hora de início deve ser antes da hora de fim." };
+  const { error } = await supabase.from("tenants").update({
+    booking_enabled: !!input.enabled,
+    booking_duration_min: Number(input.duration) || 30,
+    booking_days: input.days || "1,2,3,4,5",
+    booking_start_hour: Number(input.startHour) || 9,
+    booking_end_hour: Number(input.endHour) || 18,
+    booking_title: input.title?.trim() || null,
+  }).eq("id", tenant_id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/config");
+  return { ok: true };
+}
+
 // Define a retenção de arquivos (meses) do workspace. Owner.
 // Retenção agora é POLÍTICA DO PLANO (definida em platform_plans e herdada por trigger).
 // O cliente não edita mais — mantida como no-op para não quebrar imports antigos.
