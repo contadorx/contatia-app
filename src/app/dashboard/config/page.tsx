@@ -16,7 +16,7 @@ export default async function Config() {
   // NUNCA seleciona smtp_pass/oauth_refresh_token (segredos ficam no servidor)
   const { data: accounts } = await supabase
     .from("email_accounts")
-    .select("id, provider, from_email, display_name, is_active, daily_cap, warmup_stage")
+    .select("id, provider, from_email, display_name, is_active, daily_cap, warmup_stage, created_at")
     .order("created_at", { ascending: false });
 
   const {
@@ -109,7 +109,18 @@ export default async function Config() {
                       </span>
                       {!a.is_active && <span className="ml-1 text-xs text-subtle">(inativa)</span>}
                     </p>
-                    <p className="text-xs text-subtle">Limite diário: {a.daily_cap}/dia · aquecimento etapa {a.warmup_stage}</p>
+                    <p className="text-xs text-subtle">{(() => {
+                      const target = Number(a.daily_cap) || 40;
+                      const on = (a.warmup_stage ?? 0) !== -1;
+                      const created = a.created_at ? new Date(a.created_at) : null;
+                      const days = created ? Math.floor((Date.now() - created.getTime()) / 86400000) : 0;
+                      const ramp = [10, 15, 20, 25, 30, 40, 50, 65, 80, 100, 125, 150, 175, 200];
+                      const cap = !on || days >= ramp.length ? target : Math.min(ramp[Math.max(0, days)], target);
+                      const warming = on && cap < target;
+                      return warming
+                        ? `Aquecendo: hoje pode enviar ${cap} e-mails (dia ${days + 1}). Sobe até ${target}/dia automaticamente.`
+                        : `Limite diário: ${target}/dia${on ? " (aquecida)" : " (aquecimento desligado)"}.`;
+                    })()}</p>
                   </div>
                   <AccountRowActions id={a.id} active={a.is_active} />
                 </div>

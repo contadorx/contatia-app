@@ -125,7 +125,7 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
 
   const { data: acct } = await supabase
     .from("email_accounts")
-    .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap")
+    .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage")
     .eq("is_active", true)
     .order("created_at", { ascending: true })
     .limit(1)
@@ -140,8 +140,14 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     .eq("type", "email_sent")
     .eq("email_account_id", (acct as any).id)
     .gte("created_at", startOfDay.toISOString());
-  if ((count ?? 0) >= ((acct as any).daily_cap ?? 40)) {
-    return { error: "Limite diário desta caixa atingido (Envio Seguro). Tente amanhã ou conecte outra caixa." };
+  // warmup_stage: 0 = automático (rampa), -1 = desligado (usa cap cheio), >0 = mantém compat
+  const { effectiveDailyCap } = await import("@/lib/warmup");
+  const warmupOn = ((acct as any).warmup_stage ?? 0) !== -1;
+  const { cap, warming } = effectiveDailyCap((acct as any).created_at, (acct as any).daily_cap ?? 40, warmupOn);
+  if ((count ?? 0) >= cap) {
+    return { error: warming
+      ? `Limite de aquecimento de hoje atingido (${cap} e-mails). A caixa é nova — o limite sobe automaticamente a cada dia até o total. Tente amanhã ou use outra caixa.`
+      : "Limite diário desta caixa atingido (Envio Seguro). Tente amanhã ou conecte outra caixa." };
   }
 
   // reescreve links para rastreados (ativa o gatilho link_clicked)
