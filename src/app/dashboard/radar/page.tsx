@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import RadarImport from "@/components/RadarImport";
 import RadarPushButton from "@/components/RadarPushButton";
+import RadarSeedButton from "@/components/RadarSeedButton";
 
 export const dynamic = "force-dynamic";
 
@@ -37,8 +38,9 @@ export default async function Radar({
       <h1 className="font-display text-2xl font-bold">Radar</h1>
       <p className="mt-1 text-sm text-subtle">Garimpe empresas-alvo, enriqueça o CNPJ escolhido e jogue no pipeline.</p>
 
-      <div className="mt-6">
+      <div className="mt-6 flex flex-wrap items-center gap-3">
         <RadarImport />
+        <RadarSeedButton />
       </div>
 
       <form className="card mt-6 grid gap-3 p-4 sm:grid-cols-6">

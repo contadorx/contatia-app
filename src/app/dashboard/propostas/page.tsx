@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import ProposalForm from "@/components/ProposalForm";
 import ShareControl from "@/components/ShareControl";
+import ViewDocButton from "@/components/ViewDocButton";
 
 export const dynamic = "force-dynamic";
 
@@ -50,12 +51,15 @@ export default async function Propostas() {
                   <p className="text-sm font-semibold">
                     {d.name} <span className="ml-1 rounded-full bg-muted px-2 py-0.5 text-xs text-subtle">{d.type}</span>
                   </p>
-                  <a href={d.url} target="_blank" rel="noreferrer" className="text-xs text-brand-dark hover:underline">
-                    {d.url}
-                  </a>
+                  {d.url && (
+                    <a href={d.url} target="_blank" rel="noreferrer" className="text-xs text-brand-dark hover:underline">
+                      {d.url}
+                    </a>
+                  )}
                   {d.storage_path && !d.url && (
-                    <span className="inline-flex items-center gap-1 text-xs text-subtle">
-                      <span className="rounded bg-brand-soft px-1.5 py-0.5 text-brand-dark">PDF</span> arquivo enviado (privado)
+                    <span className="inline-flex items-center gap-2 text-xs text-subtle">
+                      <span className="rounded bg-brand-soft px-1.5 py-0.5 text-brand-dark">PDF</span>
+                      <ViewDocButton documentId={d.id} />
                     </span>
                   )}
                 </div>

@@ -147,3 +147,56 @@ export async function enrichAndPush(radarId: string, sequenceId?: string) {
   revalidatePath("/dashboard/contatos");
   return { ok: true };
 }
+
+// Semeia ~20 leads fictícios de contadores para teste (idempotente por CNPJ fake).
+export async function seedRadarDemo() {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const nomes = [
+    ["Contabilidade Andrade Ltda", "Andrade Contábil", "São Paulo", "SP", "T1"],
+    ["Escritório Contábil Marques", "Marques Assessoria", "Campinas", "SP", "T1"],
+    ["Nova Gestão Contábil ME", "Nova Gestão", "Santo André", "SP", "T2"],
+    ["Oliveira & Santos Contadores", "O&S Contadores", "Guarulhos", "SP", "T1"],
+    ["Precisão Contábil Ltda", "Precisão", "Rio de Janeiro", "RJ", "T2"],
+    ["Contável Assessoria Empresarial", "Contável", "Belo Horizonte", "MG", "T2"],
+    ["Assessoria Fiscal Ribeiro", "Ribeiro Fiscal", "Curitiba", "PR", "T3"],
+    ["Grupo Contábil Horizonte", "Horizonte", "Porto Alegre", "RS", "T1"],
+    ["Faceta Contabilidade", "Faceta", "Salvador", "BA", "T3"],
+    ["Meridiano Serviços Contábeis", "Meridiano", "Recife", "PE", "T2"],
+    ["Alfa Contabilidade Digital", "Alfa Digital", "Sorocaba", "SP", "T2"],
+    ["Contabilidade Sá & Filhos", "Sá & Filhos", "São Bernardo", "SP", "T1"],
+    ["Núcleo Contábil Vértice", "Vértice", "Osasco", "SP", "T3"],
+    ["Prime Assessoria Contábil", "Prime", "Niterói", "RJ", "T2"],
+    ["Contadoria Moderna Ltda", "Moderna", "Uberlândia", "MG", "T3"],
+    ["Escritório Fiscal Aliança", "Aliança", "Londrina", "PR", "T3"],
+    ["Contax Serviços Empresariais", "Contax", "Joinville", "SC", "T2"],
+    ["Bastos Contabilidade", "Bastos", "Fortaleza", "CE", "T4"],
+    ["Cia Contábil do Vale", "Vale Contábil", "São José dos Campos", "SP", "T1"],
+    ["Zênite Contadores Associados", "Zênite", "Ribeirão Preto", "SP", "T2"],
+  ];
+
+  const rows = nomes.map((n, i) => {
+    const seq = String(i + 1).padStart(4, "0");
+    return {
+      tenant_id,
+      cnpj: `00.00${seq.slice(0, 1)}.${seq.slice(1)}/0001-${String((i * 7) % 90 + 10)}`,
+      razao_social: n[0],
+      nome_fantasia: n[1],
+      cnae: "6920-6/01",
+      uf: n[3],
+      municipio: n[2],
+      situacao_cadastral: "ATIVA",
+      porte: i % 3 === 0 ? "ME" : i % 3 === 1 ? "EPP" : "DEMAIS",
+      tier: n[4],
+      contato_principal: `Sócio ${n[1]}`,
+      email: `contato@${n[1].toLowerCase().replace(/[^a-z0-9]/g, "")}.com.br`,
+      telefone: `(${11 + (i % 80)}) 9${String(90000000 + i * 137).slice(0, 8)}`,
+    };
+  });
+
+  const { error } = await supabase.from("radar_leads").insert(rows);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/radar");
+  return { ok: true, count: rows.length };
+}

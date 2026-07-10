@@ -49,6 +49,20 @@ export async function uploadDocument(form: FormData) {
   return { ok: true };
 }
 
+// Gera uma URL assinada temporária para o dono ver o PDF do Storage.
+export async function viewDocument(documentId: string) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { data: doc } = await supabase.from("documents").select("url, storage_path").eq("id", documentId).maybeSingle();
+  if (!doc) return { error: "Documento não encontrado." };
+  if ((doc as any).url) return { url: (doc as any).url };
+  const path = (doc as any).storage_path as string | undefined;
+  if (!path) return { error: "Documento sem arquivo." };
+  const { data: signed, error } = await supabase.storage.from("proposals").createSignedUrl(path, 60 * 10);
+  if (error || !signed?.signedUrl) return { error: "Não foi possível abrir (o bucket 'proposals' existe no Supabase?)." };
+  return { url: signed.signedUrl };
+}
+
 export async function createDocument(input: { name: string; type: string; url: string }) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
