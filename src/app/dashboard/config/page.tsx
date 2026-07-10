@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import SmtpForm from "@/components/SmtpForm";
 import AccountRowActions from "@/components/AccountRowActions";
+import WebToLeadSnippet from "@/components/WebToLeadSnippet";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,9 @@ export default async function Config() {
     .from("email_accounts")
     .select("id, provider, from_email, display_name, is_active, daily_cap, warmup_stage")
     .order("created_at", { ascending: false });
+
+  const { data: tenant } = await supabase.from("tenants").select("inbound_token").maybeSingle();
+  const inboundToken = (tenant as any)?.inbound_token as string | undefined;
 
   const rows = (accounts as any[]) || [];
   const gmailReady = !!process.env.GOOGLE_CLIENT_ID;
@@ -65,6 +69,19 @@ export default async function Config() {
           <div className="mt-3">
             <SmtpForm />
           </div>
+        </div>
+      </div>
+
+      {/* Web-to-lead */}
+      <div className="mt-8">
+        <h2 className="font-display text-lg font-bold">Captação no site (web-to-lead)</h2>
+        <p className="mt-1 text-sm text-subtle">Cole um formulário no seu site; os envios viram contatos no pipeline.</p>
+        <div className="card mt-3 p-5">
+          {inboundToken ? (
+            <WebToLeadSnippet token={inboundToken} />
+          ) : (
+            <p className="text-sm text-subtle">Token de captação indisponível. Rode a migration 0005 para gerá-lo.</p>
+          )}
         </div>
       </div>
     </div>
