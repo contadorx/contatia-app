@@ -116,8 +116,19 @@ export async function sendEmailTask(taskId: string) {
     return { error: "Limite diário desta caixa atingido (Envio Seguro). Tente amanhã ou conecte outra caixa." };
   }
 
-  // assinatura do negócio (renderiza {{primeiro_nome}}/{{empresa}} com os dados do contato)
+  // reescreve links para rastreados (ativa o gatilho link_clicked)
   let bodyText = task.generated_content || "";
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL ? (process.env.NEXT_PUBLIC_APP_URL || `https://${process.env.VERCEL_URL}`) : "";
+    if (baseUrl) {
+      const { wrapLinks } = await import("@/lib/linktrack");
+      bodyText = await wrapLinks(supabase, { tenantId: tenant_id, contactId: (task as any).contact_id ?? null, body: bodyText, baseUrl });
+    }
+  } catch {
+    /* rastreio de link não deve bloquear o envio */
+  }
+
+  // assinatura do negócio (renderiza {{primeiro_nome}}/{{empresa}} com os dados do contato)
   const { data: tnt } = await supabase.from("tenants").select("email_signature").maybeSingle();
   const signature = (tnt as any)?.email_signature as string | undefined;
   if (signature?.trim()) {
