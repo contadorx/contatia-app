@@ -37,18 +37,27 @@ export async function runAutomations(
       const threshold = Number(r.trigger_value) || 0;
       if (score < threshold) continue;
     }
-    const ok = await applyAction(db, { tenantId, contactId, rule: r });
-    if (ok) {
-      ran++;
-      await db.from("automation_logs").insert({
-        tenant_id: tenantId,
-        automation_id: r.id,
-        contact_id: contactId,
-        detail: `${r.trigger_type} → ${r.action_type}`,
-      });
-    }
+    const ok = await applyRule(db, { tenantId, contactId, rule: r });
+    if (ok) ran++;
   }
   return { ran };
+}
+
+/** Aplica UMA regra a um contato (ação + log). Reutilizado pelo cron (gatilhos de tempo). */
+export async function applyRule(
+  db: DB,
+  { tenantId, contactId, rule }: { tenantId: string; contactId: string; rule: any }
+): Promise<boolean> {
+  const ok = await applyAction(db, { tenantId, contactId, rule });
+  if (ok) {
+    await db.from("automation_logs").insert({
+      tenant_id: tenantId,
+      automation_id: rule.id,
+      contact_id: contactId,
+      detail: `${rule.trigger_type} → ${rule.action_type}`,
+    });
+  }
+  return ok;
 }
 
 async function applyAction(
