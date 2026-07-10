@@ -31,8 +31,10 @@ export default async function Superadmin() {
   }
 
   // todos os tenants + métricas por tenant (via service role — leitura de plataforma)
-  const { data: tenants } = await admin.from("tenants").select("id, name, legal_name, segment, created_at").order("created_at", { ascending: false });
+  const { data: tenants } = await admin.from("tenants").select("id, name, legal_name, segment, created_at, mrr, subscription_status").order("created_at", { ascending: false });
   const tList = (tenants as any[]) || [];
+
+  const subscriptionMrr = tList.filter((t) => t.subscription_status === "active").reduce((s, t) => s + Number(t.mrr || 0), 0);
 
   // --- Engajamento: workspaces com atividade recente (eventos ou tarefas) ---
   const now = Date.now();
@@ -96,7 +98,10 @@ export default async function Superadmin() {
           <h1 className="font-display text-2xl font-bold">Plataforma</h1>
           <p className="mt-1 text-sm text-subtle">Visão do dono do Contatia sobre todos os workspaces. Leitura apenas.</p>
         </div>
-        <a href="/dashboard/superadmin/parceiros" className="btn-ghost">Parceiros & comissões →</a>
+        <div className="flex gap-2">
+          <a href="/dashboard/superadmin/cobranca" className="btn-ghost">Cobrança →</a>
+          <a href="/dashboard/superadmin/parceiros" className="btn-ghost">Parceiros & comissões →</a>
+        </div>
       </div>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-4">
@@ -104,7 +109,7 @@ export default async function Superadmin() {
           { l: "Workspaces", v: String(totalTenants) },
           { l: "Usuários", v: String(totalUsers) },
           { l: "Contatos", v: totalContacts.toLocaleString("pt-BR") },
-          { l: "MRR em pipeline", v: brl(totalMrr) },
+          { l: "MRR de assinatura", v: brl(subscriptionMrr) },
         ].map((k) => (
           <div key={k.l} className="card p-5">
             <p className="text-xs text-subtle">{k.l}</p>
