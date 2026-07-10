@@ -35,7 +35,7 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
     : { data: [] as any[] };
 
   // queries — aplicam filtro de vendedor quando houver
-  let oppsQ = supabase.from("opportunities").select("stage_id, status, value_mrr, owner_id");
+  let oppsQ = supabase.from("opportunities").select("stage_id, status, value_mrr, owner_id, created_at, updated_at, loss_reason");
   if (vendedor) oppsQ = oppsQ.eq("owner_id", vendedor);
 
   let evsQ = supabase.from("events").select("type, created_at, contact_id").gte("created_at", sinceISO);
@@ -74,6 +74,33 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
   const closed = won.length + lost.length;
   const winRate = closed > 0 ? Math.round((won.length / closed) * 100) : null;
 
+  // tempo médio de fechamento (dias entre created_at e updated_at dos ganhos)
+  const cycleDays = won
+    .map((o) => o.created_at && o.updated_at ? (new Date(o.updated_at).getTime() - new Date(o.created_at).getTime()) / 86400000 : null)
+    .filter((d): d is number => d !== null && d >= 0);
+  const avgCycle = cycleDays.length ? Math.round(cycleDays.reduce((a, b) => a + b, 0) / cycleDays.length) : null;
+
+  // ticket médio dos ganhos
+  const avgTicket = won.length ? wonValue / won.length : null;
+
+  // motivos de perda (loss_reason)
+  const lossReasons: Record<string, number> = {};
+  for (const o of lost) {
+    const r = (o.loss_reason || "Não informado").trim() || "Não informado";
+    lossReasons[r] = (lossReasons[r] || 0) + 1;
+  }
+  const lossTop = Object.entries(lossReasons).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  // conversão por estágio: quantos ainda estão vs. já passaram (aprox. pelo funil aberto)
+  const funnelConv = stageList
+    .filter((s) => !s.is_won && !s.is_lost)
+    .map((s, i, arr) => {
+      const here = openOpps.filter((o) => o.stage_id === s.id).length;
+      const next = i < arr.length - 1 ? openOpps.filter((o) => o.stage_id === arr[i + 1].id).length : 0;
+      const conv = here > 0 ? Math.round((next / here) * 100) : null;
+      return { name: s.name, here, conv };
+    });
+
   const funnel = stageList
     .filter((s) => !s.is_won && !s.is_lost)
     .map((s) => {
@@ -97,6 +124,8 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
     { label: "Pipeline aberto", value: brl(openValue), sub: `${openOpps.length} negócios` },
     { label: "Ganho (MRR)", value: brl(wonValue), sub: `${won.length} fechados` },
     { label: "Taxa de ganho", value: winRate === null ? "—" : `${winRate}%`, sub: `${won.length}/${closed} fechados` },
+    { label: "Ticket médio", value: avgTicket === null ? "—" : brl(avgTicket), sub: "por negócio ganho" },
+    { label: "Tempo de fechamento", value: avgCycle === null ? "—" : `${avgCycle} dias`, sub: "criação → ganho" },
     { label: "Respostas (período)", value: String(replies), sub: `${dias} dias` },
   ];
 
@@ -184,6 +213,37 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
               </span>
             </div>
             <p className="mt-1 text-xs text-subtle">{noShows} no-shows em {noShowBase} reuniões concluídas</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Conversão por estágio + Motivos de perda */}
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <div className="card p-5">
+          <h2 className="font-display text-lg font-bold">Conversão por estágio</h2>
+          <p className="text-xs text-subtle">% que avança para o próximo estágio (negócios abertos).</p>
+          <div className="mt-3 space-y-2">
+            {funnelConv.map((f) => (
+              <div key={f.name} className="flex items-center justify-between text-sm">
+                <span>{f.name} <span className="text-subtle">({f.here})</span></span>
+                <span className="font-semibold text-brand-dark">{f.conv === null ? "—" : `${f.conv}%`}</span>
+              </div>
+            ))}
+            {!funnelConv.length && <p className="text-sm text-subtle">Sem estágios abertos.</p>}
+          </div>
+        </div>
+
+        <div className="card p-5">
+          <h2 className="font-display text-lg font-bold">Motivos de perda</h2>
+          <p className="text-xs text-subtle">{lost.length} negócio(s) perdido(s) no recorte.</p>
+          <div className="mt-3 space-y-2">
+            {lossTop.map(([reason, count]) => (
+              <div key={reason} className="flex items-center justify-between text-sm">
+                <span>{reason}</span>
+                <span className="rounded-full bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">{count}</span>
+              </div>
+            ))}
+            {!lossTop.length && <p className="text-sm text-subtle">Nenhuma perda registrada.</p>}
           </div>
         </div>
       </div>
