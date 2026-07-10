@@ -98,9 +98,40 @@ export async function scheduleMeeting(input: {
   }
 
   await scoreEvent(supabase, { tenant_id, contact_id: input.contact_id, type: "meeting", meta: { meeting_id: meeting.id } });
+
+  // Google Calendar: se houver conta Google conectada, cria o evento + convite
+  try {
+    const { data: acct } = await supabase
+      .from("email_accounts")
+      .select("oauth_refresh_token")
+      .eq("provider", "gmail")
+      .eq("is_active", true)
+      .not("oauth_refresh_token", "is", null)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    const refresh = (acct as any)?.oauth_refresh_token as string | undefined;
+    if (refresh) {
+      const { createCalendarEvent } = await import("@/lib/gcal");
+      const ev = await createCalendarEvent(refresh, {
+        summary: input.title?.trim() || "Reunião",
+        startISO: when.toISOString(),
+        durationMin: Number(input.duration_min) || 30,
+        attendeeEmail: (contact as any).email || null,
+        location: input.location?.trim() || null,
+        description: input.notes?.trim() || null,
+      });
+      if (ev.id) {
+        await supabase.from("meetings").update({ google_event_id: ev.id, google_event_link: ev.link || null }).eq("id", meeting.id);
+      }
+    }
+  } catch {
+    /* falha no calendar não deve impedir o agendamento */
+  }
+
   revalidatePath("/dashboard/reunioes");
   revalidatePath("/dashboard");
-  return { ok: true };
+  return { ok: true, googleConnected: true };
 }
 
 export async function setMeetingStatus(id: string, status: string, contactId?: string) {

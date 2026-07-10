@@ -33,7 +33,7 @@ export default async function Reunioes() {
     supabase.from("contacts").select("id, name").order("score", { ascending: false }).limit(500),
     supabase
       .from("meetings")
-      .select("id, title, datetime, duration_min, location, notes, status, contact_id, contacts(name, company)")
+      .select("id, title, datetime, duration_min, location, notes, status, contact_id, google_event_link, contacts(name, company)")
       .gte("datetime", nowISO)
       .order("datetime", { ascending: true }),
     supabase
@@ -64,6 +64,9 @@ export default async function Reunioes() {
       <div className="mt-6">
         <MeetingForm contacts={(contacts as { id: string; name: string }[]) || []} />
       </div>
+      <p className="mt-2 text-xs text-subtle">
+        Com o Gmail conectado em Config → E-mail, cada reunião agendada vira automaticamente um evento no seu Google Calendar, com convite para o contato. Se você conectou o Gmail antes desta atualização, reconecte uma vez para liberar o acesso à agenda.
+      </p>
 
       {/* Agenda (próximas por dia) */}
       <h2 className="mt-8 mb-3 font-display text-lg font-bold">Agenda</h2>
@@ -87,6 +90,11 @@ export default async function Reunioes() {
                             <p className="text-sm font-semibold">{m.title} <span className="font-normal text-subtle">· {m.contacts?.name || "—"}</span></p>
                             {m.location && <p className="text-xs text-brand-dark">{m.location}</p>}
                             {m.notes && <p className="mt-0.5 text-xs text-subtle">{m.notes}</p>}
+                            {m.google_event_link && (
+                              <a href={m.google_event_link} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-xs text-signal hover:underline">
+                                ✓ no Google Calendar
+                              </a>
+                            )}
                           </div>
                         </div>
                         <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${st.c}`}>{st.l}</span>
