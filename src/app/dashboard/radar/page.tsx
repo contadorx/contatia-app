@@ -8,19 +8,21 @@ export const dynamic = "force-dynamic";
 export default async function Radar({
   searchParams,
 }: {
-  searchParams: { cnae?: string; uf?: string; municipio?: string; porte?: string; tier?: string; q?: string };
+  searchParams: { cnae?: string; uf?: string; municipio?: string; bairro?: string; capital?: string; porte?: string; tier?: string; q?: string };
 }) {
   const supabase = createClient();
 
   let query = supabase
     .from("radar_leads")
-    .select("id, cnpj, razao_social, nome_fantasia, cnae, uf, municipio, porte, tier, converted_contact_id", { count: "exact" })
+    .select("id, cnpj, razao_social, nome_fantasia, cnae, uf, municipio, bairro, is_capital, porte, tier, converted_contact_id", { count: "exact" })
     .order("razao_social", { ascending: true })
     .limit(100);
 
   if (searchParams.cnae) query = query.ilike("cnae", `%${searchParams.cnae}%`);
   if (searchParams.uf) query = query.eq("uf", searchParams.uf.toUpperCase());
   if (searchParams.municipio) query = query.ilike("municipio", `%${searchParams.municipio}%`);
+  if (searchParams.bairro) query = query.ilike("bairro", `%${searchParams.bairro}%`);
+  if (searchParams.capital === "1") query = query.eq("is_capital", true);
   if (searchParams.porte) query = query.ilike("porte", `%${searchParams.porte}%`);
   if (searchParams.tier) query = query.eq("tier", searchParams.tier);
   if (searchParams.q) query = query.or(`razao_social.ilike.%${searchParams.q}%,nome_fantasia.ilike.%${searchParams.q}%`);
@@ -48,6 +50,11 @@ export default async function Radar({
         <input name="cnae" defaultValue={searchParams.cnae} className="input" placeholder="CNAE" />
         <input name="uf" defaultValue={searchParams.uf} className="input" placeholder="UF" maxLength={2} />
         <input name="municipio" defaultValue={searchParams.municipio} className="input" placeholder="Município" />
+        <input name="bairro" defaultValue={searchParams.bairro} className="input" placeholder="Bairro" />
+        <label className="flex items-center gap-2 text-sm text-subtle">
+          <input type="checkbox" name="capital" value="1" defaultChecked={searchParams.capital === "1"} />
+          Só capitais
+        </label>
         <div className="flex gap-2">
           <select name="tier" defaultValue={searchParams.tier} className="input">
             <option value="">Tier</option>
@@ -80,7 +87,7 @@ export default async function Radar({
                 <tr key={r.id} className="border-b border-line last:border-0">
                   <td className="px-4 py-3">
                     <p className="font-medium">{r.nome_fantasia || r.razao_social || "—"}</p>
-                    <p className="text-xs text-subtle">{r.cnpj || "sem CNPJ"} · {r.municipio || "—"}</p>
+                    <p className="text-xs text-subtle">{r.cnpj || "sem CNPJ"} · {[r.bairro, r.municipio].filter(Boolean).join(", ") || "—"}{r.is_capital && <span className="ml-1 rounded bg-brand-soft px-1 py-0.5 text-[9px] font-bold text-brand-dark">CAPITAL</span>}</p>
                   </td>
                   <td className="px-4 py-3 text-subtle">{r.cnae || "—"}</td>
                   <td className="px-4 py-3 text-subtle">{r.uf || "—"}</td>

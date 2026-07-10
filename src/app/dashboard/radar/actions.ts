@@ -39,6 +39,7 @@ export async function importRadarCsv(csv: string) {
     cnae: idx(["cnae", "cnae_fiscal"]),
     uf: idx(["uf", "estado"]),
     municipio: idx(["municipio", "município", "cidade"]),
+    bairro: idx(["bairro", "distrito"]),
     situacao: idx(["situacao_cadastral", "situacao", "situação"]),
     porte: idx(["porte"]),
     tier: idx(["tier", "t[1-4]"]),
@@ -47,10 +48,14 @@ export async function importRadarCsv(csv: string) {
     telefone: idx(["telefone", "fone", "phone"]),
   };
 
+  const CAPITAIS = new Set(["rio branco","maceio","macapa","manaus","salvador","fortaleza","brasilia","vitoria","goiania","sao luis","cuiaba","campo grande","belo horizonte","belem","joao pessoa","curitiba","recife","teresina","rio de janeiro","natal","porto alegre","porto velho","boa vista","florianopolis","sao paulo","aracaju","palmas"]);
+  const norm = (s: string | null) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
     const c = lines[i].split(delim);
     const get = (k: number) => (k >= 0 ? (c[k] || "").trim() : null);
+    const municipio = get(col.municipio);
     rows.push({
       tenant_id,
       cnpj: get(col.cnpj),
@@ -58,7 +63,9 @@ export async function importRadarCsv(csv: string) {
       nome_fantasia: get(col.fantasia),
       cnae: get(col.cnae),
       uf: get(col.uf)?.toUpperCase() || null,
-      municipio: get(col.municipio),
+      municipio,
+      bairro: get(col.bairro),
+      is_capital: CAPITAIS.has(norm(municipio)),
       situacao_cadastral: get(col.situacao),
       porte: get(col.porte),
       tier: get(col.tier),
@@ -221,6 +228,8 @@ export async function seedRadarDemo() {
       cnae: "6920-6/01",
       uf: n[3],
       municipio: n[2],
+      bairro: ["Centro", "Jardins", "Savassi", "Batel", "Moema", "Boa Viagem"][i % 6],
+      is_capital: ["São Paulo", "Rio de Janeiro", "Belo Horizonte", "Curitiba", "Recife", "Porto Alegre", "Salvador", "Fortaleza"].includes(n[2]),
       situacao_cadastral: "ATIVA",
       porte: i % 3 === 0 ? "ME" : i % 3 === 1 ? "EPP" : "DEMAIS",
       tier: n[4],
