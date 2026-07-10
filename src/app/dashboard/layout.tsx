@@ -8,6 +8,7 @@ const nav = [
   { href: "/dashboard", label: "Hoje" },
   { href: "/dashboard/pipeline", label: "Pipeline" },
   { href: "/dashboard/metricas", label: "Métricas" },
+  { href: "/dashboard/equipe", label: "Equipe" },
   { href: "/dashboard/reunioes", label: "Reuniões" },
   { href: "/dashboard/propostas", label: "Propostas" },
   { href: "/dashboard/cadencias", label: "Cadências" },

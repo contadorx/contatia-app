@@ -2,23 +2,26 @@ import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import ContactTools from "@/components/ContactTools";
 import EnrollButton from "@/components/EnrollButton";
+import AssignSelect from "@/components/AssignSelect";
 
 export const dynamic = "force-dynamic";
 
 export default async function Contatos() {
   const supabase = createClient();
 
-  const [{ data: contacts }, { data: sequences }] = await Promise.all([
+  const [{ data: contacts }, { data: sequences }, { data: members }] = await Promise.all([
     supabase
       .from("contacts")
-      .select("id, name, email, phone, company, origin, status, score, created_at")
+      .select("id, name, email, phone, company, origin, status, score, assigned_to, created_at")
       .order("score", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(200),
     supabase.from("sequences").select("id, name").eq("is_active", true).order("created_at", { ascending: false }),
+    supabase.from("profiles").select("id, full_name, email").eq("is_active", true),
   ]);
 
   const seqs = (sequences as { id: string; name: string }[]) || [];
+  const memberList = (members as { id: string; full_name: string | null; email: string }[]) || [];
 
   return (
     <div>
@@ -43,6 +46,7 @@ export default async function Contatos() {
                 <th className="px-4 py-3 font-medium">Contato</th>
                 <th className="px-4 py-3 font-medium">Origem</th>
                 <th className="px-4 py-3 font-medium">Score</th>
+                <th className="px-4 py-3 font-medium">Responsável</th>
                 <th className="px-4 py-3 font-medium text-right">Ação</th>
               </tr>
             </thead>
@@ -67,6 +71,9 @@ export default async function Contatos() {
                     <span className={`text-sm font-semibold ${(c.score ?? 0) >= 25 ? "text-warn" : "text-subtle"}`}>
                       {c.score ?? 0}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <AssignSelect contactId={c.id} current={c.assigned_to} members={memberList} />
                   </td>
                   <td className="px-4 py-3 text-right">
                     <EnrollButton contactId={c.id} sequences={seqs} />
