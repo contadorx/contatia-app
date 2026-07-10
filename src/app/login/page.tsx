@@ -19,7 +19,10 @@ export default function LoginPage() {
     if (mode === "in") {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setMsg(error.message);
-      else router.push("/dashboard");
+      else {
+        const next = new URLSearchParams(window.location.search).get("next");
+        router.push(next || "/dashboard");
+      }
     } else {
       const { error } = await supabase.auth.signUp({ email, password });
       if (error) setMsg(error.message);

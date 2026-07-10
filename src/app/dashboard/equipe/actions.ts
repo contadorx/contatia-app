@@ -84,3 +84,28 @@ export async function dedupeByEmail() {
   revalidatePath("/dashboard/contatos");
   return { ok: true, marked: dups.length };
 }
+
+// Gera um convite (owner). Retorna o token; o client monta o link.
+export async function createInvite(email: string) {
+  const { supabase, tenant_id, role, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  if (role !== "owner") return { error: "Só o owner convida." };
+  if (!email.trim() || !email.includes("@")) return { error: "E-mail inválido." };
+  const { data, error } = await supabase
+    .from("tenant_invites")
+    .insert({ tenant_id, email: email.trim().toLowerCase(), role: "partner", created_by: user_id })
+    .select("token")
+    .single();
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/equipe");
+  return { ok: true, token: (data as any).token as string };
+}
+
+export async function revokeInvite(id: string) {
+  const { supabase, role } = await ctx();
+  if (role !== "owner") return { error: "Só o owner remove convites." };
+  const { error } = await supabase.from("tenant_invites").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/equipe");
+  return { ok: true };
+}

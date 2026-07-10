@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import TeamTools from "@/components/TeamTools";
+import InviteTools from "@/components/InviteTools";
 
 export const dynamic = "force-dynamic";
 
@@ -9,11 +10,12 @@ const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "cu
 export default async function Equipe() {
   const supabase = createClient();
 
-  const [{ data: members }, { data: contacts }, { data: opps }, { count: unassignedCount }] = await Promise.all([
+  const [{ data: members }, { data: contacts }, { data: opps }, { count: unassignedCount }, { data: invites }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, email, role, is_active").order("full_name", { ascending: true }),
     supabase.from("contacts").select("assigned_to, score"),
     supabase.from("opportunities").select("owner_id, status, value_mrr"),
     supabase.from("contacts").select("id", { count: "exact", head: true }).is("assigned_to", null),
+    supabase.from("tenant_invites").select("id, email, token, expires_at").is("accepted_at", null).order("created_at", { ascending: false }),
   ]);
 
   const mem = (members as any[]) || [];
@@ -41,6 +43,10 @@ export default async function Equipe() {
     <div>
       <h1 className="font-display text-2xl font-bold">Equipe</h1>
       <p className="mt-1 text-sm text-subtle">Distribuição da carteira e placar por vendedor. {unassignedCount ?? 0} contatos sem dono.</p>
+
+      <div className="mt-6">
+        <InviteTools pending={(invites as any[]) || []} />
+      </div>
 
       <div className="mt-6">
         <TeamTools />
