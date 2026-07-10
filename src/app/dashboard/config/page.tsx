@@ -3,6 +3,7 @@ import SmtpForm from "@/components/SmtpForm";
 import AccountRowActions from "@/components/AccountRowActions";
 import WebToLeadSnippet from "@/components/WebToLeadSnippet";
 import AiSettingsForm from "@/components/AiSettingsForm";
+import WhatsAppConnect from "@/components/WhatsAppConnect";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,11 @@ export default async function Config() {
   const { data: accounts } = await supabase
     .from("email_accounts")
     .select("id, provider, from_email, display_name, is_active, daily_cap, warmup_stage")
+    .order("created_at", { ascending: false });
+
+  const { data: waAccounts } = await supabase
+    .from("whatsapp_accounts")
+    .select("id, evolution_url, instance, is_active, inbound_token")
     .order("created_at", { ascending: false });
 
   const { data: tenant } = await supabase.from("tenants").select("inbound_token, ai_model, ai_api_key").maybeSingle();
@@ -72,6 +78,15 @@ export default async function Config() {
           <div className="mt-3">
             <SmtpForm />
           </div>
+        </div>
+      </div>
+
+      {/* WhatsApp */}
+      <div className="mt-8">
+        <h2 className="font-display text-lg font-bold">WhatsApp (Evolution API)</h2>
+        <p className="mt-1 text-sm text-subtle">Conecte sua instância Evolution (você a hospeda). Envia da fila e detecta respostas via webhook.</p>
+        <div className="card mt-3 p-5">
+          <WhatsAppConnect accounts={(waAccounts as any[]) || []} />
         </div>
       </div>
 

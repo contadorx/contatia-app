@@ -126,3 +126,49 @@ export async function sendEmailTask(taskId: string) {
   revalidatePath("/dashboard");
   return { ok: true };
 }
+
+// Envia a tarefa de WhatsApp via Evolution API (caixa ativa do tenant), com cap diário.
+export async function sendWhatsAppTask(taskId: string) {
+  const { sendText } = await import("@/lib/whatsapp");
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const { data: task } = await supabase
+    .from("tasks")
+    .select("id, channel, generated_content, contact_id, contacts(phone, name)")
+    .eq("id", taskId)
+    .single();
+  if (!task) return { error: "Tarefa não encontrada." };
+  if (task.channel !== "whatsapp") return { error: "Tarefa não é de WhatsApp." };
+  const phone = (task as any).contacts?.phone as string | undefined;
+  if (!phone) return { error: "Contato sem telefone." };
+
+  const { data: acc } = await supabase
+    .from("whatsapp_accounts")
+    .select("id, evolution_url, api_key, instance, daily_cap")
+    .eq("is_active", true)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (!acc) return { error: "Nenhuma instância WhatsApp conectada. Configure em Config." };
+
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const { count } = await supabase
+    .from("events")
+    .select("id", { count: "exact", head: true })
+    .eq("type", "whatsapp_sent")
+    .gte("created_at", startOfDay.toISOString());
+  if ((count ?? 0) >= ((acc as any).daily_cap ?? 40)) {
+    return { error: "Limite diário de WhatsApp atingido (anti-ban). Tente amanhã." };
+  }
+
+  const res = await sendText(acc as any, phone, task.generated_content || "");
+  if (res.error) return { error: res.error };
+
+  await supabase.from("tasks").update({ status: "done", completed_at: new Date().toISOString() }).eq("id", taskId);
+  await scoreEvent(supabase, { tenant_id, contact_id: (task as any).contact_id, type: "task_done" });
+  await supabase.from("events").insert({ tenant_id, type: "whatsapp_sent", contact_id: (task as any).contact_id, meta: {} });
+  revalidatePath("/dashboard");
+  return { ok: true };
+}

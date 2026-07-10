@@ -1,7 +1,7 @@
 "use client";
 
 import { useTransition, useState } from "react";
-import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied } from "@/app/dashboard/task-actions";
+import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask } from "@/app/dashboard/task-actions";
 import { channelLabel, waLink, type Channel } from "@/lib/cadence";
 
 type Task = {
@@ -37,6 +37,13 @@ export default function TaskQueue({ tasks, hotThreshold }: { tasks: Task[]; hotT
       if (res?.error) setErr(res.error);
     });
   }
+  function sendWa(id: string) {
+    setErr(null);
+    start(async () => {
+      const res = (await sendWhatsAppTask(id)) as { error?: string } | undefined;
+      if (res?.error) setErr(res.error);
+    });
+  }
 
   if (!tasks.length)
     return (
@@ -69,9 +76,14 @@ export default function TaskQueue({ tasks, hotThreshold }: { tasks: Task[]; hotT
 
             {/* ação por canal */}
             {t.channel === "whatsapp" && c?.phone && (
-              <a className="btn-brand py-1.5 text-xs" href={waLink(c.phone, content)} target="_blank" rel="noreferrer" onClick={() => act(() => completeTask(t.id, t.contact_id ?? undefined))}>
-                Abrir WhatsApp
-              </a>
+              <>
+                <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => sendWa(t.id)}>
+                  Enviar
+                </button>
+                <a className="text-xs text-subtle hover:text-ink" href={waLink(c.phone, content)} target="_blank" rel="noreferrer" title="Abrir no WhatsApp Web/app">
+                  ↗
+                </a>
+              </>
             )}
             {t.channel === "email" && c?.email && (
               <>
