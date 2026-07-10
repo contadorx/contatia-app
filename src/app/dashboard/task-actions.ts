@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { scoreEvent } from "@/lib/scoring";
+import { renderTemplate } from "@/lib/cadence";
 
 async function ctx() {
   const supabase = createClient();
@@ -109,8 +110,18 @@ export async function sendEmailTask(taskId: string) {
     return { error: "Limite diário desta caixa atingido (Envio Seguro). Tente amanhã ou conecte outra caixa." };
   }
 
+  // assinatura do negócio (renderiza {{primeiro_nome}}/{{empresa}} com os dados do contato)
+  let bodyText = task.generated_content || "";
+  const { data: tnt } = await supabase.from("tenants").select("email_signature").maybeSingle();
+  const signature = (tnt as any)?.email_signature as string | undefined;
+  if (signature?.trim()) {
+    const contact = (task as any).contacts || {};
+    const rendered = renderTemplate(signature, { name: contact.name, company: null, ...contact });
+    bodyText = `${bodyText}\n\n${rendered}`;
+  }
+
   try {
-    await sendEmail(acct as any, { to, subject: task.title || "", text: task.generated_content || "" });
+    await sendEmail(acct as any, { to, subject: task.title || "", text: bodyText });
   } catch (e: any) {
     return { error: "Falha no envio: " + (e?.message || "erro desconhecido") };
   }

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { createSequence, generateSequenceAI, type StepInput } from "@/app/dashboard/cadencias/actions";
+import { useState, useTransition, useEffect, useRef } from "react";
+import { createSequence, generateSequenceAI, loadAiContext, saveAiContext, type StepInput } from "@/app/dashboard/cadencias/actions";
 import type { Channel } from "@/lib/cadence";
 
 const CHANNELS: { v: Channel; l: string }[] = [
@@ -21,29 +21,76 @@ export default function SequenceBuilder() {
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
-  // IA
+  // IA — briefing rico
   const [aiOpen, setAiOpen] = useState(false);
-  const [market, setMarket] = useState("");
-  const [product, setProduct] = useState("");
-  const [icp, setIcp] = useState("");
+  const [brief, setBrief] = useState({
+    market: "", product: "", icp: "", tone: "", pain: "", proof: "", goal: "", cta: "", avoid: "", steps: 5,
+    channels: ["email", "whatsapp", "linkedin"] as string[],
+  });
+  const [ctxLoaded, setCtxLoaded] = useState(false);
   const [aiMsg, setAiMsg] = useState<string | null>(null);
   const [aiPending, startAi] = useTransition();
+
+  function bf(k: string, v: string | number | string[]) {
+    setBrief((s) => ({ ...s, [k]: v }));
+  }
+  function toggleChannel(ch: string) {
+    setBrief((s) => ({ ...s, channels: s.channels.includes(ch) ? s.channels.filter((c) => c !== ch) : [...s.channels, ch] }));
+  }
+
+  // ao abrir o painel, puxa o contexto salvo no negócio
+  useEffect(() => {
+    if (aiOpen && !ctxLoaded) {
+      loadAiContext().then((res: any) => {
+        const c = res?.context || {};
+        setBrief((s) => ({ ...s, ...c, steps: c.steps || s.steps, channels: c.channels?.length ? c.channels : s.channels }));
+        setCtxLoaded(true);
+      });
+    }
+  }, [aiOpen, ctxLoaded]);
 
   function generateAI() {
     setAiMsg(null);
     startAi(async () => {
-      const res = (await generateSequenceAI({ market, product, icp })) as { steps?: StepInput[]; error?: string };
+      const res = (await generateSequenceAI(brief)) as { steps?: StepInput[]; error?: string };
       if (res?.error) setAiMsg(res.error);
       else if (res?.steps?.length) {
         setSteps(res.steps);
-        if (!name && market) setName(`Cadência — ${market}`.slice(0, 60));
+        if (!name && brief.market) setName(`Cadência — ${brief.market}`.slice(0, 60));
         setAiOpen(false);
       }
+    });
+  }
+  function saveContext() {
+    setAiMsg(null);
+    startAi(async () => {
+      const res = (await saveAiContext(brief)) as { ok?: boolean; error?: string };
+      setAiMsg(res?.error ? res.error : "✓ Contexto salvo no negócio (reusado nas próximas gerações).");
     });
   }
 
   function update(i: number, patch: Partial<StepInput>) {
     setSteps((s) => s.map((st, idx) => (idx === i ? { ...st, ...patch } : st)));
+  }
+
+  // refs dos corpos + inserir variável no cursor
+  const bodyRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
+  function insertVar(i: number, v: string) {
+    const token = `{{${v}}}`;
+    const el = bodyRefs.current[i];
+    const cur = steps[i]?.body || "";
+    if (!el) {
+      update(i, { body: cur + token });
+      return;
+    }
+    const start = el.selectionStart ?? cur.length;
+    const end = el.selectionEnd ?? cur.length;
+    const next = cur.slice(0, start) + token + cur.slice(end);
+    update(i, { body: next });
+    requestAnimationFrame(() => {
+      el.focus();
+      el.selectionStart = el.selectionEnd = start + token.length;
+    });
   }
   function add() {
     setSteps((s) => [...s, { ...emptyStep(), delay_days: 2 }]);
@@ -83,16 +130,49 @@ export default function SequenceBuilder() {
           </button>
         ) : (
           <div>
-            <p className="text-sm font-semibold">Descreva e a IA monta a cadência</p>
+            <p className="text-sm font-semibold">Contexto para a IA montar a cadência</p>
+            <p className="mt-0.5 text-xs text-subtle">Quanto mais contexto, melhor a cadência. Puxamos o que já está salvo no seu negócio.</p>
+
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <input className="input" value={market} onChange={(e) => setMarket(e.target.value)} placeholder="Mercado (ex.: contadores)" />
-              <input className="input" value={product} onChange={(e) => setProduct(e.target.value)} placeholder="Seu produto/serviço" />
-              <input className="input" value={icp} onChange={(e) => setIcp(e.target.value)} placeholder="Cliente ideal (ICP)" />
+              <input className="input" value={brief.market} onChange={(e) => bf("market", e.target.value)} placeholder="Mercado-alvo (ex.: contadores SP)" />
+              <input className="input" value={brief.product} onChange={(e) => bf("product", e.target.value)} placeholder="Seu produto/serviço" />
+              <input className="input" value={brief.icp} onChange={(e) => bf("icp", e.target.value)} placeholder="Cliente ideal (cargo, porte)" />
             </div>
-            {aiMsg && <p className="mt-2 text-sm text-danger">{aiMsg}</p>}
-            <div className="mt-3 flex gap-2">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <textarea className="input min-h-[52px]" value={brief.pain} onChange={(e) => bf("pain", e.target.value)} placeholder="Dor que você resolve (o problema do cliente)" />
+              <textarea className="input min-h-[52px]" value={brief.proof} onChange={(e) => bf("proof", e.target.value)} placeholder="Prova / diferencial (resultado, número, case real)" />
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <input className="input" value={brief.tone} onChange={(e) => bf("tone", e.target.value)} placeholder="Tom de voz (ex.: consultivo, direto)" />
+              <input className="input" value={brief.goal} onChange={(e) => bf("goal", e.target.value)} placeholder="Objetivo (ex.: agendar diagnóstico)" />
+              <input className="input" value={brief.cta} onChange={(e) => bf("cta", e.target.value)} placeholder="CTA preferido (ex.: 15 min esta semana)" />
+            </div>
+            <div className="mt-3">
+              <textarea className="input min-h-[44px]" value={brief.avoid} onChange={(e) => bf("avoid", e.target.value)} placeholder="Nunca dizer / evitar (ex.: promessas de resultado, termos proibidos)" />
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-4">
+              <label className="flex items-center gap-2 text-xs text-subtle">
+                Passos
+                <input type="number" min={3} max={8} className="input w-16 py-1" value={brief.steps} onChange={(e) => bf("steps", Number(e.target.value))} />
+              </label>
+              <div className="flex flex-wrap gap-3 text-xs">
+                {["email", "whatsapp", "linkedin", "call"].map((ch) => (
+                  <label key={ch} className="flex items-center gap-1.5">
+                    <input type="checkbox" checked={brief.channels.includes(ch)} onChange={() => toggleChannel(ch)} />
+                    {ch === "call" ? "ligação" : ch}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {aiMsg && <p className={`mt-2 text-sm ${aiMsg.startsWith("✓") ? "text-signal" : "text-danger"}`}>{aiMsg}</p>}
+            <div className="mt-3 flex flex-wrap gap-2">
               <button className="btn-brand py-1.5 text-sm" onClick={generateAI} disabled={aiPending}>
                 {aiPending ? "Gerando..." : "Gerar rascunho"}
+              </button>
+              <button className="btn-ghost py-1.5 text-sm" onClick={saveContext} disabled={aiPending} title="Salva o contexto no negócio para reusar">
+                Salvar contexto
               </button>
               <button className="btn-ghost py-1.5 text-sm" onClick={() => setAiOpen(false)}>
                 Cancelar
@@ -155,12 +235,26 @@ export default function SequenceBuilder() {
                 placeholder="Assunto do e-mail"
               />
             )}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-subtle">Inserir:</span>
+              {["primeiro_nome", "empresa"].map((v) => (
+                <button key={v} type="button" className="rounded-lg border border-line px-2 py-0.5 text-xs hover:bg-muted" onClick={() => insertVar(i, v)}>
+                  {`{{${v}}}`}
+                </button>
+              ))}
+            </div>
             <textarea
-              className="input mt-2 min-h-[70px]"
+              ref={(el) => { bodyRefs.current[i] = el; }}
+              className="input mt-1 min-h-[70px]"
               value={s.body}
               onChange={(e) => update(i, { body: e.target.value })}
               placeholder="Mensagem. Use {{primeiro_nome}}, {{empresa}}..."
             />
+            {s.body.trim() && (
+              <p className="mt-1 text-xs text-subtle">
+                Prévia: {s.body.replace(/\{\{\s*primeiro_nome\s*\}\}/g, "João").replace(/\{\{\s*empresa\s*\}\}/g, "Empresa X")}
+              </p>
+            )}
           </div>
         ))}
         <button className="btn-ghost" onClick={add}>
