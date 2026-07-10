@@ -6,14 +6,15 @@ export const dynamic = "force-dynamic";
 export default async function Pipeline() {
   const supabase = createClient();
 
-  const [{ data: stages }, { data: opps }, { data: contacts }, { data: accounts }] = await Promise.all([
+  const [{ data: stages }, { data: opps }, { data: contacts }, { data: accounts }, { data: products }] = await Promise.all([
     supabase.from("pipeline_stages").select("id, name, position, is_won, is_lost").order("position", { ascending: true }),
     supabase
       .from("opportunities")
-      .select("id, title, value_mrr, stage_id, status, primary_contact_id, account_id, contacts:primary_contact_id(name, score)")
+      .select("id, title, value_mrr, stage_id, status, primary_contact_id, account_id, product_id, contacts:primary_contact_id(name, score)")
       .order("created_at", { ascending: false }),
     supabase.from("contacts").select("id, name").order("created_at", { ascending: false }).limit(500),
     supabase.from("accounts").select("id, name").order("created_at", { ascending: false }).limit(500),
+    supabase.from("products").select("id, name, kind, billing, price").eq("active", true).order("name", { ascending: true }),
   ]);
 
   const oppList = (opps as any[]) || [];
@@ -60,6 +61,7 @@ export default async function Pipeline() {
       stage_id: o.stage_id,
       status: o.status,
       account_id: o.account_id ?? null,
+      product_id: o.product_id ?? null,
       contact_id: cid,
       contact_name: o.contacts?.name ?? null,
       contact_score: o.contacts?.score ?? 0,
@@ -82,6 +84,7 @@ export default async function Pipeline() {
           opportunities={opportunities}
           contacts={(contacts as { id: string; name: string }[]) || []}
           accounts={(accounts as { id: string; name: string }[]) || []}
+          products={(products as any[]) || []}
           allTags={(allTags as any[]) || []}
         />
       </div>

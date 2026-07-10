@@ -36,7 +36,7 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
     : { data: [] as any[] };
 
   // queries — aplicam filtro de vendedor quando houver
-  let oppsQ = supabase.from("opportunities").select("stage_id, status, value_mrr, owner_id, created_at, updated_at, loss_reason");
+  let oppsQ = supabase.from("opportunities").select("stage_id, status, value_mrr, owner_id, created_at, updated_at, loss_reason, product_id, products(name)");
   if (vendedor) oppsQ = oppsQ.eq("owner_id", vendedor);
 
   let evsQ = supabase.from("events").select("type, created_at, contact_id").gte("created_at", sinceISO);
@@ -91,6 +91,14 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
     lossReasons[r] = (lossReasons[r] || 0) + 1;
   }
   const lossTop = Object.entries(lossReasons).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  // receita por produto (soma do MRR ganho por produto vinculado)
+  const revByProduct: Record<string, number> = {};
+  for (const o of won) {
+    const pname = (o as any).products?.name || "Sem produto";
+    revByProduct[pname] = (revByProduct[pname] || 0) + Number(o.value_mrr || 0);
+  }
+  const revProductTop = Object.entries(revByProduct).sort((a, b) => b[1] - a[1]).slice(0, 6);
 
   // conversão por estágio: quantos ainda estão vs. já passaram (aprox. pelo funil aberto)
   const funnelConv = stageList
@@ -248,6 +256,22 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
           </div>
         </div>
       </div>
+
+      {/* Receita por produto */}
+      {revProductTop.length > 0 && (
+        <div className="card mt-4 p-5">
+          <h2 className="font-display text-lg font-bold">Receita por produto</h2>
+          <p className="text-xs text-subtle">MRR ganho por produto/serviço vinculado às oportunidades.</p>
+          <div className="mt-3 space-y-2">
+            {revProductTop.map(([name, val]) => (
+              <div key={name} className="flex items-center justify-between text-sm">
+                <span>{name}</span>
+                <span className="font-semibold text-signal">{brl(val)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {isManager && !vendedor && memberList.length > 1 && (
         <p className="mt-6 text-xs text-subtle">Dica: selecione um vendedor acima para ver o funil, a atividade e as reuniões individuais dele.</p>

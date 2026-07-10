@@ -22,6 +22,7 @@ export async function createOpportunity(input: {
   stage_id: string | null;
   primary_contact_id: string | null;
   account_id?: string | null;
+  product_id?: string | null;
 }) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace atribuído." };
@@ -35,6 +36,7 @@ export async function createOpportunity(input: {
     stage_id: input.stage_id,
     primary_contact_id: input.primary_contact_id,
     account_id: input.account_id || null,
+    product_id: input.product_id || null,
     status: "open",
   });
   if (error) return { error: error.message };
@@ -44,7 +46,7 @@ export async function createOpportunity(input: {
 
 // Edita os dados de uma oportunidade (título, valor, contato, empresa).
 export async function updateOpportunity(id: string, patch: {
-  title?: string; value_mrr?: number; primary_contact_id?: string | null; account_id?: string | null;
+  title?: string; value_mrr?: number; primary_contact_id?: string | null; account_id?: string | null; product_id?: string | null;
 }) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
@@ -56,6 +58,7 @@ export async function updateOpportunity(id: string, patch: {
   if (patch.value_mrr !== undefined) clean.value_mrr = Number(patch.value_mrr) || 0;
   if (patch.primary_contact_id !== undefined) clean.primary_contact_id = patch.primary_contact_id || null;
   if (patch.account_id !== undefined) clean.account_id = patch.account_id || null;
+  if (patch.product_id !== undefined) clean.product_id = patch.product_id || null;
   const { error } = await supabase.from("opportunities").update(clean).eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/dashboard/pipeline");
