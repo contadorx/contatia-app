@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import Link from "next/link";
 import ContactTools from "@/components/ContactTools";
 import EnrollButton from "@/components/EnrollButton";
 
@@ -48,7 +49,11 @@ export default async function Contatos() {
             <tbody>
               {contacts.map((c) => (
                 <tr key={c.id} className="border-b border-line last:border-0 hover:bg-muted">
-                  <td className="px-4 py-3 font-medium">{c.name}</td>
+                  <td className="px-4 py-3 font-medium">
+                    <Link href={`/dashboard/contatos/${c.id}`} className="text-brand-dark hover:underline">
+                      {c.name}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3 text-subtle">{c.company || "—"}</td>
                   <td className="px-4 py-3 text-subtle">{c.email || c.phone || "—"}</td>
                   <td className="px-4 py-3">
