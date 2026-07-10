@@ -140,3 +140,13 @@ export async function saveBusinessProfile(input: {
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
+
+// Salva a assinatura de e-mail do negócio (owner).
+export async function saveSignature(signature: string) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { error } = await supabase.from("tenants").update({ email_signature: signature.trim() || null }).eq("id", tenant_id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/config");
+  return { ok: true };
+}

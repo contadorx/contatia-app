@@ -5,6 +5,7 @@ import WebToLeadSnippet from "@/components/WebToLeadSnippet";
 import AiSettingsForm from "@/components/AiSettingsForm";
 import WhatsAppConnect from "@/components/WhatsAppConnect";
 import BusinessProfileForm from "@/components/BusinessProfileForm";
+import SignatureForm from "@/components/SignatureForm";
 import ConfigTabs from "@/components/ConfigTabs";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ export default async function Config() {
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("inbound_token, ai_model, ai_api_key, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color")
+    .select("inbound_token, ai_model, ai_api_key, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature")
     .maybeSingle();
   const inboundToken = (tenant as any)?.inbound_token as string | undefined;
   const aiModel = ((tenant as any)?.ai_model as string) || "";
@@ -50,6 +51,12 @@ export default async function Config() {
           <p className="text-sm text-subtle">Identidade e marca do workspace — usadas nos entregáveis white-label.</p>
           <div className="card mt-3 p-5">
             <BusinessProfileForm biz={(tenant as any) || {}} canEdit={isOwner} />
+          </div>
+
+          <p className="mt-6 text-sm font-semibold">Assinatura de e-mail</p>
+          <p className="text-sm text-subtle">Anexada ao fim dos e-mails enviados pela fila.</p>
+          <div className="card mt-2 p-5">
+            <SignatureForm initial={((tenant as any)?.email_signature as string) || ""} />
           </div>
         </div>
 

@@ -109,12 +109,23 @@ export async function enrollContact(contactId: string, sequenceId: string) {
   return { ok: true, count: tasks.length };
 }
 
-// Gera uma cadência com IA a partir de um briefing (a IA rascunha; humano aprova).
-export async function generateSequenceAI(brief: { market: string; product: string; icp: string; tone?: string }) {
+// Gera uma cadência com IA a partir de um briefing rico (a IA rascunha; humano aprova).
+export async function generateSequenceAI(brief: {
+  market: string;
+  product: string;
+  icp: string;
+  tone?: string;
+  pain?: string;
+  proof?: string;
+  goal?: string;
+  cta?: string;
+  avoid?: string;
+  steps?: number;
+  channels?: string[];
+}) {
   if (!brief.market?.trim() || !brief.product?.trim()) {
     return { error: "Descreva ao menos o mercado e o produto." };
   }
-  // config de IA do workspace (fallback pro ambiente dentro do helper)
   const supabase = createClient();
   const { data: tenant } = await supabase.from("tenants").select("ai_model, ai_api_key").maybeSingle();
   const { generateSequence } = await import("@/lib/anthropic");
@@ -122,4 +133,29 @@ export async function generateSequenceAI(brief: { market: string; product: strin
     apiKey: (tenant as any)?.ai_api_key || undefined,
     model: (tenant as any)?.ai_model || undefined,
   });
+}
+
+// Carrega o contexto salvo do negócio (para pré-preencher o painel de IA).
+export async function loadAiContext() {
+  const supabase = createClient();
+  const { data: tenant } = await supabase.from("tenants").select("ai_context, segment, legal_name").maybeSingle();
+  const ctx = ((tenant as any)?.ai_context as Record<string, unknown>) || {};
+  // sugestões da ficha do negócio quando o contexto ainda está vazio
+  if (!ctx.market && (tenant as any)?.segment) ctx.market = (tenant as any).segment;
+  if (!ctx.product && (tenant as any)?.legal_name) ctx.product = "";
+  return { context: ctx };
+}
+
+// Salva o contexto rico no negócio para reuso.
+export async function saveAiContext(context: Record<string, unknown>) {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: profile } = await supabase.from("profiles").select("tenant_id").eq("id", user?.id ?? "").maybeSingle();
+  const tenant_id = profile?.tenant_id as string | undefined;
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { error } = await supabase.from("tenants").update({ ai_context: context }).eq("id", tenant_id);
+  if (error) return { error: error.message };
+  return { ok: true };
 }
