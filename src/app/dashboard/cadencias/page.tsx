@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import SequenceBuilder from "@/components/SequenceBuilder";
+import { TemplateGallery, SaveAsTemplateButton } from "@/components/TemplateGallery";
+import { listTemplates } from "@/app/dashboard/cadencias/actions";
 import { channelLabel, type Channel } from "@/lib/cadence";
 
 export const dynamic = "force-dynamic";
@@ -7,24 +9,28 @@ export const dynamic = "force-dynamic";
 export default async function Cadencias() {
   const supabase = createClient();
 
-  const { data: sequences } = await supabase
-    .from("sequences")
-    .select("id, name, audience, is_active, created_at, sequence_steps(channel, position)")
-    .order("created_at", { ascending: false });
+  const [{ data: sequences }, { templates }] = await Promise.all([
+    supabase
+      .from("sequences")
+      .select("id, name, audience, is_active, created_at, sequence_steps(channel, position)")
+      .order("created_at", { ascending: false }),
+    listTemplates(),
+  ]);
 
   return (
     <div>
       <h1 className="font-display text-2xl font-bold">Cadências</h1>
       <p className="mt-1 text-sm text-subtle">As sequências multicanal que alimentam a fila do &ldquo;Hoje&rdquo;.</p>
 
-      <div className="mt-6">
+      <div className="mt-6 flex flex-wrap gap-2">
         <SequenceBuilder />
+        <TemplateGallery templates={(templates as any[]) || []} />
       </div>
 
       <div className="mt-6 space-y-3">
         {!sequences?.length ? (
           <div className="card p-10 text-center text-sm text-subtle">
-            Nenhuma sequência ainda. Crie a primeira acima.
+            Nenhuma sequência ainda. Crie a primeira acima — do zero, com IA, ou a partir de um template.
           </div>
         ) : (
           sequences.map((s) => {
@@ -41,6 +47,9 @@ export default async function Cadencias() {
                       .map((st) => channelLabel[st.channel as Channel])
                       .join(" → ")}
                   </p>
+                  <div className="mt-2">
+                    <SaveAsTemplateButton sequenceId={s.id} />
+                  </div>
                 </div>
                 <span
                   className={`rounded-full px-3 py-1 text-xs font-semibold ${

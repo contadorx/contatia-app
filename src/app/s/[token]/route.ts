@@ -43,6 +43,15 @@ export async function GET(_req: Request, { params }: { params: { token: string }
       .from("contacts")
       .update({ score: (c?.score || 0) + (POINTS["doc_opened"] || 15), last_activity_at: new Date().toISOString() })
       .eq("id", (share as any).contact_id);
+
+    // automações: abriu proposta + (talvez) cruzou limiar de score
+    try {
+      const { runAutomations } = await import("@/lib/automations");
+      await runAutomations(admin, { tenantId: (share as any).tenant_id, contactId: (share as any).contact_id, trigger: "doc_opened" });
+      await runAutomations(admin, { tenantId: (share as any).tenant_id, contactId: (share as any).contact_id, trigger: "score_gte" });
+    } catch {
+      /* automação não deve quebrar o rastreio */
+    }
   }
 
   if (url) return NextResponse.redirect(url);

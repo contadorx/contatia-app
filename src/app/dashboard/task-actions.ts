@@ -69,6 +69,12 @@ export async function markReplied(contactId: string) {
     await supabase.from("tasks").update({ status: "skipped" }).in("enrollment_id", ids).eq("status", "pending");
   }
   await scoreEvent(supabase, { tenant_id, contact_id: contactId, type: "replied" });
+  try {
+    const { runAutomations } = await import("@/lib/automations");
+    await runAutomations(supabase, { tenantId: tenant_id, contactId, trigger: "replied" });
+  } catch {
+    /* automação não deve quebrar o fluxo */
+  }
   revalidatePath("/dashboard");
   return { ok: true };
 }

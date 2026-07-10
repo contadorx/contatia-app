@@ -22,6 +22,7 @@ const groups: { title?: string; items: { href: string; label: string; primary?: 
     title: "Biblioteca",
     items: [
       { href: "/dashboard/cadencias", label: "Cadências" },
+      { href: "/dashboard/automacoes", label: "Automações" },
       { href: "/dashboard/propostas", label: "Propostas" },
       { href: "/dashboard/reunioes", label: "Reuniões" },
     ],

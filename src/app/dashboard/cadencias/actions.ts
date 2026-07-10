@@ -159,3 +159,65 @@ export async function saveAiContext(context: Record<string, unknown>) {
   if (error) return { error: error.message };
   return { ok: true };
 }
+
+// Lista templates disponíveis (globais + do tenant).
+export async function listTemplates() {
+  const { supabase } = await ctx();
+  const { data } = await supabase
+    .from("sequence_templates")
+    .select("id, name, audience, description, steps, is_global")
+    .order("is_global", { ascending: false })
+    .order("created_at", { ascending: false });
+  return { templates: (data as any[]) || [] };
+}
+
+// Cria uma cadência a partir de um template (clona os passos).
+export async function createFromTemplate(templateId: string) {
+  const { supabase } = await ctx();
+  const { data: tpl } = await supabase
+    .from("sequence_templates")
+    .select("name, audience, steps")
+    .eq("id", templateId)
+    .maybeSingle();
+  if (!tpl) return { error: "Template não encontrado." };
+  const steps = (((tpl as any).steps as any[]) || []).map((s) => ({
+    channel: s.channel,
+    delay_days: Number(s.delay_days) || 0,
+    subject: s.subject || "",
+    body: s.body || "",
+  }));
+  if (!steps.length) return { error: "Template sem passos." };
+  return await createSequence({ name: (tpl as any).name, audience: (tpl as any).audience || "", steps });
+}
+
+// Salva uma cadência existente como template do tenant.
+export async function saveAsTemplate(sequenceId: string, description?: string) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { data: seq } = await supabase.from("sequences").select("name, audience").eq("id", sequenceId).maybeSingle();
+  if (!seq) return { error: "Cadência não encontrada." };
+  const { data: steps } = await supabase
+    .from("sequence_steps")
+    .select("channel, delay_days, subject, body_template")
+    .eq("sequence_id", sequenceId)
+    .order("position", { ascending: true });
+  const stepsJson = (((steps as any[]) || []).map((s) => ({
+    channel: s.channel,
+    delay_days: s.delay_days,
+    subject: s.subject || "",
+    body: s.body_template || "",
+  })));
+  if (!stepsJson.length) return { error: "Cadência sem passos." };
+  const { error } = await supabase.from("sequence_templates").insert({
+    tenant_id,
+    name: (seq as any).name,
+    audience: (seq as any).audience,
+    description: description || null,
+    steps: stepsJson,
+    is_global: false,
+    created_by: user_id,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/cadencias");
+  return { ok: true };
+}
