@@ -10,7 +10,8 @@ export default async function Contatos() {
   const [{ data: contacts }, { data: sequences }] = await Promise.all([
     supabase
       .from("contacts")
-      .select("id, name, email, phone, company, origin, status, created_at")
+      .select("id, name, email, phone, company, origin, status, score, created_at")
+      .order("score", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(200),
     supabase.from("sequences").select("id, name").eq("is_active", true).order("created_at", { ascending: false }),
@@ -40,6 +41,7 @@ export default async function Contatos() {
                 <th className="px-4 py-3 font-medium">Empresa</th>
                 <th className="px-4 py-3 font-medium">Contato</th>
                 <th className="px-4 py-3 font-medium">Origem</th>
+                <th className="px-4 py-3 font-medium">Score</th>
                 <th className="px-4 py-3 font-medium text-right">Ação</th>
               </tr>
             </thead>
@@ -55,6 +57,11 @@ export default async function Contatos() {
                     ) : (
                       "—"
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`text-sm font-semibold ${(c.score ?? 0) >= 25 ? "text-warn" : "text-subtle"}`}>
+                      {c.score ?? 0}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <EnrollButton contactId={c.id} sequences={seqs} />

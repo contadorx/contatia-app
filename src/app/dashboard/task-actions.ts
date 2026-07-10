@@ -2,28 +2,35 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { scoreEvent } from "@/lib/scoring";
 
-async function withUser() {
+async function ctx() {
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  return { supabase, user_id: user?.id };
+  const { data } = await supabase
+    .from("profiles")
+    .select("tenant_id")
+    .eq("id", user?.id ?? "")
+    .maybeSingle();
+  return { supabase, tenant_id: (data?.tenant_id as string) || null, user_id: user?.id };
 }
 
-export async function completeTask(id: string) {
-  const { supabase } = await withUser();
+export async function completeTask(id: string, contactId?: string) {
+  const { supabase, tenant_id } = await ctx();
   const { error } = await supabase
     .from("tasks")
     .update({ status: "done", completed_at: new Date().toISOString() })
     .eq("id", id);
   if (error) return { error: error.message };
+  if (tenant_id && contactId) await scoreEvent(supabase, { tenant_id, contact_id: contactId, type: "task_done" });
   revalidatePath("/dashboard");
   return { ok: true };
 }
 
 export async function skipTask(id: string) {
-  const { supabase } = await withUser();
+  const { supabase } = await ctx();
   const { error } = await supabase.from("tasks").update({ status: "skipped" }).eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/dashboard");
@@ -31,7 +38,7 @@ export async function skipTask(id: string) {
 }
 
 export async function snoozeTask(id: string, days: number) {
-  const { supabase } = await withUser();
+  const { supabase } = await ctx();
   const d = new Date();
   d.setDate(d.getDate() + (days || 1));
   const { error } = await supabase
@@ -43,25 +50,37 @@ export async function snoozeTask(id: string, days: number) {
   return { ok: true };
 }
 
+// Marca que o contato RESPONDEU: pausa a(s) sequência(s), cancela toques futuros
+// pendentes e pontua alto (fica quente). É o "respondeu → pausa" manual (WhatsApp/
+// ligação/LinkedIn) enquanto a detecção automática de e-mail não entra.
+export async function markReplied(contactId: string) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const { data: enrs } = await supabase
+    .from("enrollments")
+    .select("id")
+    .eq("contact_id", contactId)
+    .eq("status", "active");
+  const ids = ((enrs as any[]) || []).map((e) => e.id);
+  if (ids.length) {
+    await supabase.from("enrollments").update({ status: "replied" }).in("id", ids);
+    await supabase.from("tasks").update({ status: "skipped" }).in("enrollment_id", ids).eq("status", "pending");
+  }
+  await scoreEvent(supabase, { tenant_id, contact_id: contactId, type: "replied" });
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
 // ---- Envio de e-mail real (SMTP/Gmail) a partir de uma tarefa da fila ----
 export async function sendEmailTask(taskId: string) {
   const { sendEmail } = await import("@/lib/mailer");
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("tenant_id")
-    .eq("id", user?.id ?? "")
-    .maybeSingle();
-  const tenant_id = profile?.tenant_id as string | undefined;
+  const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
 
-  // tarefa + contato
   const { data: task } = await supabase
     .from("tasks")
-    .select("id, channel, title, generated_content, contacts(email, name)")
+    .select("id, channel, title, generated_content, contact_id, contacts(email, name)")
     .eq("id", taskId)
     .single();
   if (!task) return { error: "Tarefa não encontrada." };
@@ -69,7 +88,6 @@ export async function sendEmailTask(taskId: string) {
   const to = (task as any).contacts?.email as string | undefined;
   if (!to) return { error: "Contato sem e-mail." };
 
-  // caixa ativa (com segredos — só no servidor)
   const { data: acct } = await supabase
     .from("email_accounts")
     .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap")
@@ -79,7 +97,6 @@ export async function sendEmailTask(taskId: string) {
     .maybeSingle();
   if (!acct) return { error: "Nenhuma caixa de e-mail conectada. Configure em Config." };
 
-  // cap diário (Envio Seguro): conta e-mails já enviados hoje por esta caixa
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   const { count } = await supabase
@@ -93,19 +110,15 @@ export async function sendEmailTask(taskId: string) {
   }
 
   try {
-    await sendEmail(acct as any, {
-      to,
-      subject: task.title || "",
-      text: task.generated_content || "",
-    });
+    await sendEmail(acct as any, { to, subject: task.title || "", text: task.generated_content || "" });
   } catch (e: any) {
     return { error: "Falha no envio: " + (e?.message || "erro desconhecido") };
   }
 
-  // marca feita + registra evento (alimenta cap e, no futuro, o score)
   await supabase.from("tasks").update({ status: "done", completed_at: new Date().toISOString() }).eq("id", taskId);
-  await supabase.from("events").insert({
+  await scoreEvent(supabase, {
     tenant_id,
+    contact_id: (task as any).contact_id,
     type: "email_sent",
     email_account_id: (acct as any).id,
     meta: { to },
