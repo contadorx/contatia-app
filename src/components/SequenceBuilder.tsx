@@ -139,8 +139,14 @@ export default function SequenceBuilder() {
               <input className="input" value={brief.icp} onChange={(e) => bf("icp", e.target.value)} placeholder="Cliente ideal (cargo, porte)" />
             </div>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <textarea className="input min-h-[52px]" value={brief.pain} onChange={(e) => bf("pain", e.target.value)} placeholder="Dor que você resolve (o problema do cliente)" />
-              <textarea className="input min-h-[52px]" value={brief.proof} onChange={(e) => bf("proof", e.target.value)} placeholder="Prova / diferencial (resultado, número, case real)" />
+              <div>
+                <label className="label">Dor que você resolve</label>
+                <textarea className="input mt-1 min-h-[110px] leading-relaxed" value={brief.pain} onChange={(e) => bf("pain", e.target.value)} placeholder="O problema concreto do cliente e por que dói. Quanto mais específico, melhor a cadência." />
+              </div>
+              <div>
+                <label className="label">Prova / diferencial</label>
+                <textarea className="input mt-1 min-h-[110px] leading-relaxed" value={brief.proof} onChange={(e) => bf("proof", e.target.value)} placeholder="Resultado, número ou case real que sustenta sua promessa (sem exagerar)." />
+              </div>
             </div>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <input className="input" value={brief.tone} onChange={(e) => bf("tone", e.target.value)} placeholder="Tom de voz (ex.: consultivo, direto)" />
@@ -148,7 +154,8 @@ export default function SequenceBuilder() {
               <input className="input" value={brief.cta} onChange={(e) => bf("cta", e.target.value)} placeholder="CTA preferido (ex.: 15 min esta semana)" />
             </div>
             <div className="mt-3">
-              <textarea className="input min-h-[44px]" value={brief.avoid} onChange={(e) => bf("avoid", e.target.value)} placeholder="Nunca dizer / evitar (ex.: promessas de resultado, termos proibidos)" />
+              <label className="label">Nunca dizer / evitar</label>
+              <textarea className="input mt-1 min-h-[80px] leading-relaxed" value={brief.avoid} onChange={(e) => bf("avoid", e.target.value)} placeholder="Promessas proibidas, termos a evitar, restrições de compliance." />
             </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-4">
@@ -245,7 +252,7 @@ export default function SequenceBuilder() {
             </div>
             <textarea
               ref={(el) => { bodyRefs.current[i] = el; }}
-              className="input mt-1 min-h-[70px]"
+              className="input mt-1 min-h-[150px] leading-relaxed"
               value={s.body}
               onChange={(e) => update(i, { body: e.target.value })}
               placeholder="Mensagem. Use {{primeiro_nome}}, {{empresa}}..."

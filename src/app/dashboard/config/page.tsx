@@ -45,7 +45,7 @@ export default async function Config() {
       <h1 className="font-display text-2xl font-bold">Configurações</h1>
       <p className="mt-1 mb-6 text-sm text-subtle">A ficha do seu negócio, os canais de envio e as integrações.</p>
 
-      <ConfigTabs tabs={["Negócio", "E-mail", "WhatsApp", "IA", "Captação"]}>
+      <ConfigTabs tabs={["Negócio", "E-mail", "WhatsApp", "Captação"]}>
         {/* Negócio */}
         <div>
           <p className="text-sm text-subtle">Identidade e marca do workspace — usadas nos entregáveis white-label.</p>
@@ -57,6 +57,12 @@ export default async function Config() {
           <p className="text-sm text-subtle">Anexada ao fim dos e-mails enviados pela fila.</p>
           <div className="card mt-2 p-5">
             <SignatureForm initial={((tenant as any)?.email_signature as string) || ""} />
+          </div>
+
+          <p className="mt-6 text-sm font-semibold">Inteligência (IA)</p>
+          <p className="text-sm text-subtle">Modelo e chave usados pelo &ldquo;Gerar cadência com IA&rdquo;. Definidos aqui, valem sem mexer no ambiente.</p>
+          <div className="card mt-2 p-5">
+            <AiSettingsForm currentModel={aiModel} hasKey={aiHasKey} />
           </div>
         </div>
 
@@ -101,6 +107,7 @@ export default async function Config() {
             <div className="card p-5">
               <p className="text-sm font-semibold">Outro provedor (SMTP)</p>
               <p className="mt-1 text-xs text-subtle">Outlook, servidor próprio, ou Gmail com senha de app.</p>
+              <p className="mt-1 text-xs text-subtle">Detecção automática de resposta (IMAP) fica dentro deste formulário — marque &ldquo;Detectar respostas&rdquo; ao conectar a caixa.</p>
               <div className="mt-3">
                 <SmtpForm />
               </div>
@@ -113,14 +120,6 @@ export default async function Config() {
           <p className="text-sm text-subtle">Conecte sua instância Evolution (você a hospeda). Envia da fila e detecta respostas via webhook.</p>
           <div className="card mt-3 p-5">
             <WhatsAppConnect accounts={(waAccounts as any[]) || []} />
-          </div>
-        </div>
-
-        {/* IA */}
-        <div>
-          <p className="text-sm text-subtle">Modelo e chave usados pelo &ldquo;Gerar cadência com IA&rdquo;. Definidos aqui, valem sem mexer no ambiente.</p>
-          <div className="card mt-3 p-5">
-            <AiSettingsForm currentModel={aiModel} hasKey={aiHasKey} />
           </div>
         </div>
 
