@@ -27,6 +27,16 @@ export default async function Propostas() {
   const shareList = (shares as any[]) || [];
   const trackingReady = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+  // retenção (política do plano) para avisar expiração dos arquivos
+  const { data: tnt } = await supabase.from("tenants").select("file_retention_months, platform_plans(file_retention_months)").maybeSingle();
+  const retMonths = Number((tnt as any)?.platform_plans?.file_retention_months ?? (tnt as any)?.file_retention_months ?? 6);
+  function expiryInfo(createdAt: string) {
+    const exp = new Date(createdAt);
+    exp.setMonth(exp.getMonth() + retMonths);
+    const days = Math.ceil((exp.getTime() - Date.now()) / 86400000);
+    return { days, date: exp.toLocaleDateString("pt-BR") };
+  }
+
   return (
     <div>
       <h1 className="font-display text-2xl font-bold">Propostas & documentos</h1>
@@ -64,6 +74,12 @@ export default async function Propostas() {
                   <div className="mt-1">
                     <ViewDocButton documentId={d.id} hasFile={!!d.storage_path} />
                   </div>
+                  {d.storage_path && (() => {
+                    const { days, date } = expiryInfo(d.created_at);
+                    if (days <= 0) return <p className="mt-1 text-xs font-semibold text-danger">⚠ Arquivo expirado — pode ter sido excluído</p>;
+                    if (days <= 30) return <p className="mt-1 text-xs font-semibold text-warn">⚠ Expira em {days} dia{days > 1 ? "s" : ""} ({date}) — baixe se precisar guardar</p>;
+                    return <p className="mt-1 text-[11px] text-subtle">Guardado até {date}</p>;
+                  })()}
                 </div>
               </div>
               <ShareControl documentId={d.id} contacts={contactList} />

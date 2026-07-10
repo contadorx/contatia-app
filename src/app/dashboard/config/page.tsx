@@ -6,7 +6,6 @@ import AiSettingsForm from "@/components/AiSettingsForm";
 import WhatsAppConnect from "@/components/WhatsAppConnect";
 import BusinessProfileForm from "@/components/BusinessProfileForm";
 import SignatureForm from "@/components/SignatureForm";
-import RetentionForm from "@/components/RetentionForm";
 import ConfigTabs from "@/components/ConfigTabs";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +26,7 @@ export default async function Config() {
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("inbound_token, ai_model, ai_api_key, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature, file_retention_months")
+    .select("inbound_token, ai_model, ai_api_key, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature, file_retention_months, platform_plans(name, file_retention_months)")
     .maybeSingle();
   const inboundToken = (tenant as any)?.inbound_token as string | undefined;
   const aiModel = ((tenant as any)?.ai_model as string) || "";
@@ -67,9 +66,22 @@ export default async function Config() {
           </div>
 
           <p className="mt-6 text-sm font-semibold">Retenção de arquivos</p>
-          <p className="text-sm text-subtle">Por quanto tempo os PDFs de proposta ficam guardados. Após o prazo, o arquivo é expurgado (o registro do documento permanece). LGPD e economia de storage.</p>
+          <p className="text-sm text-subtle">Os PDFs de proposta ficam guardados por um prazo definido pelo seu <b>plano</b>. Depois do prazo, o arquivo é automaticamente excluído (o registro do documento permanece no histórico) — por LGPD e economia de armazenamento.</p>
           <div className="card mt-2 p-5">
-            <RetentionForm initial={Number((tenant as any)?.file_retention_months ?? 6)} />
+            {(() => {
+              const planName = (tenant as any)?.platform_plans?.name as string | undefined;
+              const months = Number((tenant as any)?.platform_plans?.file_retention_months ?? (tenant as any)?.file_retention_months ?? 6);
+              return (
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm">Plano <b>{planName || "—"}</b></p>
+                    <p className="mt-0.5 text-2xl font-bold text-brand-dark">{months} meses</p>
+                    <p className="mt-1 text-xs text-subtle">Arquivos com mais de {months} meses são excluídos automaticamente. Baixe o que precisar guardar antes do prazo.</p>
+                  </div>
+                  <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-subtle">política do plano</span>
+                </div>
+              );
+            })()}
           </div>
         </div>
 
