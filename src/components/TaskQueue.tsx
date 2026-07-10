@@ -118,18 +118,19 @@ export default function TaskQueue({
       else setEditing((s) => { const n = { ...s }; delete n[id]; return n; });
     });
   }
-  function sendWa(id: string) {
+  function sendWa(id: string, body?: string) {
     setErr(null);
     start(async () => {
-      const res = (await sendWhatsAppTask(id)) as { error?: string } | undefined;
+      const res = (await sendWhatsAppTask(id, body)) as { error?: string } | undefined;
       if (res?.error) setErr(res.error);
+      else setEditing((s) => { const n = { ...s }; delete n[id]; return n; });
     });
   }
 
   // ação primária por canal (Enter)
   function primary(t: Task) {
     if (t.channel === "email" && t.contacts?.email) send(t.id, editing[t.id] ? { subject: editing[t.id].subject, body: editing[t.id].body } : undefined);
-    else if (t.channel === "whatsapp" && t.contacts?.phone) sendWa(t.id);
+    else if (t.channel === "whatsapp" && t.contacts?.phone) sendWa(t.id, editing[t.id] ? editing[t.id].body : undefined);
     else act(() => completeTask(t.id, t.contact_id ?? undefined));
   }
 
@@ -256,9 +257,12 @@ export default function TaskQueue({
 
               {t.channel === "whatsapp" && c?.phone && (
                 <>
-                  <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => sendWa(t.id)}>Enviar</button>
-                  {waLink(c.phone, content) && (
-                    <a className="text-xs text-subtle hover:text-ink" href={waLink(c.phone, content)} target="_blank" rel="noreferrer" title="Abrir no WhatsApp Web/app" onClick={(e) => e.stopPropagation()}>↗</a>
+                  <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={(e) => { e.stopPropagation(); setEditing((s) => s[t.id] ? (() => { const n = { ...s }; delete n[t.id]; return n; })() : { ...s, [t.id]: { subject: "", body: content } }); }}>
+                    {editing[t.id] ? "Fechar" : "Editar"}
+                  </button>
+                  <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => sendWa(t.id, editing[t.id] ? editing[t.id].body : undefined)}>Enviar</button>
+                  {waLink(c.phone, editing[t.id]?.body ?? content) && (
+                    <a className="text-xs text-subtle hover:text-ink" href={waLink(c.phone, editing[t.id]?.body ?? content)} target="_blank" rel="noreferrer" title="Abrir no WhatsApp Web/app" onClick={(e) => e.stopPropagation()}>↗</a>
                   )}
                 </>
               )}
@@ -319,6 +323,23 @@ export default function TaskQueue({
                 <p className="mt-1 text-xs text-subtle">A assinatura do negócio é anexada automaticamente no envio. Variáveis como {"{{primeiro_nome}}"} são resolvidas.</p>
                 <div className="mt-2 flex gap-2">
                   <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => send(t.id, { subject: editing[t.id].subject, body: editing[t.id].body })}>
+                    {pending ? "Enviando..." : "Enviar editado"}
+                  </button>
+                  <button className="btn-ghost py-1.5 text-xs" onClick={() => setEditing((s) => { const n = { ...s }; delete n[t.id]; return n; })}>Cancelar</button>
+                </div>
+              </div>
+            )}
+            {editing[t.id] && t.channel === "whatsapp" && (
+              <div className="mt-3 border-t border-line pt-3" onClick={(e) => e.stopPropagation()}>
+                <label className="label">Mensagem do WhatsApp</label>
+                <textarea
+                  className="input mt-1 min-h-[100px] text-sm"
+                  value={editing[t.id].body}
+                  onChange={(e) => setEditing((s) => ({ ...s, [t.id]: { ...s[t.id], body: e.target.value } }))}
+                />
+                <p className="mt-1 text-xs text-subtle">Edite antes de enviar. Vale tanto para o envio pela instância quanto para o link &ldquo;↗&rdquo;.</p>
+                <div className="mt-2 flex gap-2">
+                  <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => sendWa(t.id, editing[t.id].body)}>
                     {pending ? "Enviando..." : "Enviar editado"}
                   </button>
                   <button className="btn-ghost py-1.5 text-xs" onClick={() => setEditing((s) => { const n = { ...s }; delete n[t.id]; return n; })}>Cancelar</button>

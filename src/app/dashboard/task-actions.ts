@@ -164,10 +164,14 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
 }
 
 // Envia a tarefa de WhatsApp via Evolution API (caixa ativa do tenant), com cap diário.
-export async function sendWhatsAppTask(taskId: string) {
+export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
   const { sendText } = await import("@/lib/whatsapp");
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
+
+  if (overrideBody !== undefined) {
+    await supabase.from("tasks").update({ generated_content: overrideBody }).eq("id", taskId);
+  }
 
   const { data: task } = await supabase
     .from("tasks")
