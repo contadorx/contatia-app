@@ -42,6 +42,35 @@ export async function createOpportunity(input: {
   return { ok: true };
 }
 
+// Edita os dados de uma oportunidade (título, valor, contato, empresa).
+export async function updateOpportunity(id: string, patch: {
+  title?: string; value_mrr?: number; primary_contact_id?: string | null; account_id?: string | null;
+}) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const clean: Record<string, unknown> = {};
+  if (patch.title !== undefined) {
+    if (!patch.title.trim()) return { error: "O título não pode ficar vazio." };
+    clean.title = patch.title.trim();
+  }
+  if (patch.value_mrr !== undefined) clean.value_mrr = Number(patch.value_mrr) || 0;
+  if (patch.primary_contact_id !== undefined) clean.primary_contact_id = patch.primary_contact_id || null;
+  if (patch.account_id !== undefined) clean.account_id = patch.account_id || null;
+  const { error } = await supabase.from("opportunities").update(clean).eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/pipeline");
+  return { ok: true };
+}
+
+export async function deleteOpportunity(id: string) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { error } = await supabase.from("opportunities").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/pipeline");
+  return { ok: true };
+}
+
 export async function moveOpportunity(id: string, stageId: string) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };

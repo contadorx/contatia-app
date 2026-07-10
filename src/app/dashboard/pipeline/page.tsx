@@ -10,7 +10,7 @@ export default async function Pipeline() {
     supabase.from("pipeline_stages").select("id, name, position, is_won, is_lost").order("position", { ascending: true }),
     supabase
       .from("opportunities")
-      .select("id, title, value_mrr, stage_id, status, primary_contact_id, contacts:primary_contact_id(name, score)")
+      .select("id, title, value_mrr, stage_id, status, primary_contact_id, account_id, contacts:primary_contact_id(name, score)")
       .order("created_at", { ascending: false }),
     supabase.from("contacts").select("id, name").order("created_at", { ascending: false }).limit(500),
     supabase.from("accounts").select("id, name").order("created_at", { ascending: false }).limit(500),
@@ -59,6 +59,7 @@ export default async function Pipeline() {
       value_mrr: Number(o.value_mrr) || 0,
       stage_id: o.stage_id,
       status: o.status,
+      account_id: o.account_id ?? null,
       contact_id: cid,
       contact_name: o.contacts?.name ?? null,
       contact_score: o.contacts?.score ?? 0,
