@@ -114,7 +114,7 @@ export default async function Config() {
             <div className="card p-5">
               <p className="text-sm font-semibold">Outro provedor (SMTP)</p>
               <p className="mt-1 text-xs text-subtle">Outlook, servidor próprio, ou Gmail com senha de app.</p>
-              <p className="mt-1 text-xs text-subtle">Detecção automática de resposta (IMAP) fica dentro deste formulário — marque &ldquo;Detectar respostas&rdquo; ao conectar a caixa.</p>
+              <p className="mt-1 text-xs text-subtle">A <b>detecção de respostas por IMAP</b> tem uma seção própria dentro deste formulário — ative para a Contatia pausar a cadência sozinha quando o lead responder.</p>
               <div className="mt-3">
                 <SmtpForm />
               </div>

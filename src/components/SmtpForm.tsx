@@ -143,16 +143,30 @@ export default function SmtpForm() {
           <input type="password" className="input mt-1" value={f.smtp_pass} onChange={(e) => up("smtp_pass", e.target.value)} />
         </div>
       </div>
-      <div className="mt-4 rounded-xl bg-muted p-3">
-        <label className="flex items-center gap-2 text-sm font-medium">
-          <input type="checkbox" checked={f.detect_replies} onChange={(e) => up("detect_replies", e.target.checked)} />
-          Detectar respostas automaticamente (IMAP)
-        </label>
+      <div className="mt-5 rounded-xl border border-line bg-surface p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold">Detecção de respostas (IMAP)</p>
+            <p className="mt-0.5 text-xs text-subtle">
+              Quando o lead responde seu e-mail, a Contatia detecta e <b>pausa a cadência</b> automaticamente — sem você marcar na mão. Lê a caixa por IMAP uma vez por dia (no cron).
+            </p>
+          </div>
+          <label className="flex shrink-0 items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={f.detect_replies} onChange={(e) => up("detect_replies", e.target.checked)} />
+            {f.detect_replies ? "Ativado" : "Ativar"}
+          </label>
+        </div>
+
         {f.detect_replies && (
-          <div className="mt-3">
-            <label className="label">Host IMAP (se diferente do SMTP)</label>
-            <input className="input mt-1" value={f.imap_host} onChange={(e) => up("imap_host", e.target.value)} placeholder="ex.: imap.empresa.com.br (vazio = usa o host SMTP, porta 993)" />
-            <p className="mt-1 text-xs text-subtle">Usa o mesmo usuário/senha do envio. Não funciona em caixas de envio puro (ex.: Brevo).</p>
+          <div className="mt-3 border-t border-line pt-3">
+            <label className="label">Host IMAP</label>
+            <input className="input mt-1" value={f.imap_host} onChange={(e) => up("imap_host", e.target.value)} placeholder="ex.: imap.empresa.com.br" />
+            <p className="mt-1 text-xs text-subtle">
+              Em branco, a Contatia usa o mesmo host do SMTP na <b>porta 993 (SSL)</b> com o mesmo usuário e senha do envio.
+            </p>
+            <div className="mt-2 rounded-lg bg-warn/10 p-2.5 text-xs text-warn">
+              ⚠ Só funciona em caixas que <b>recebem</b> e-mail (ex.: seu domínio, Gmail, Outlook). Serviços de <b>envio puro como a Brevo não têm IMAP</b> — se você envia pela Brevo, deixe o IMAP apontando para a caixa real que recebe as respostas (o e-mail do seu domínio), ou use o Gmail conectado por OAuth para detecção via Gmail.
+            </div>
           </div>
         )}
       </div>
