@@ -160,6 +160,16 @@ export async function scheduleMeeting(input: {
   return { ok: true, googleConnected: true };
 }
 
+export async function saveRecording(id: string, url: string) {
+  const { supabase } = await ctx();
+  const clean = (url || "").trim();
+  if (clean && !/^https?:\/\//i.test(clean)) return { error: "Cole um link válido (começa com http)." };
+  const { error } = await supabase.from("meetings").update({ recording_url: clean || null }).eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/reunioes/${id}`);
+  return { ok: true };
+}
+
 export async function setMeetingStatus(id: string, status: string, contactId?: string) {
   const { supabase, tenant_id } = await ctx();
   const patch: Record<string, unknown> = { status };

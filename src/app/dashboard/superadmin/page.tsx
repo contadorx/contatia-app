@@ -97,6 +97,7 @@ export default async function Superadmin() {
         <div>
           <h1 className="font-display text-2xl font-bold">Plataforma</h1>
           <p className="mt-1 text-sm text-subtle">Visão do dono do Contatia sobre todos os workspaces. Leitura apenas.</p>
+          <p className="mt-1 text-xs text-signal">✓ Régua de ciclo de vida ativa: boas-vindas, onboarding (D+1/D+3) e reengajamento (D+14) enviados automaticamente.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <a href="/dashboard/superadmin/suporte" className="btn-ghost">Suporte →</a>

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import SequenceBuilder from "@/components/SequenceBuilder";
 import { TemplateGallery, SaveAsTemplateButton } from "@/components/TemplateGallery";
+import { CadenceReport } from "@/components/CadenceReport";
 import { listTemplates } from "@/app/dashboard/cadencias/actions";
 import { channelLabel, type Channel } from "@/lib/cadence";
 
@@ -50,6 +51,7 @@ export default async function Cadencias() {
                   <div className="mt-2">
                     <SaveAsTemplateButton sequenceId={s.id} />
                   </div>
+                  <CadenceReport sequenceId={s.id} />
                 </div>
                 <span
                   className={`rounded-full px-3 py-1 text-xs font-semibold ${

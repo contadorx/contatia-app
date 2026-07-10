@@ -74,6 +74,7 @@ export function BookingSettings({ token, initial }: {
             <button className="btn-ghost py-1 text-xs" onClick={() => navigator.clipboard?.writeText(url)}>copiar</button>
           </div>
           <p className="mt-1 text-[11px] text-subtle">Coloque na sua assinatura de e-mail, bio ou proposta. Quem abrir escolhe o horário e cai direto na sua agenda.</p>
+          <p className="mt-1 text-[11px] text-signal">✓ Com o Gmail conectado, os horários já ocupados na sua agenda do Google ficam indisponíveis automaticamente.</p>
         </div>
       )}
     </div>

@@ -235,12 +235,23 @@ export default function SequenceBuilder() {
               )}
             </div>
             {s.channel === "email" && (
-              <input
-                className="input mt-3"
-                value={s.subject}
-                onChange={(e) => update(i, { subject: e.target.value })}
-                placeholder="Assunto do e-mail"
-              />
+              <>
+                <input
+                  className="input mt-3"
+                  value={s.subject}
+                  onChange={(e) => update(i, { subject: e.target.value })}
+                  placeholder="Assunto do e-mail (variante A)"
+                />
+                <input
+                  className="input mt-2"
+                  value={s.subject_b || ""}
+                  onChange={(e) => update(i, { subject_b: e.target.value })}
+                  placeholder="Assunto alternativo (variante B) — opcional, para teste A/B"
+                />
+                {s.subject_b?.trim() ? (
+                  <p className="mt-1 text-[11px] text-subtle">Teste A/B ativo: cada contato recebe A ou B (sorteio 50/50). O relatório mostra qual converte mais.</p>
+                ) : null}
+              </>
             )}
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span className="text-xs text-subtle">Inserir:</span>

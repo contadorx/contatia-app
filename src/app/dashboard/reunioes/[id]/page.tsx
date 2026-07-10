@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { RecordingField } from "@/components/RecordingField";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import MeetingStatusButtons from "@/components/MeetingStatusButtons";
@@ -30,7 +31,7 @@ export default async function ReuniaoDetalhe({ params }: { params: { id: string 
 
   const { data: m } = await supabase
     .from("meetings")
-    .select("id, title, datetime, duration_min, location, notes, status, outcome, outcome_status, contact_id, opportunity_id, google_event_link, confirmed_at, created_at, contacts(name, company, email, phone)")
+    .select("id, title, datetime, duration_min, location, notes, status, outcome, outcome_status, contact_id, opportunity_id, google_event_link, recording_url, confirmed_at, created_at, contacts(name, company, email, phone)")
     .eq("id", params.id)
     .maybeSingle();
 
@@ -75,6 +76,11 @@ export default async function ReuniaoDetalhe({ params }: { params: { id: string 
               <a href={M.google_event_link} target="_blank" rel="noreferrer" className="text-xs text-signal hover:underline">✓ no Google Calendar</a>
             )}
           </div>
+        </div>
+
+        <div className="mt-4">
+          <p className="label">Gravação da reunião</p>
+          <RecordingField meetingId={M.id} initial={M.recording_url || ""} />
         </div>
 
         {M.notes && (

@@ -123,31 +123,48 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     return { error: `E-mail na lista de supressão (${(supp as any).reason}). Envio bloqueado para proteger sua reputação.` };
   }
 
-  const { data: acct } = await supabase
+  // ROTAÇÃO DE CAIXAS: busca todas as caixas ativas e escolhe a com mais folga hoje
+  // (cap efetivo do dia − enviados hoje). Distribui a carga e protege cada domínio.
+  const { data: accts } = await supabase
     .from("email_accounts")
     .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage")
     .eq("is_active", true)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (!acct) return { error: "Nenhuma caixa de e-mail conectada. Configure em Config." };
+    .order("created_at", { ascending: true });
+  if (!accts || !accts.length) return { error: "Nenhuma caixa de e-mail conectada. Configure em Config." };
 
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
-  const { count } = await supabase
-    .from("events")
-    .select("id", { count: "exact", head: true })
-    .eq("type", "email_sent")
-    .eq("email_account_id", (acct as any).id)
-    .gte("created_at", startOfDay.toISOString());
-  // warmup_stage: 0 = automático (rampa), -1 = desligado (usa cap cheio), >0 = mantém compat
   const { effectiveDailyCap } = await import("@/lib/warmup");
-  const warmupOn = ((acct as any).warmup_stage ?? 0) !== -1;
-  const { cap, warming } = effectiveDailyCap((acct as any).created_at, (acct as any).daily_cap ?? 40, warmupOn);
-  if ((count ?? 0) >= cap) {
-    return { error: warming
-      ? `Limite de aquecimento de hoje atingido (${cap} e-mails). A caixa é nova — o limite sobe automaticamente a cada dia até o total. Tente amanhã ou use outra caixa.`
-      : "Limite diário desta caixa atingido (Envio Seguro). Tente amanhã ou conecte outra caixa." };
+
+  // contagem de enviados hoje por caixa
+  const { data: sentToday } = await supabase
+    .from("events")
+    .select("email_account_id")
+    .eq("type", "email_sent")
+    .gte("created_at", startOfDay.toISOString());
+  const sentByAcct: Record<string, number> = {};
+  for (const e of (sentToday as any[]) || []) {
+    const id = e.email_account_id;
+    if (id) sentByAcct[id] = (sentByAcct[id] || 0) + 1;
+  }
+
+  // escolhe a caixa com maior folga
+  let acct: any = null;
+  let bestSlack = -1;
+  let anyWarming = false;
+  for (const a of accts as any[]) {
+    const warmupOn = (a.warmup_stage ?? 0) !== -1;
+    const { cap, warming } = effectiveDailyCap(a.created_at, a.daily_cap ?? 40, warmupOn);
+    const used = sentByAcct[a.id] || 0;
+    const slack = cap - used;
+    if (warming) anyWarming = true;
+    if (slack > bestSlack) { bestSlack = slack; acct = a; }
+  }
+
+  if (!acct || bestSlack <= 0) {
+    return { error: anyWarming
+      ? "Limite de envio de hoje atingido em todas as caixas (algumas ainda em aquecimento). Tente amanhã ou conecte outra caixa."
+      : "Limite diário atingido em todas as caixas (Envio Seguro). Tente amanhã ou conecte outra caixa." };
   }
 
   // reescreve links para rastreados (ativa o gatilho link_clicked)

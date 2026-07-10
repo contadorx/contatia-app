@@ -25,7 +25,7 @@ export async function getBookingSlots(token: string) {
   const startH = Number(tenant.booking_start_hour ?? 9);
   const endH = Number(tenant.booking_end_hour ?? 18);
 
-  // reuniões futuras já marcadas (para bloquear horários ocupados)
+  // reuniões futuras já marcadas no Contatia (para bloquear horários ocupados)
   const nowISO = new Date().toISOString();
   const { data: booked } = await admin
     .from("meetings")
@@ -34,6 +34,27 @@ export async function getBookingSlots(token: string) {
     .gte("datetime", nowISO)
     .in("status", ["agendada", "confirmada"]);
   const busy = ((booked as any[]) || []).map((b) => new Date(b.datetime).getTime());
+
+  // free/busy do Google Calendar (bloqueia QUALQUER compromisso da agenda, não só do Contatia)
+  const googleBusy: { start: number; end: number }[] = [];
+  try {
+    const { data: gacct } = await admin
+      .from("email_accounts")
+      .select("oauth_refresh_token")
+      .eq("tenant_id", tenant.id)
+      .eq("provider", "gmail")
+      .eq("is_active", true)
+      .not("oauth_refresh_token", "is", null)
+      .limit(1)
+      .maybeSingle();
+    const refresh = (gacct as any)?.oauth_refresh_token;
+    if (refresh) {
+      const { getBusyBlocks } = await import("@/lib/gcal");
+      const timeMax = new Date(Date.now() + 15 * 86400000).toISOString();
+      const blocks = await getBusyBlocks(refresh, nowISO, timeMax);
+      googleBusy.push(...blocks);
+    }
+  } catch { /* free/busy é best-effort; não quebra o agendamento */ }
 
   const slots: { date: string; times: { iso: string; label: string }[] }[] = [];
   const now = new Date();
@@ -49,9 +70,14 @@ export async function getBookingSlots(token: string) {
         const slot = new Date(day);
         slot.setHours(h, min, 0, 0);
         if (slot.getTime() <= now.getTime() + 3600000) continue; // pelo menos 1h de antecedência
-        // ocupado se colide com alguma reunião
+        // ocupado se colide com reunião do Contatia
         const collide = busy.some((b) => Math.abs(b - slot.getTime()) < dur * 60000);
         if (collide) continue;
+        // ocupado se o intervalo do slot cai dentro de um bloco ocupado do Google
+        const slotStart = slot.getTime();
+        const slotEnd = slotStart + dur * 60000;
+        const googleCollide = googleBusy.some((b) => slotStart < b.end && slotEnd > b.start);
+        if (googleCollide) continue;
         times.push({ iso: slot.toISOString(), label: `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}` });
       }
     }
@@ -80,7 +106,7 @@ export async function createBooking(token: string, input: { name: string; email:
   const when = new Date(input.datetime);
   if (isNaN(when.getTime()) || when.getTime() < Date.now()) return { error: "Horário inválido." };
 
-  // horário ainda livre?
+  // horário ainda livre? (checa reuniões do Contatia + free/busy do Google)
   const dur = Number(tenant.booking_duration_min) || 30;
   const { data: booked } = await admin
     .from("meetings")
@@ -90,6 +116,29 @@ export async function createBooking(token: string, input: { name: string; email:
     .in("status", ["agendada", "confirmada"]);
   const collide = ((booked as any[]) || []).some((b) => Math.abs(new Date(b.datetime).getTime() - when.getTime()) < dur * 60000);
   if (collide) return { error: "Esse horário acabou de ser reservado. Escolha outro." };
+
+  // valida contra o free/busy do Google (compromisso que possa ter surgido)
+  try {
+    const { data: gacct } = await admin
+      .from("email_accounts")
+      .select("oauth_refresh_token")
+      .eq("tenant_id", tenant.id)
+      .eq("provider", "gmail")
+      .eq("is_active", true)
+      .not("oauth_refresh_token", "is", null)
+      .limit(1)
+      .maybeSingle();
+    const refresh = (gacct as any)?.oauth_refresh_token;
+    if (refresh) {
+      const { getBusyBlocks } = await import("@/lib/gcal");
+      const slotStart = when.getTime();
+      const slotEnd = slotStart + dur * 60000;
+      const blocks = await getBusyBlocks(refresh, new Date(slotStart - 60000).toISOString(), new Date(slotEnd + 60000).toISOString());
+      if (blocks.some((b) => slotStart < b.end && slotEnd > b.start)) {
+        return { error: "Esse horário acabou de ficar ocupado na agenda. Escolha outro." };
+      }
+    }
+  } catch { /* best-effort */ }
 
   // contato: acha por e-mail ou cria
   let contactId: string | null = null;

@@ -98,6 +98,25 @@ export default async function Config() {
         <div>
           <p className="text-sm text-subtle">Conecte as caixas que enviam suas cadências. O envio respeita o limite diário (Envio Seguro).</p>
 
+          {(() => {
+            const active = rows.filter((a) => a.is_active);
+            if (active.length < 2) return null;
+            const ramp = [10, 15, 20, 25, 30, 40, 50, 65, 80, 100, 125, 150, 175, 200];
+            let total = 0;
+            for (const a of active) {
+              const target = Number(a.daily_cap) || 40;
+              const on = (a.warmup_stage ?? 0) !== -1;
+              const days = a.created_at ? Math.floor((Date.now() - new Date(a.created_at).getTime()) / 86400000) : 0;
+              total += !on || days >= ramp.length ? target : Math.min(ramp[Math.max(0, days)], target);
+            }
+            return (
+              <div className="mt-3 rounded-lg bg-brand-soft p-3 text-sm">
+                <p className="font-semibold text-brand-dark">Rotação de caixas ativa</p>
+                <p className="text-xs text-brand-dark">Você tem {active.length} caixas conectadas. A Contatia distribui os envios entre elas (sempre a com mais folga), somando até <b>{total} e-mails/dia</b> com segurança. Conectar mais caixas aumenta seu volume sem queimar reputação.</p>
+              </div>
+            );
+          })()}
+
           <div className="mt-4 space-y-3">
             {rows.length ? (
               rows.map((a) => (

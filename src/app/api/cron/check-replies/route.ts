@@ -25,6 +25,7 @@ export async function GET(req: Request) {
     .eq("is_active", true);
 
   let marked = 0;
+  let suggestions = 0;
   const errors: string[] = [];
 
   for (const acc of (accounts as any[]) || []) {
@@ -66,6 +67,26 @@ export async function GET(req: Request) {
           .eq("id", e.contact_id);
         marked++;
       }
+
+      // remetentes que NÃO são contatos → viram sugestão (não perder quem te respondeu)
+      try {
+        const ownDomain = (acc.smtp_user || "").split("@")[1]?.toLowerCase();
+        const { data: known } = await admin.from("contacts").select("email").eq("tenant_id", acc.tenant_id).in("email", Array.from(set));
+        const knownSet = new Set(((known as any[]) || []).map((k) => (k.email || "").toLowerCase()));
+        for (const s of set) {
+          const email = s.toLowerCase();
+          if (knownSet.has(email)) continue;
+          const dom = email.split("@")[1] || "";
+          // ignora ruído: no-reply, o próprio domínio, e provedores de sistema
+          if (/no-?reply|mailer-daemon|postmaster|notification|bounce/.test(email)) continue;
+          if (ownDomain && dom === ownDomain) continue;
+          await admin.from("contact_suggestions").upsert(
+            { tenant_id: acc.tenant_id, email, status: "pending" },
+            { onConflict: "tenant_id,email", ignoreDuplicates: true }
+          );
+          suggestions++;
+        }
+      } catch { /* sugestões não devem quebrar o cron */ }
     }
 
     await admin.from("email_accounts").update({ last_reply_check_at: new Date().toISOString() }).eq("id", acc.id);
@@ -175,5 +196,16 @@ export async function GET(req: Request) {
     /* régua não deve quebrar o cron */
   }
 
-  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, autoRan, purged, reminders, errors });
+  // régua de ciclo de vida do assinante (boas-vindas, onboarding, reengajamento)
+  let lifecycle = 0;
+  try {
+    const { runLifecycle } = await import("@/lib/lifecycle");
+    const lc = await runLifecycle(admin);
+    lifecycle = lc.sent;
+    if (lc.errors.length) errors.push(...lc.errors);
+  } catch (e: any) {
+    errors.push(`lifecycle: ${e?.message || "erro"}`);
+  }
+
+  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, autoRan, purged, reminders, lifecycle, errors });
 }

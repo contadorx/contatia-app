@@ -21,6 +21,7 @@ export type StepInput = {
   channel: Channel;
   delay_days: number;
   subject: string;
+  subject_b?: string;
   body: string;
 };
 
@@ -48,6 +49,7 @@ export async function createSequence(input: {
     channel: s.channel,
     delay_days: Number(s.delay_days) || 0,
     subject: s.subject || null,
+    subject_b: s.channel === "email" && s.subject_b?.trim() ? s.subject_b.trim() : null,
     body_template: s.body || null,
   }));
   const { error: e2 } = await supabase.from("sequence_steps").insert(steps);
@@ -71,7 +73,7 @@ export async function enrollContact(contactId: string, sequenceId: string) {
 
   const { data: steps } = await supabase
     .from("sequence_steps")
-    .select("position, channel, delay_days, subject, body_template")
+    .select("position, channel, delay_days, subject, subject_b, body_template")
     .eq("sequence_id", sequenceId)
     .order("position", { ascending: true });
   if (!steps?.length) return { error: "Sequência sem passos." };
@@ -89,16 +91,22 @@ export async function enrollContact(contactId: string, sequenceId: string) {
   let offset = 0;
   const tasks = steps.map((s) => {
     offset += Number(s.delay_days) || 0;
+    // A/B de assunto: se o passo tem variante B, sorteia qual usar nesta inscrição
+    const hasB = s.channel === "email" && s.subject_b && String(s.subject_b).trim();
+    const variant = hasB ? (Math.random() < 0.5 ? "a" : "b") : null;
+    const chosenSubject = variant === "b" ? s.subject_b : s.subject;
     return {
       tenant_id,
       enrollment_id: enr.id,
       contact_id: contactId,
       assigned_to: assigned,
       channel: s.channel,
-      title: s.subject || channelLabel[s.channel as Channel],
+      title: chosenSubject || channelLabel[s.channel as Channel],
       generated_content: renderTemplate(s.body_template, contact),
       due_date: addDaysISO(today, offset),
       status: "pending",
+      step_position: s.position,
+      subject_variant: variant,
     };
   });
   const { error: e2 } = await supabase.from("tasks").insert(tasks);
