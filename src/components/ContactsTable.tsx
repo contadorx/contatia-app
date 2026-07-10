@@ -5,6 +5,7 @@ import Link from "next/link";
 import AssignSelect from "@/components/AssignSelect";
 import EnrollButton from "@/components/EnrollButton";
 import { bulkAssign, bulkEnroll } from "@/app/dashboard/contatos/bulk-actions";
+import { bulkTag, createTag } from "@/app/dashboard/contatos/tag-actions";
 
 type Contact = {
   id: string;
@@ -15,22 +16,28 @@ type Contact = {
   origin: string | null;
   score: number | null;
   assigned_to: string | null;
+  contact_tags?: { tag_id: string; tags: { id: string; name: string; color: string } | null }[];
 };
 type Member = { id: string; full_name: string | null; email: string };
 type Seq = { id: string; name: string };
+type Tag = { id: string; name: string; color: string };
 
 export default function ContactsTable({
   contacts,
   sequences,
   members,
+  tags = [],
 }: {
   contacts: Contact[];
   sequences: Seq[];
   members: Member[];
+  tags?: Tag[];
 }) {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [seq, setSeq] = useState("");
   const [assignTo, setAssignTo] = useState("");
+  const [tagId, setTagId] = useState("");
+  const [newTag, setNewTag] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -76,6 +83,30 @@ export default function ContactsTable({
         setMsg(`✓ ${res.count} contatos atribuídos.`);
         clear();
         setAssignTo("");
+      }
+    });
+  }
+  function doTag() {
+    if (!tagId) return setMsg("Escolha a tag.");
+    setMsg(null);
+    start(async () => {
+      const res = (await bulkTag([...sel], tagId)) as { count?: number; error?: string };
+      if (res?.error) setMsg(res.error);
+      else {
+        setMsg(`✓ tag aplicada a ${res.count} contatos.`);
+        clear();
+        setTagId("");
+      }
+    });
+  }
+  function doCreateTag() {
+    if (!newTag.trim()) return;
+    start(async () => {
+      const res = (await createTag(newTag)) as { tag?: Tag; error?: string };
+      if (res?.error) setMsg(res.error);
+      else {
+        setNewTag("");
+        setMsg("✓ tag criada. Recarregue para vê-la nas listas.");
       }
     });
   }
@@ -138,7 +169,26 @@ export default function ContactsTable({
           </button>
         </div>
       )}
+
+      {/* aplicar tag em lote */}
+      {sel.size > 0 && tags.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-subtle">Tag:</span>
+          <select className="input py-1.5 text-sm" value={tagId} onChange={(e) => setTagId(e.target.value)}>
+            <option value="">Aplicar tag…</option>
+            {tags.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <button className="btn-ghost py-1.5 text-sm" onClick={doTag} disabled={pending || !tagId}>Aplicar tag</button>
+        </div>
+      )}
       {msg && <p className="mb-3 text-sm text-signal">{msg}</p>}
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input className="input max-w-[200px] py-1.5 text-sm" value={newTag} onChange={(e) => setNewTag(e.target.value)} placeholder="Nova tag (ex.: T1, Quente, Reforma)" />
+        <button className="btn-ghost py-1.5 text-sm" onClick={doCreateTag} disabled={pending || !newTag.trim()}>Criar tag</button>
+      </div>
 
       <div className="card overflow-visible">
         <table className="w-full text-sm">
@@ -168,6 +218,17 @@ export default function ContactsTable({
                     <Link href={`/dashboard/contatos/${c.id}`} className="text-brand-dark hover:underline">
                       {c.name}
                     </Link>
+                    {c.contact_tags && c.contact_tags.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {c.contact_tags.map((ct) =>
+                          ct.tags ? (
+                            <span key={ct.tag_id} className="rounded-full px-1.5 py-0.5 text-[10px] font-medium" style={{ background: `${ct.tags.color}22`, color: ct.tags.color }}>
+                              {ct.tags.name}
+                            </span>
+                          ) : null
+                        )}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-subtle">{c.company || "—"}</td>
                   <td className="px-4 py-3 text-subtle">{c.email || c.phone || "—"}</td>

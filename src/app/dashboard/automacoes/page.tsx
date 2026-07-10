@@ -10,6 +10,7 @@ const TRIGGER_LABEL: Record<string, string> = {
   replied: "Respondeu",
   score_gte: "Score ≥",
   no_activity_days: "Sem atividade há",
+  tag_added: "Recebeu tag",
 };
 const ACTION_LABEL: Record<string, string> = {
   enroll: "inscrever na cadência",
@@ -21,11 +22,12 @@ const ACTION_LABEL: Record<string, string> = {
 export default async function Automacoes() {
   const supabase = createClient();
 
-  const [{ data: automations }, { data: sequences }, { data: stages }, { data: logs }] = await Promise.all([
+  const [{ data: automations }, { data: sequences }, { data: stages }, { data: logs }, { data: tags }] = await Promise.all([
     supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, sequences(name), pipeline_stages(name)").order("created_at", { ascending: false }),
     supabase.from("sequences").select("id, name").eq("is_active", true),
     supabase.from("pipeline_stages").select("id, name").order("position", { ascending: true }),
     supabase.from("automation_logs").select("detail, created_at, contacts(name)").order("created_at", { ascending: false }).limit(15),
+    supabase.from("tags").select("id, name").order("name", { ascending: true }),
   ]);
 
   const rules = (automations as any[]) || [];
@@ -37,7 +39,7 @@ export default async function Automacoes() {
       <p className="mt-1 text-sm text-subtle">Regras &ldquo;quando isso acontecer, faça aquilo&rdquo; — o contato reage sozinho ao comportamento.</p>
 
       <div className="mt-6">
-        <AutomationBuilder sequences={(sequences as any[]) || []} stages={(stages as any[]) || []} />
+        <AutomationBuilder sequences={(sequences as any[]) || []} stages={(stages as any[]) || []} tags={(tags as any[]) || []} />
       </div>
 
       <div className="mt-6 space-y-2">

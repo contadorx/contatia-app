@@ -10,6 +10,7 @@ const TRIGGERS = [
   { v: "doc_opened", l: "Abriu uma proposta" },
   { v: "link_clicked", l: "Clicou num link" },
   { v: "replied", l: "Respondeu" },
+  { v: "tag_added", l: "Recebeu uma tag" },
   { v: "score_gte", l: "Score atingiu (nº)" },
   { v: "no_activity_days", l: "Sem atividade há X dias" },
 ];
@@ -20,7 +21,7 @@ const ACTIONS = [
   { v: "mark_hot", l: "Marcar como quente" },
 ];
 
-export default function AutomationBuilder({ sequences, stages }: { sequences: Seq[]; stages: Stage[] }) {
+export default function AutomationBuilder({ sequences, stages, tags }: { sequences: Seq[]; stages: Stage[]; tags?: { id: string; name: string }[] }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ name: "", trigger_type: "doc_opened", trigger_value: "", action_type: "enroll", action_seq: "", action_stage: "" });
   const [msg, setMsg] = useState<string | null>(null);
@@ -70,6 +71,14 @@ export default function AutomationBuilder({ sequences, stages }: { sequences: Se
               onChange={(e) => up("trigger_value", e.target.value)}
               placeholder={f.trigger_type === "score_gte" ? "Score mínimo (ex.: 25)" : "Dias sem atividade (ex.: 120)"}
             />
+          )}
+          {f.trigger_type === "tag_added" && (
+            <select className="input mt-2" value={f.trigger_value} onChange={(e) => up("trigger_value", e.target.value)}>
+              <option value="">Qualquer tag</option>
+              {(tags || []).map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
           )}
         </div>
 
