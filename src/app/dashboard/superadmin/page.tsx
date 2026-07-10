@@ -34,6 +34,34 @@ export default async function Superadmin() {
   const { data: tenants } = await admin.from("tenants").select("id, name, legal_name, segment, created_at").order("created_at", { ascending: false });
   const tList = (tenants as any[]) || [];
 
+  // --- Engajamento: workspaces com atividade recente (eventos ou tarefas) ---
+  const now = Date.now();
+  const d7 = new Date(now - 7 * 86400000).toISOString();
+  const d30 = new Date(now - 30 * 86400000).toISOString();
+  const [{ data: ev7 }, { data: ev30 }] = await Promise.all([
+    admin.from("events").select("tenant_id").gte("created_at", d7).limit(5000),
+    admin.from("events").select("tenant_id").gte("created_at", d30).limit(5000),
+  ]);
+  const active7 = new Set(((ev7 as any[]) || []).map((e) => e.tenant_id)).size;
+  const active30 = new Set(((ev30 as any[]) || []).map((e) => e.tenant_id)).size;
+
+  // --- Crescimento: novos workspaces por mês (últimos 6 meses) ---
+  const months: { label: string; count: number }[] = [];
+  for (let i = 5; i >= 0; i--) {
+    const dt = new Date();
+    dt.setMonth(dt.getMonth() - i, 1);
+    const label = dt.toLocaleDateString("pt-BR", { month: "short" });
+    const y = dt.getFullYear();
+    const m = dt.getMonth();
+    const count = tList.filter((t) => {
+      const c = new Date(t.created_at);
+      return c.getFullYear() === y && c.getMonth() === m;
+    }).length;
+    months.push({ label, count });
+  }
+  const maxMonth = Math.max(1, ...months.map((m) => m.count));
+  const new30 = tList.filter((t) => new Date(t.created_at).toISOString() >= d30).length;
+
   const rows = await Promise.all(
     tList.map(async (t) => {
       const [users, contacts, oppsOpen, mrr] = await Promise.all([
@@ -79,6 +107,43 @@ export default async function Superadmin() {
           </div>
         ))}
       </div>
+
+      {/* Resultados: crescimento + engajamento */}
+      <h2 className="mt-8 mb-3 font-display text-lg font-bold">Resultados</h2>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="card p-5">
+          <p className="text-sm font-semibold">Crescimento — novos workspaces por mês</p>
+          <div className="mt-4 flex items-end gap-3" style={{ height: 120 }}>
+            {months.map((m, i) => (
+              <div key={i} className="flex flex-1 flex-col items-center gap-1">
+                <span className="text-xs font-semibold text-ink">{m.count}</span>
+                <div className="w-full rounded-t bg-brand" style={{ height: `${(m.count / maxMonth) * 90}px`, minHeight: m.count ? 4 : 0 }} />
+                <span className="text-[11px] text-subtle">{m.label}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-subtle">{new30} novo(s) nos últimos 30 dias.</p>
+        </div>
+
+        <div className="card p-5">
+          <p className="text-sm font-semibold">Engajamento — workspaces ativos</p>
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <div className="rounded-xl bg-muted p-4">
+              <p className="text-xs text-subtle">Ativos (7 dias)</p>
+              <p className="mt-1 font-display text-2xl font-bold text-signal">{active7}</p>
+              <p className="text-xs text-subtle">de {totalTenants} · {totalTenants ? Math.round((active7 / totalTenants) * 100) : 0}%</p>
+            </div>
+            <div className="rounded-xl bg-muted p-4">
+              <p className="text-xs text-subtle">Ativos (30 dias)</p>
+              <p className="mt-1 font-display text-2xl font-bold">{active30}</p>
+              <p className="text-xs text-subtle">de {totalTenants} · {totalTenants ? Math.round((active30 / totalTenants) * 100) : 0}%</p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-subtle">Ativo = registrou eventos (envios, aberturas, respostas) no período. É o proxy de uso real — o sinal de churn antes do churn.</p>
+        </div>
+      </div>
+
+      <h2 className="mt-8 mb-3 font-display text-lg font-bold">Workspaces</h2>
 
       <div className="card mt-6 overflow-x-auto">
         <table className="w-full text-sm">
