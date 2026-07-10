@@ -87,7 +87,7 @@ export default async function Reunioes() {
                             <p className="text-[10px] text-subtle">{m.duration_min || 30}min</p>
                           </div>
                           <div>
-                            <p className="text-sm font-semibold">{m.title} <span className="font-normal text-subtle">· {m.contacts?.name || "—"}</span></p>
+                            <p className="text-sm font-semibold"><a href={`/dashboard/reunioes/${m.id}`} className="hover:text-brand-dark hover:underline">{m.title}</a> <span className="font-normal text-subtle">· {m.contacts?.name || "—"}</span></p>
                             {m.location && <p className="text-xs text-brand-dark">{m.location}</p>}
                             {m.notes && <p className="mt-0.5 text-xs text-subtle">{m.notes}</p>}
                             {m.google_event_link && (
@@ -125,7 +125,7 @@ export default async function Reunioes() {
                 <div key={m.id} className="card p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-semibold">{m.title} <span className="font-normal text-subtle">· {m.contacts?.name || "—"}</span></p>
+                      <p className="text-sm font-semibold"><a href={`/dashboard/reunioes/${m.id}`} className="hover:text-brand-dark hover:underline">{m.title}</a> <span className="font-normal text-subtle">· {m.contacts?.name || "—"}</span></p>
                       <p className="text-xs text-subtle">{new Date(m.datetime).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</p>
                       {m.outcome && <p className="mt-1 text-xs text-ink/70">↳ {m.outcome}</p>}
                     </div>

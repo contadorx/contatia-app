@@ -41,11 +41,11 @@ function buildTransport(a: EmailAccount) {
 
 export async function sendEmail(
   account: EmailAccount,
-  msg: { to: string; subject: string; text: string }
+  msg: { to: string; subject: string; text: string; html?: string }
 ) {
   const transport = buildTransport(account);
   const from = account.display_name
     ? `${account.display_name} <${account.from_email}>`
     : account.from_email;
-  await transport.sendMail({ from, to: msg.to, subject: msg.subject, text: msg.text });
+  await transport.sendMail({ from, to: msg.to, subject: msg.subject, text: msg.text, ...(msg.html ? { html: msg.html } : {}) });
 }

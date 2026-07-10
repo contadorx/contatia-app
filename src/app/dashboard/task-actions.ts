@@ -139,14 +139,25 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   // assinatura do negócio (renderiza {{primeiro_nome}}/{{empresa}} com os dados do contato)
   const { data: tnt } = await supabase.from("tenants").select("email_signature").maybeSingle();
   const signature = (tnt as any)?.email_signature as string | undefined;
-  if (signature?.trim()) {
-    const contact = (task as any).contacts || {};
-    const rendered = renderTemplate(signature, { name: contact.name, company: null, ...contact });
-    bodyText = `${bodyText}\n\n${rendered}`;
+  const contact = (task as any).contacts || {};
+  const sigRendered = signature?.trim() ? renderTemplate(signature, { name: contact.name, company: null, ...contact }) : "";
+  const sigIsHtml = /<[a-z][\s\S]*>/i.test(sigRendered); // tem tag HTML?
+
+  let html: string | undefined;
+  if (sigRendered) {
+    if (sigIsHtml) {
+      // corpo (texto) vira HTML simples + assinatura HTML abaixo
+      const bodyHtml = bodyText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+      html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#16172A;line-height:1.5">${bodyHtml}<br><br>${sigRendered}</div>`;
+      // versão texto (fallback) sem as tags
+      bodyText = `${bodyText}\n\n${sigRendered.replace(/<[^>]+>/g, "").replace(/\s+\n/g, "\n").trim()}`;
+    } else {
+      bodyText = `${bodyText}\n\n${sigRendered}`;
+    }
   }
 
   try {
-    await sendEmail(acct as any, { to, subject: task.title || "", text: bodyText });
+    await sendEmail(acct as any, { to, subject: task.title || "", text: bodyText, html });
   } catch (e: any) {
     return { error: "Falha no envio: " + (e?.message || "erro desconhecido") };
   }
