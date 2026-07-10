@@ -134,6 +134,8 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
           touchTarget={Number((goal as any)?.touch_target) || 0}
           wonMrr={((monthWon as any[]) || []).reduce((s, o) => s + Number(o.value_mrr || 0), 0)}
           touchesDone={touchesDone}
+          targetUserId={isManager && vendedor ? vendedor : undefined}
+          targetName={isManager && vendedor ? selectedName : undefined}
         />
       </div>
 

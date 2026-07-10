@@ -23,12 +23,16 @@ export default function GoalPanel({
   touchTarget,
   wonMrr,
   touchesDone,
+  targetUserId,
+  targetName,
 }: {
   period: string;
   mrrTarget: number;
   touchTarget: number;
   wonMrr: number;
   touchesDone: number;
+  targetUserId?: string;
+  targetName?: string;
 }) {
   const [edit, setEdit] = useState(false);
   const [mrr, setMrr] = useState(String(mrrTarget || ""));
@@ -37,7 +41,7 @@ export default function GoalPanel({
 
   function save() {
     start(async () => {
-      await setGoal({ period, mrr_target: Number(mrr) || 0, touch_target: Number(touch) || 0 });
+      await setGoal({ period, mrr_target: Number(mrr) || 0, touch_target: Number(touch) || 0, target_user_id: targetUserId });
       setEdit(false);
     });
   }
@@ -45,7 +49,7 @@ export default function GoalPanel({
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between">
-        <h2 className="font-display text-lg font-bold">Minha meta — {period}</h2>
+        <h2 className="font-display text-lg font-bold">{targetName ? `Meta — ${targetName}` : "Minha meta"} · {period}</h2>
         <button className="text-xs text-subtle hover:text-brand" onClick={() => setEdit((e) => !e)}>
           {edit ? "fechar" : "definir meta"}
         </button>

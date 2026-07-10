@@ -65,3 +65,20 @@ export async function importContacts(rows: Row[]) {
   revalidatePath("/dashboard/contatos");
   return { ok: true, count: clean.length };
 }
+
+// Edita os dados de um contato (corrigir/completar informações).
+export async function updateContact(id: string, patch: {
+  name?: string; email?: string; phone?: string; company?: string; role_title?: string; cnpj?: string; status?: string;
+}) {
+  const { supabase } = await tenantId();
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) clean[k] = (typeof v === "string" ? v.trim() : v) || null;
+  }
+  if (clean.name === null) return { error: "O nome não pode ficar vazio." };
+  const { error } = await supabase.from("contacts").update(clean).eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/contatos/${id}`);
+  revalidatePath("/dashboard/contatos");
+  return { ok: true };
+}

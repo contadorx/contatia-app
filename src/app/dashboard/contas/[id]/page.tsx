@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import AddContactToAccount from "@/components/AddContactToAccount";
+import EditAccountButton from "@/components/EditAccountButton";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,7 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
             {[account.uf, account.cnpj, account.domain].filter(Boolean).join(" · ") || "—"}
           </p>
         </div>
+        <EditAccountButton account={account as any} />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">

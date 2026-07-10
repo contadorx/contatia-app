@@ -80,10 +80,18 @@ export async function markReplied(contactId: string) {
 }
 
 // ---- Envio de e-mail real (SMTP/Gmail) a partir de uma tarefa da fila ----
-export async function sendEmailTask(taskId: string) {
+export async function sendEmailTask(taskId: string, override?: { subject?: string; body?: string }) {
   const { sendEmail } = await import("@/lib/mailer");
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
+
+  // se veio corpo/assunto editado, persiste na task antes de enviar
+  if (override && (override.subject !== undefined || override.body !== undefined)) {
+    const patch: Record<string, unknown> = {};
+    if (override.subject !== undefined) patch.title = override.subject;
+    if (override.body !== undefined) patch.generated_content = override.body;
+    if (Object.keys(patch).length) await supabase.from("tasks").update(patch).eq("id", taskId);
+  }
 
   const { data: task } = await supabase
     .from("tasks")

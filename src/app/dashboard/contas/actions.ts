@@ -51,3 +51,20 @@ export async function setContactAccount(contactId: string, accountId: string | n
   revalidatePath("/dashboard/contas");
   return { ok: true };
 }
+
+// Edita os dados de uma empresa (corrigir/completar informações).
+export async function updateAccount(id: string, patch: {
+  name?: string; cnpj?: string; uf?: string; domain?: string; phone?: string; website?: string;
+}) {
+  const { supabase } = await ctx();
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) clean[k] = (typeof v === "string" ? v.trim() : v) || null;
+  }
+  if (clean.name === null) return { error: "O nome não pode ficar vazio." };
+  const { error } = await supabase.from("accounts").update(clean).eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/contas/${id}`);
+  revalidatePath("/dashboard/contas");
+  return { ok: true };
+}

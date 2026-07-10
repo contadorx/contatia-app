@@ -150,6 +150,28 @@ export async function enrichAndPush(radarId: string, sequenceId?: string) {
     if (tag) await supabase.from("contact_tags").upsert({ tenant_id, contact_id: (contact as any).id, tag_id: (tag as any).id }, { onConflict: "contact_id,tag_id", ignoreDuplicates: true });
   }
 
+  // cria a OPORTUNIDADE no primeiro estágio do pipeline (é isso que aparece no board)
+  const { data: firstStage } = await supabase
+    .from("pipeline_stages")
+    .select("id")
+    .eq("is_won", false)
+    .eq("is_lost", false)
+    .order("position", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (firstStage) {
+    const { data: me } = await supabase.from("profiles").select("id").eq("id", (await supabase.auth.getUser()).data.user?.id ?? "").maybeSingle();
+    await supabase.from("opportunities").insert({
+      tenant_id,
+      title: company || name,
+      primary_contact_id: (contact as any).id,
+      owner_id: (me as any)?.id || null,
+      stage_id: (firstStage as any).id,
+      status: "open",
+      value_mrr: 0,
+    });
+  }
+
   if (sequenceId) {
     const { enrollContact } = await import("@/app/dashboard/cadencias/actions");
     await enrollContact((contact as any).id, sequenceId);
@@ -157,6 +179,7 @@ export async function enrichAndPush(radarId: string, sequenceId?: string) {
 
   revalidatePath("/dashboard/radar");
   revalidatePath("/dashboard/contatos");
+  revalidatePath("/dashboard/pipeline");
   return { ok: true };
 }
 

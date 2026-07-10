@@ -6,6 +6,7 @@ import EnrollButton from "@/components/EnrollButton";
 import ContactReplyButton from "@/components/ContactReplyButton";
 import NoteComposer from "@/components/NoteComposer";
 import ContactCadences from "@/components/ContactCadences";
+import EditContactButton from "@/components/EditContactButton";
 import { channelLabel, type Channel } from "@/lib/cadence";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
 
   const { data: contact } = await supabase
     .from("contacts")
-    .select("id, name, email, phone, company, role_title, origin, status, score, account_id, accounts(name)")
+    .select("id, name, email, phone, company, role_title, cnpj, origin, status, score, account_id, accounts(name)")
     .eq("id", params.id)
     .maybeSingle();
   if (!contact) notFound();
@@ -95,6 +96,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <EnrollButton contactId={c.id} sequences={(sequences as { id: string; name: string }[]) || []} />
           <ContactReplyButton contactId={c.id} />
+          <EditContactButton contact={c as any} />
         </div>
       </div>
 

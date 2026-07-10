@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition, useState, useEffect, useRef, useCallback } from "react";
+import { useTransition, useState, useEffect, useRef } from "react";
 import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask, sendAllEmailTasks, completeTasks } from "@/app/dashboard/task-actions";
 import { channelLabel, waLink, type Channel } from "@/lib/cadence";
 
@@ -61,6 +61,7 @@ export default function TaskQueue({
   const [err, setErr] = useState<string | null>(null);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   const [focus, setFocus] = useState(0);
+  const [editing, setEditing] = useState<Record<string, { subject: string; body: string }>>({});
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   // filtros
@@ -109,11 +110,12 @@ export default function TaskQueue({
   function act(fn: () => Promise<unknown>) {
     start(async () => { await fn(); });
   }
-  function send(id: string) {
+  function send(id: string, override?: { subject?: string; body?: string }) {
     setErr(null);
     start(async () => {
-      const res = (await sendEmailTask(id)) as { error?: string } | undefined;
+      const res = (await sendEmailTask(id, override)) as { error?: string } | undefined;
       if (res?.error) setErr(res.error);
+      else setEditing((s) => { const n = { ...s }; delete n[id]; return n; });
     });
   }
   function sendWa(id: string) {
@@ -125,11 +127,11 @@ export default function TaskQueue({
   }
 
   // ação primária por canal (Enter)
-  const primary = useCallback((t: Task) => {
-    if (t.channel === "email" && t.contacts?.email) send(t.id);
+  function primary(t: Task) {
+    if (t.channel === "email" && t.contacts?.email) send(t.id, editing[t.id] ? { subject: editing[t.id].subject, body: editing[t.id].body } : undefined);
     else if (t.channel === "whatsapp" && t.contacts?.phone) sendWa(t.id);
     else act(() => completeTask(t.id, t.contact_id ?? undefined));
-  }, []);
+  }
 
   // navegação por teclado
   useEffect(() => {
@@ -147,7 +149,12 @@ export default function TaskQueue({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tasks, focus, primary]);
+  }, [tasks, focus, editing]);
+
+  // mantém o foco dentro do intervalo quando a lista muda (uso sequencial)
+  useEffect(() => {
+    setFocus((f) => Math.min(f, Math.max(0, tasks.length - 1)));
+  }, [tasks.length]);
 
   useEffect(() => {
     rowRefs.current[focus]?.scrollIntoView({ block: "nearest" });
@@ -255,15 +262,26 @@ export default function TaskQueue({
               )}
               {t.channel === "email" && c?.email && (
                 <>
-                  <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => send(t.id)}>Enviar</button>
-                  <a className="text-xs text-subtle hover:text-ink" href={`mailto:${c.email}?subject=${encodeURIComponent(t.title || "")}&body=${encodeURIComponent(content)}`} title="Abrir no seu cliente de e-mail">✎</a>
+                  <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={(e) => { e.stopPropagation(); setEditing((s) => s[t.id] ? (() => { const n = { ...s }; delete n[t.id]; return n; })() : { ...s, [t.id]: { subject: t.title || "", body: content } }); }}>
+                    {editing[t.id] ? "Fechar" : "Editar"}
+                  </button>
+                  <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => send(t.id, editing[t.id] ? { subject: editing[t.id].subject, body: editing[t.id].body } : undefined)}>Enviar</button>
+                  <a className="text-xs text-subtle hover:text-ink" href={`mailto:${c.email}?subject=${encodeURIComponent(t.title || "")}&body=${encodeURIComponent(content)}`} title="Abrir no seu cliente de e-mail" onClick={(e) => e.stopPropagation()}>✎</a>
                 </>
               )}
               {t.channel === "linkedin" && (
                 <button className="btn-ghost py-1.5 text-xs" onClick={() => act(() => completeTask(t.id, t.contact_id ?? undefined))}>Feito</button>
               )}
               {t.channel === "call" && (
-                <button className="btn-ghost py-1.5 text-xs" onClick={() => act(() => completeTask(t.id, t.contact_id ?? undefined))}>Registrar</button>
+                <>
+                  <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={(e) => { e.stopPropagation(); setEditing((s) => s[t.id] ? (() => { const n = { ...s }; delete n[t.id]; return n; })() : { ...s, [t.id]: { subject: "", body: content } }); }}>
+                    {editing[t.id] ? "Fechar" : "Ver script"}
+                  </button>
+                  {c?.phone && (
+                    <a className="btn-ghost py-1.5 text-xs" href={`tel:${c.phone.replace(/[^0-9+]/g, "")}`} onClick={(e) => e.stopPropagation()} title="Ligar">Ligar</a>
+                  )}
+                  <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => act(() => completeTask(t.id, t.contact_id ?? undefined))}>Registrar</button>
+                </>
               )}
 
               {t.contact_id && (
@@ -280,6 +298,37 @@ export default function TaskQueue({
               <button className="text-xs text-subtle hover:text-ink" disabled={pending} onClick={() => act(() => snoozeTask(t.id, 1))} title="Adiar 1 dia">↷</button>
               <button className="text-xs text-subtle hover:text-danger" disabled={pending} onClick={() => act(() => skipTask(t.id))} title="Pular">✕</button>
             </div>
+
+            {/* editor inline de e-mail / script de ligação */}
+            {editing[t.id] && t.channel === "email" && (
+              <div className="mt-3 border-t border-line pt-3" onClick={(e) => e.stopPropagation()}>
+                <label className="label">Assunto</label>
+                <input
+                  className="input mt-1 text-sm"
+                  value={editing[t.id].subject}
+                  onChange={(e) => setEditing((s) => ({ ...s, [t.id]: { ...s[t.id], subject: e.target.value } }))}
+                />
+                <label className="label mt-2 block">Corpo</label>
+                <textarea
+                  className="input mt-1 min-h-[140px] text-sm"
+                  value={editing[t.id].body}
+                  onChange={(e) => setEditing((s) => ({ ...s, [t.id]: { ...s[t.id], body: e.target.value } }))}
+                />
+                <p className="mt-1 text-xs text-subtle">A assinatura do negócio é anexada automaticamente no envio. Variáveis como {"{{primeiro_nome}}"} são resolvidas.</p>
+                <div className="mt-2 flex gap-2">
+                  <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => send(t.id, { subject: editing[t.id].subject, body: editing[t.id].body })}>
+                    {pending ? "Enviando..." : "Enviar editado"}
+                  </button>
+                  <button className="btn-ghost py-1.5 text-xs" onClick={() => setEditing((s) => { const n = { ...s }; delete n[t.id]; return n; })}>Cancelar</button>
+                </div>
+              </div>
+            )}
+            {editing[t.id] && t.channel === "call" && (
+              <div className="mt-3 border-t border-line pt-3" onClick={(e) => e.stopPropagation()}>
+                <p className="label">Roteiro da ligação</p>
+                <div className="mt-1 whitespace-pre-wrap rounded-lg bg-muted p-3 text-sm">{content || "Sem roteiro definido para este passo."}</div>
+              </div>
+            )}
 
             {/* contexto inline: última atividade do contato */}
             {la && (
