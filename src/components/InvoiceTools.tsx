@@ -41,13 +41,9 @@ export function InvoiceForm({ tenants }: { tenants: Tenant[] }) {
         <div><label className="label">Descrição</label><input className="input mt-1" value={f.description} onChange={(e) => up("description", e.target.value)} /></div>
         <div><label className="label">Vencimento</label><input className="input mt-1" type="date" value={f.due_date} onChange={(e) => up("due_date", e.target.value)} /></div>
         <div className="sm:col-span-2">
-          <label className="label">Link de pagamento Asaas *</label>
-          <input className="input mt-1" value={f.payment_link} onChange={(e) => up("payment_link", e.target.value)} placeholder="https://www.asaas.com/c/..." />
-          <p className="mt-1 text-xs text-subtle">Crie o link no Asaas (cobrança avulsa) e cole aqui. A Contatia envia a fatura por e-mail e controla o pagamento — sem pagar a comunicação do Asaas.</p>
-        </div>
-        <div className="sm:col-span-2">
-          <label className="label">ID da cobrança Asaas (opcional, casa o webhook)</label>
-          <input className="input mt-1" value={f.asaas_payment_id} onChange={(e) => up("asaas_payment_id", e.target.value)} placeholder="pay_..." />
+          <label className="label">Link de pagamento Asaas (opcional)</label>
+          <input className="input mt-1" value={f.payment_link} onChange={(e) => up("payment_link", e.target.value)} placeholder="deixe em branco para gerar automático" />
+          <p className="mt-1 text-xs text-subtle">Em branco, a Contatia <b>gera a cobrança no Asaas automaticamente</b> (via API) e traz o link + o id que casa o webhook. Preencha só se quiser usar um link já existente.</p>
         </div>
       </div>
       {msg && <p className="mt-2 text-sm text-danger">{msg}</p>}

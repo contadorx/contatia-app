@@ -143,7 +143,7 @@ export default async function Cobranca() {
         </table>
       </div>
       <p className="mt-2 text-xs text-subtle">
-        A fatura é enviada por e-mail pela sua caixa <b>transacional</b> (Brevo, remetente suporte@contatia.com.br — conecte em Config→E-mail). O cliente paga no link do Asaas; o webhook marca como paga e atualiza a assinatura. Você pode reenviar lembrete das vencidas ou marcar paga manualmente.
+        A cobrança é <b>gerada no Asaas via API</b> (link automático) e a fatura vai por e-mail pela <b>API do Brevo</b> (remetente {process.env.EMAIL_FROM || "suporte@contatia.com.br"}). O cliente paga no link; o webhook marca como paga e atualiza a assinatura. A régua reenvia lembrete das vencidas automaticamente.
       </p>
 
       <p className="mt-6 text-xs text-subtle">

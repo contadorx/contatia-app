@@ -8,33 +8,63 @@ async function guard() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { data: me } = await supabase.from("profiles").select("is_superadmin, tenant_id").eq("id", user?.id ?? "").maybeSingle();
-  return { supabase, ok: !!(me as any)?.is_superadmin, adminTenant: (me as any)?.tenant_id as string | null };
+  const { data: me } = await supabase.from("profiles").select("is_superadmin").eq("id", user?.id ?? "").maybeSingle();
+  return { supabase, ok: !!(me as any)?.is_superadmin };
 }
 
-export async function createInvoice(input: { tenant_id: string; amount: number; description?: string; due_date?: string; payment_link?: string; asaas_payment_id?: string }) {
+const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 });
+
+// Cria a fatura. Se ASAAS_API_KEY existir e não vier link manual, gera a cobrança no
+// Asaas automaticamente (cria/reusa cliente → cria cobrança → guarda link + pay_id).
+export async function createInvoice(input: {
+  tenant_id: string; amount: number; description?: string; due_date?: string; payment_link?: string; asaas_payment_id?: string;
+}) {
   const { supabase, ok } = await guard();
   if (!ok) return { error: "Apenas o dono da plataforma." };
   if (!input.tenant_id) return { error: "Escolha o workspace." };
+  if (!input.amount || Number(input.amount) <= 0) return { error: "Informe o valor." };
+
+  let link = input.payment_link?.trim() || null;
+  let payId = input.asaas_payment_id?.trim() || null;
+
+  // gera no Asaas se não veio link manual e a API está configurada
+  if (!link && process.env.ASAAS_API_KEY) {
+    const { data: t } = await supabase.from("tenants").select("name, legal_name, cnpj, contact_email, asaas_customer_id").eq("id", input.tenant_id).maybeSingle();
+    const { ensureAsaasCustomer, createAsaasCharge } = await import("@/lib/asaas");
+    const cust = await ensureAsaasCustomer({
+      name: (t as any)?.legal_name || (t as any)?.name || "Cliente Contatia",
+      email: (t as any)?.contact_email,
+      cpfCnpj: (t as any)?.cnpj,
+      existingId: (t as any)?.asaas_customer_id,
+    });
+    if (cust.error) return { error: cust.error };
+    if (cust.id && cust.id !== (t as any)?.asaas_customer_id) {
+      await supabase.from("tenants").update({ asaas_customer_id: cust.id }).eq("id", input.tenant_id);
+    }
+    const due = input.due_date || new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
+    const charge = await createAsaasCharge({ customerId: cust.id!, value: Number(input.amount), dueDate: due, description: input.description });
+    if (charge.error) return { error: charge.error };
+    link = charge.link || null;
+    payId = charge.id || null;
+  }
+
   const { error } = await supabase.from("platform_invoices").insert({
     tenant_id: input.tenant_id,
     amount: Number(input.amount) || 0,
     description: input.description?.trim() || null,
     due_date: input.due_date || null,
-    payment_link: input.payment_link?.trim() || null,
-    asaas_payment_id: input.asaas_payment_id?.trim() || null,
+    payment_link: link,
+    asaas_payment_id: payId,
     status: "pending",
   });
   if (error) return { error: error.message };
   revalidatePath("/dashboard/superadmin/cobranca");
-  return { ok: true };
+  return { ok: true, generated: !input.payment_link && !!link };
 }
 
-const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 2 });
-
-// Envia (ou reenvia) a fatura por e-mail usando a caixa SMTP do workspace do superadmin.
+// Envia (ou reenvia) a fatura por e-mail via API do Brevo (suporte@contatia.com.br).
 export async function sendInvoiceEmail(invoiceId: string, kind: "fatura" | "lembrete" = "fatura") {
-  const { supabase, ok, adminTenant } = await guard();
+  const { supabase, ok } = await guard();
   if (!ok) return { error: "Apenas o dono da plataforma." };
 
   const { data: inv } = await supabase
@@ -45,22 +75,7 @@ export async function sendInvoiceEmail(invoiceId: string, kind: "fatura" | "lemb
   if (!inv) return { error: "Fatura não encontrada." };
   const to = (inv as any).tenants?.contact_email as string | undefined;
   if (!to) return { error: "O workspace não tem e-mail de contato (Config→Negócio do cliente)." };
-  if (!(inv as any).payment_link) return { error: "Cole o link de pagamento do Asaas antes de enviar." };
-
-  // caixa de envio TRANSACIONAL: preferir a que envia como suporte@contatia.com.br
-  // (Brevo, domínio verificado — igual ao Quotaria). Fallback: caixa ativa do workspace.
-  const { data: accts } = await supabase
-    .from("email_accounts")
-    .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap")
-    .eq("tenant_id", adminTenant ?? "")
-    .eq("is_active", true)
-    .order("created_at", { ascending: true });
-  const list = (accts as any[]) || [];
-  const acct =
-    list.find((a) => (a.from_email || "").toLowerCase().startsWith("suporte@")) ||
-    list.find((a) => (a.smtp_host || "").includes("brevo")) ||
-    list[0];
-  if (!acct) return { error: "Conecte a caixa transacional (Brevo, suporte@contatia.com.br) em Config→E-mail." };
+  if (!(inv as any).payment_link) return { error: "Sem link de pagamento. Gere no Asaas ou cole um link." };
 
   const nome = (inv as any).tenants?.name || (inv as any).tenants?.legal_name || "cliente";
   const venc = (inv as any).due_date ? new Date((inv as any).due_date).toLocaleDateString("pt-BR") : "—";
@@ -83,19 +98,15 @@ ${link}
 
 Assim que o pagamento for confirmado, sua assinatura é atualizada automaticamente. Qualquer dúvida, é só responder este e-mail.`;
 
-  try {
-    const { sendEmail } = await import("@/lib/mailer");
-    await sendEmail(acct as any, { to, subject, text });
-  } catch (e: any) {
-    return { error: "Falha no envio: " + (e?.message || "erro") };
-  }
+  const { sendBrevoEmail } = await import("@/lib/brevo");
+  const res = await sendBrevoEmail({ to, toName: nome, subject, text });
+  if (res.error) return { error: res.error };
 
   await supabase.from("platform_invoices").update({ sent_at: new Date().toISOString() }).eq("id", invoiceId);
   revalidatePath("/dashboard/superadmin/cobranca");
   return { ok: true };
 }
 
-// Marca manualmente pago/cancelado (fallback quando não vier pelo webhook).
 export async function setInvoiceStatus(invoiceId: string, status: string) {
   const { supabase, ok } = await guard();
   if (!ok) return { error: "Apenas o dono da plataforma." };
