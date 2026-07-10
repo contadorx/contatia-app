@@ -41,7 +41,7 @@ export default function ContactTools() {
           const res = await importContacts(rows);
           if (res?.error) setMsg(res.error);
           else {
-            setMsg(`${res?.count} contatos importados.`);
+            setMsg(`${res?.count} contatos importados.${(res as any)?.invalid ? ` ${(res as any).invalid} com e-mail inválido (marcados; não entram em cadência de e-mail).` : ""}`);
             if (fileRef.current) fileRef.current.value = "";
           }
         });

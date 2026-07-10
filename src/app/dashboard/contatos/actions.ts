@@ -93,14 +93,37 @@ export async function importContacts(rows: Row[]) {
   }
   const withAccounts = clean.map((c) => ({ ...c, account_id: nameToId[(c.company || "").trim().toLowerCase()] || null }));
 
+  // verifica e-mails por DOMÍNIO único (uma checagem de MX por domínio, não por linha)
+  const { verifyEmail } = await import("@/lib/emailverify");
+  const domainStatus: Record<string, boolean> = {}; // domínio → recebe e-mail (MX)
+  const emailRe = /^[^\s@]+@([^\s@]+\.[^\s@]+)$/;
+  for (const c of withAccounts) {
+    const m = (c.email || "").toLowerCase().match(emailRe);
+    if (!m) continue;
+    const dom = m[1];
+    if (dom in domainStatus) continue;
+    const check = await verifyEmail(`x@${dom}`);
+    domainStatus[dom] = check.hasMx && !check.disposable;
+  }
+  const withStatus = withAccounts.map((c) => {
+    const m = (c.email || "").toLowerCase().match(emailRe);
+    let email_status = "ok";
+    if (c.email) {
+      if (!m) email_status = "invalid";
+      else email_status = domainStatus[m[1]] ? "ok" : "invalid";
+    }
+    return { ...c, email_status };
+  });
+  const invalidCount = withStatus.filter((c) => c.email && c.email_status === "invalid").length;
+
   // insere em lotes de 500
-  for (let i = 0; i < withAccounts.length; i += 500) {
-    const { error } = await supabase.from("contacts").insert(withAccounts.slice(i, i + 500));
+  for (let i = 0; i < withStatus.length; i += 500) {
+    const { error } = await supabase.from("contacts").insert(withStatus.slice(i, i + 500));
     if (error) return { error: error.message };
   }
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/contas");
-  return { ok: true, count: withAccounts.length, companies: companyNames.length };
+  return { ok: true, count: withStatus.length, companies: companyNames.length, invalid: invalidCount };
 }
 
 // Edita os dados de um contato (corrigir/completar informações).

@@ -95,13 +95,20 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
 
   const { data: task } = await supabase
     .from("tasks")
-    .select("id, channel, title, generated_content, contact_id, contacts(email, name)")
+    .select("id, channel, title, generated_content, contact_id, contacts(email, name, email_status)")
     .eq("id", taskId)
     .single();
   if (!task) return { error: "Tarefa não encontrada." };
   if (task.channel !== "email") return { error: "Tarefa não é de e-mail." };
   const to = (task as any).contacts?.email as string | undefined;
   if (!to) return { error: "Contato sem e-mail." };
+
+  // não envia para e-mail marcado como inválido/bounce (protege reputação)
+  const estatus = (task as any).contacts?.email_status as string | undefined;
+  if (estatus && ["invalid", "hard_bounce", "complaint"].includes(estatus)) {
+    await supabase.from("tasks").update({ status: "skipped" }).eq("id", taskId);
+    return { error: `E-mail marcado como "${estatus}". Envio bloqueado para proteger sua reputação.` };
+  }
 
   // proteção de reputação: não envia para e-mail suprimido (bounce/spam/unsubscribe)
   const { data: supp } = await supabase

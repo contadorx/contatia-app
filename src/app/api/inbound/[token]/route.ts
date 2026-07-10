@@ -40,6 +40,14 @@ export async function POST(req: Request, { params }: { params: { token: string }
     return NextResponse.json({ error: "Informe ao menos nome ou e-mail." }, { status: 400, headers: cors });
   }
 
+  // verifica o e-mail na entrada (sintaxe + descartável + MX) e grava o status
+  let email_status = "ok";
+  if (email) {
+    const { verifyEmail } = await import("@/lib/emailverify");
+    const check = await verifyEmail(email);
+    email_status = check.valid ? "ok" : check.disposable ? "invalid" : check.hasMx ? "ok" : "invalid";
+  }
+
   const { error } = await admin.from("contacts").insert({
     tenant_id: (tenant as any).id,
     name: name || email,
@@ -48,8 +56,9 @@ export async function POST(req: Request, { params }: { params: { token: string }
     company: company || null,
     origin: "web",
     status: "new",
+    email_status,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500, headers: cors });
 
-  return NextResponse.json({ ok: true }, { status: 200, headers: cors });
+  return NextResponse.json({ ok: true, email_status }, { status: 200, headers: cors });
 }
