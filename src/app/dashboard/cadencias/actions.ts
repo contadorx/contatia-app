@@ -114,6 +114,12 @@ export async function generateSequenceAI(brief: { market: string; product: strin
   if (!brief.market?.trim() || !brief.product?.trim()) {
     return { error: "Descreva ao menos o mercado e o produto." };
   }
+  // config de IA do workspace (fallback pro ambiente dentro do helper)
+  const supabase = createClient();
+  const { data: tenant } = await supabase.from("tenants").select("ai_model, ai_api_key").maybeSingle();
   const { generateSequence } = await import("@/lib/anthropic");
-  return await generateSequence(brief);
+  return await generateSequence(brief, {
+    apiKey: (tenant as any)?.ai_api_key || undefined,
+    model: (tenant as any)?.ai_model || undefined,
+  });
 }

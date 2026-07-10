@@ -18,15 +18,18 @@ function extractJsonArray(text: string): string {
 
 const CHANNELS = new Set(["email", "whatsapp", "call", "linkedin"]);
 
-export async function generateSequence(brief: {
-  market: string;
-  product: string;
-  icp: string;
-  tone?: string;
-}): Promise<{ steps?: AiStep[]; error?: string }> {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return { error: "Falta ANTHROPIC_API_KEY no ambiente (Vercel)." };
-  const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+export async function generateSequence(
+  brief: {
+    market: string;
+    product: string;
+    icp: string;
+    tone?: string;
+  },
+  opts?: { apiKey?: string; model?: string }
+): Promise<{ steps?: AiStep[]; error?: string }> {
+  const key = opts?.apiKey || process.env.ANTHROPIC_API_KEY;
+  if (!key) return { error: "Configure a chave da IA em Config (ou ANTHROPIC_API_KEY no ambiente)." };
+  const model = opts?.model || process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
 
   const system = [
     "Você é especialista em cadências de prospecção B2B outbound no Brasil.",

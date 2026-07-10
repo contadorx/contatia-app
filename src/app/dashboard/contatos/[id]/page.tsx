@@ -4,11 +4,13 @@ import { createClient } from "@/lib/supabase/server";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import EnrollButton from "@/components/EnrollButton";
 import ContactReplyButton from "@/components/ContactReplyButton";
+import NoteComposer from "@/components/NoteComposer";
 import { channelLabel, type Channel } from "@/lib/cadence";
 
 export const dynamic = "force-dynamic";
 
 const EVENT_LABEL: Record<string, string> = {
+  note: "Nota",
   task_done: "Toque executado",
   email_sent: "E-mail enviado",
   replied: "Respondeu",
@@ -22,6 +24,7 @@ const EVENT_COLOR: Record<string, string> = {
   doc_opened: "bg-signal",
   meeting: "bg-brand",
   email_opened: "bg-brand",
+  note: "bg-warn",
 };
 
 function fmt(iso: string) {
@@ -43,7 +46,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
       supabase.from("sequences").select("id, name").eq("is_active", true),
       supabase.from("enrollments").select("id, status, sequences(name)").eq("contact_id", params.id).order("created_at", { ascending: false }),
       supabase.from("tasks").select("id, channel, title, due_date").eq("contact_id", params.id).eq("status", "pending").order("due_date", { ascending: true }),
-      supabase.from("events").select("id, type, created_at").eq("contact_id", params.id).order("created_at", { ascending: false }).limit(50),
+      supabase.from("events").select("id, type, created_at, meta").eq("contact_id", params.id).order("created_at", { ascending: false }).limit(50),
       supabase.from("meetings").select("id, title, datetime, status").eq("contact_id", params.id).order("datetime", { ascending: false }),
     ]);
 
@@ -139,6 +142,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
         <div>
           <h2 className="mb-3 font-display text-lg font-bold">Linha do tempo</h2>
           <div className="card p-5">
+            <NoteComposer contactId={c.id} />
             {evs.length ? (
               <div className="relative space-y-4 pl-5">
                 <div className="absolute bottom-1 left-[5px] top-1 w-0.5 bg-line" />
@@ -146,6 +150,9 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
                   <div key={e.id} className="relative">
                     <div className={`absolute -left-[18px] top-1 h-[9px] w-[9px] rounded-full ${EVENT_COLOR[e.type] || "bg-subtle"}`} />
                     <p className="text-sm font-medium">{EVENT_LABEL[e.type] || e.type}</p>
+                    {e.type === "note" && e.meta?.text && (
+                      <p className="mt-0.5 whitespace-pre-wrap text-sm text-ink/80">{e.meta.text}</p>
+                    )}
                     <p className="text-xs text-subtle">{fmt(e.created_at)}</p>
                   </div>
                 ))}

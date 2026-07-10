@@ -92,3 +92,15 @@ export async function testSmtp(input: {
     return { error: e?.message || "Falha na conexão." };
   }
 }
+
+// Salva a config de IA do workspace (modelo + chave). A chave só é atualizada se enviada.
+export async function saveAiSettings(input: { model: string; apiKey: string }) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const patch: Record<string, unknown> = { ai_model: input.model.trim() || null };
+  if (input.apiKey.trim()) patch.ai_api_key = input.apiKey.trim();
+  const { error } = await supabase.from("tenants").update(patch).eq("id", tenant_id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/config");
+  return { ok: true };
+}
