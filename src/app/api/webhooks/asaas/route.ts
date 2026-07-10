@@ -25,10 +25,29 @@ export async function POST(req: Request) {
   const payment = body?.payment || {};
   const subId = payment?.subscription as string | undefined;
   const custId = payment?.customer as string | undefined;
+  const payId = payment?.id as string | undefined;
   const dueDate = payment?.dueDate as string | undefined;
   const value = Number(payment?.value) || 0;
 
   if (!event) return NextResponse.json({ ok: true, ignored: "sem evento" });
+
+  // 1) casa uma FATURA da central por asaas_payment_id (fluxo link de pagamento)
+  if (payId) {
+    const { data: inv } = await admin.from("platform_invoices").select("id, tenant_id").eq("asaas_payment_id", payId).maybeSingle();
+    if (inv) {
+      if (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") {
+        await admin.from("platform_invoices").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", (inv as any).id);
+        // reflete na assinatura do tenant
+        const base = dueDate ? new Date(dueDate) : new Date();
+        base.setMonth(base.getMonth() + 1);
+        await admin.from("tenants").update({ subscription_status: "active", current_period_end: base.toISOString().slice(0, 10), ...(value ? { mrr: value } : {}) }).eq("id", (inv as any).tenant_id);
+      } else if (event === "PAYMENT_OVERDUE") {
+        await admin.from("platform_invoices").update({ status: "overdue" }).eq("id", (inv as any).id);
+        await admin.from("tenants").update({ subscription_status: "past_due" }).eq("id", (inv as any).tenant_id);
+      }
+      return NextResponse.json({ ok: true, event, invoice: (inv as any).id });
+    }
+  }
 
   // localiza o tenant
   let q = admin.from("tenants").select("id");

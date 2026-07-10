@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
 import BillingRow from "@/components/BillingRow";
+import { InvoiceForm, InvoiceRow } from "@/components/InvoiceTools";
 
 export const dynamic = "force-dynamic";
 
@@ -27,10 +28,13 @@ export default async function Cobranca() {
   const admin = createAdminClient();
   const db = admin || supabase;
 
-  const [{ data: tenants }, { data: plans }] = await Promise.all([
+  const [{ data: tenants }, { data: plans }, { data: invoices }] = await Promise.all([
     db.from("tenants").select("id, name, legal_name, plan_id, subscription_status, mrr, current_period_end, asaas_customer_id, asaas_subscription_id, platform_plans(name)").order("created_at", { ascending: false }),
     db.from("platform_plans").select("id, name, price_monthly").eq("is_active", true).order("sort", { ascending: true }),
+    db.from("platform_invoices").select("id, amount, description, due_date, status, payment_link, sent_at, tenant_id, tenants(name)").order("created_at", { ascending: false }).limit(100),
   ]);
+
+  const invList = (invoices as any[]) || [];
 
   const tList = (tenants as any[]) || [];
   const pList = (plans as any[]) || [];
@@ -115,7 +119,34 @@ export default async function Cobranca() {
         </table>
       </div>
 
-      <p className="mt-4 text-xs text-subtle">
+      {/* Central de faturas */}
+      <div className="mt-8 flex items-center justify-between">
+        <h2 className="font-display text-lg font-bold">Central de faturas</h2>
+        <InvoiceForm tenants={rows.map((r) => ({ id: r.id, name: r.name }))} />
+      </div>
+      <div className="card mt-3 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="border-b border-line text-left text-subtle">
+            <tr>
+              <th className="px-4 py-3 font-medium">Cliente</th>
+              <th className="px-4 py-3 font-medium">Valor</th>
+              <th className="px-4 py-3 font-medium">Vence</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Envio</th>
+              <th className="px-4 py-3 font-medium">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {invList.map((inv) => <InvoiceRow key={inv.id} inv={inv} />)}
+            {!invList.length && <tr><td colSpan={6} className="px-4 py-8 text-center text-subtle">Nenhuma fatura ainda. Crie a primeira acima.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-subtle">
+        A fatura é enviada por e-mail pela sua caixa <b>transacional</b> (Brevo, remetente suporte@contatia.com.br — conecte em Config→E-mail). O cliente paga no link do Asaas; o webhook marca como paga e atualiza a assinatura. Você pode reenviar lembrete das vencidas ou marcar paga manualmente.
+      </p>
+
+      <p className="mt-6 text-xs text-subtle">
         Para o Asaas atualizar sozinho: configure o webhook para <b>/api/webhooks/asaas?token=SEU_TOKEN</b> e a env <b>ASAAS_WEBHOOK_TOKEN</b>. Enquanto não integra, dá pra lançar plano/status manualmente em &ldquo;editar&rdquo;.
       </p>
     </div>

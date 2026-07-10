@@ -135,5 +135,60 @@ export async function GET(req: Request) {
     /* expurgo não deve quebrar o cron */
   }
 
-  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, autoRan, purged, errors });
+  // ---- Régua de cobrança: marca vencidas + reenvia lembrete das já enviadas ----
+  let reminders = 0;
+  try {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    // 1) pending com vencimento passado → overdue
+    await admin.from("platform_invoices").update({ status: "overdue" }).eq("status", "pending").lt("due_date", todayStr);
+
+    // 2) acha a caixa transacional (Brevo/suporte@) do superadmin
+    const { data: su } = await admin.from("profiles").select("tenant_id").eq("is_superadmin", true).limit(1).maybeSingle();
+    const suTenant = (su as any)?.tenant_id as string | undefined;
+    if (suTenant) {
+      const { data: boxes } = await admin
+        .from("email_accounts")
+        .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token")
+        .eq("tenant_id", suTenant)
+        .eq("is_active", true);
+      const list = (boxes as any[]) || [];
+      const box = list.find((a) => (a.from_email || "").toLowerCase().startsWith("suporte@")) || list.find((a) => (a.smtp_host || "").includes("brevo")) || list[0];
+
+      if (box) {
+        const cutoff = new Date(Date.now() - 3 * 86400000).toISOString(); // já enviada há 3+ dias
+        const { data: due } = await admin
+          .from("platform_invoices")
+          .select("id, amount, description, due_date, payment_link, tenant_id, sent_at, tenants(name, legal_name, contact_email)")
+          .eq("status", "overdue")
+          .not("sent_at", "is", null)
+          .lt("sent_at", cutoff)
+          .not("payment_link", "is", null)
+          .limit(50);
+
+        const { sendEmail } = await import("@/lib/mailer");
+        for (const inv of (due as any[]) || []) {
+          const to = inv.tenants?.contact_email;
+          if (!to) continue;
+          const nome = inv.tenants?.name || inv.tenants?.legal_name || "cliente";
+          const valor = (Number(inv.amount) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+          const venc = inv.due_date ? new Date(inv.due_date).toLocaleDateString("pt-BR") : "—";
+          try {
+            await sendEmail(box as any, {
+              to,
+              subject: `Lembrete: fatura Contatia em aberto (${valor})`,
+              text: `Olá, ${nome}. Sua fatura de ${valor} (venc. ${venc}) segue em aberto.\n\nPague com segurança neste link:\n${inv.payment_link}\n\nAssim que confirmar, sua assinatura é atualizada automaticamente. Qualquer dúvida, é só responder este e-mail.`,
+            });
+            await admin.from("platform_invoices").update({ sent_at: new Date().toISOString() }).eq("id", inv.id);
+            reminders++;
+          } catch {
+            /* falha de um lembrete não interrompe a régua */
+          }
+        }
+      }
+    }
+  } catch {
+    /* régua não deve quebrar o cron */
+  }
+
+  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, autoRan, purged, reminders, errors });
 }
