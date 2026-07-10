@@ -1,50 +1,50 @@
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import TaskQueue from "@/components/TaskQueue";
 
 export const dynamic = "force-dynamic";
 
 export default async function Today() {
   const supabase = createClient();
+  const today = new Date().toISOString().slice(0, 10);
 
-  const [contacts, tasks, radar] = await Promise.all([
+  const [contactsCount, tasksToday, meetingsCount] = await Promise.all([
     supabase.from("contacts").select("id", { count: "exact", head: true }),
     supabase
       .from("tasks")
-      .select("id", { count: "exact", head: true })
+      .select("id, channel, title, generated_content, due_date, contacts(name, company, phone, email)")
       .eq("status", "pending")
-      .lte("due_date", new Date().toISOString().slice(0, 10)),
-    supabase.from("radar_leads").select("id", { count: "exact", head: true }),
+      .lte("due_date", today)
+      .order("due_date", { ascending: true }),
+    supabase.from("meetings").select("id", { count: "exact", head: true }).eq("status", "agendada"),
   ]);
 
+  const tasks = (tasksToday.data as any[]) || [];
+
   const cards = [
-    { label: "Toques de hoje", value: tasks.count ?? 0, href: "/dashboard/contatos", live: true },
-    { label: "Contatos", value: contacts.count ?? 0, href: "/dashboard/contatos" },
-    { label: "Leads no radar", value: radar.count ?? 0, href: "/dashboard/radar" },
+    { label: "Toques de hoje", value: tasks.length, live: true },
+    { label: "Contatos", value: contactsCount.count ?? 0 },
+    { label: "Reuniões agendadas", value: meetingsCount.count ?? 0 },
   ];
 
   return (
     <div>
       <h1 className="font-display text-2xl font-bold">O que precisa de você hoje</h1>
-      <p className="mt-1 text-sm text-subtle">Sua fila de cadência e o pulso da carteira.</p>
+      <p className="mt-1 text-sm text-subtle">Sua fila de cadência. Quem respondeu vem primeiro.</p>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-3">
         {cards.map((c) => (
-          <Link key={c.label} href={c.href} className="card p-5 transition hover:border-brand">
+          <div key={c.label} className="card p-5">
             <div className="flex items-center gap-2">
               {c.live && <span className="h-2 w-2 rounded-full bg-signal" />}
               <span className="label">{c.label}</span>
             </div>
             <p className="mt-2 font-display text-3xl font-bold">{c.value}</p>
-          </Link>
+          </div>
         ))}
       </div>
 
-      <div className="card mt-6 p-6">
-        <p className="text-sm text-subtle">
-          Fase 0 no ar: base multi-tenant, contatos e importação. O motor de cadência
-          (fila diária de e-mail/WhatsApp/ligação/LinkedIn) entra na Fase 1.
-        </p>
-      </div>
+      <h2 className="mt-8 mb-3 font-display text-lg font-bold">Fila de hoje</h2>
+      <TaskQueue tasks={tasks} />
     </div>
   );
 }

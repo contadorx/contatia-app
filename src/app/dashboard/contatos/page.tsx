@@ -1,15 +1,22 @@
 import { createClient } from "@/lib/supabase/server";
 import ContactTools from "@/components/ContactTools";
+import EnrollButton from "@/components/EnrollButton";
 
 export const dynamic = "force-dynamic";
 
 export default async function Contatos() {
   const supabase = createClient();
-  const { data: contacts } = await supabase
-    .from("contacts")
-    .select("id, name, email, phone, company, origin, status, created_at")
-    .order("created_at", { ascending: false })
-    .limit(200);
+
+  const [{ data: contacts }, { data: sequences }] = await Promise.all([
+    supabase
+      .from("contacts")
+      .select("id, name, email, phone, company, origin, status, created_at")
+      .order("created_at", { ascending: false })
+      .limit(200),
+    supabase.from("sequences").select("id, name").eq("is_active", true).order("created_at", { ascending: false }),
+  ]);
+
+  const seqs = (sequences as { id: string; name: string }[]) || [];
 
   return (
     <div>
@@ -20,7 +27,7 @@ export default async function Contatos() {
         <ContactTools />
       </div>
 
-      <div className="card mt-6 overflow-hidden">
+      <div className="card mt-6 overflow-visible">
         {!contacts?.length ? (
           <div className="p-10 text-center text-sm text-subtle">
             Nenhum contato ainda. Adicione um ou importe seu CSV para começar.
@@ -33,7 +40,7 @@ export default async function Contatos() {
                 <th className="px-4 py-3 font-medium">Empresa</th>
                 <th className="px-4 py-3 font-medium">Contato</th>
                 <th className="px-4 py-3 font-medium">Origem</th>
-                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium text-right">Ação</th>
               </tr>
             </thead>
             <tbody>
@@ -44,14 +51,14 @@ export default async function Contatos() {
                   <td className="px-4 py-3 text-subtle">{c.email || c.phone || "—"}</td>
                   <td className="px-4 py-3">
                     {c.origin ? (
-                      <span className="rounded-full bg-brand-soft px-2 py-0.5 text-xs text-brand-dark">
-                        {c.origin}
-                      </span>
+                      <span className="rounded-full bg-brand-soft px-2 py-0.5 text-xs text-brand-dark">{c.origin}</span>
                     ) : (
                       "—"
                     )}
                   </td>
-                  <td className="px-4 py-3 text-subtle">{c.status}</td>
+                  <td className="px-4 py-3 text-right">
+                    <EnrollButton contactId={c.id} sequences={seqs} />
+                  </td>
                 </tr>
               ))}
             </tbody>
