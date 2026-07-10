@@ -4,7 +4,8 @@
 export const POINTS: Record<string, number> = {
   replied: 30, // respondeu — o sinal mais forte
   meeting: 20, // reunião marcada
-  email_opened: 15, // abriu (fatia futura de tracking)
+  doc_opened: 15, // abriu a proposta — sinal de compra forte
+  email_opened: 15, // abriu (fatia futura de tracking de e-mail)
   link_clicked: 10,
   task_done: 2, // toque executado
   email_sent: 1, // envio
