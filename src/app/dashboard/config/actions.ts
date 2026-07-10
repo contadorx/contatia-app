@@ -108,3 +108,35 @@ export async function saveAiSettings(input: { model: string; apiKey: string }) {
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
+
+// Salva a ficha do negócio (owner). Campos vazios viram null.
+export async function saveBusinessProfile(input: {
+  legal_name: string;
+  cnpj: string;
+  segment: string;
+  contact_email: string;
+  phone: string;
+  website: string;
+  logo_url: string;
+  brand_color: string;
+}) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const clean = (v: string) => (v?.trim() ? v.trim() : null);
+  const { error } = await supabase
+    .from("tenants")
+    .update({
+      legal_name: clean(input.legal_name),
+      cnpj: clean(input.cnpj),
+      segment: clean(input.segment),
+      contact_email: clean(input.contact_email),
+      phone: clean(input.phone),
+      website: clean(input.website),
+      logo_url: clean(input.logo_url),
+      brand_color: clean(input.brand_color),
+    })
+    .eq("id", tenant_id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/config");
+  return { ok: true };
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useTransition, useState } from "react";
-import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask } from "@/app/dashboard/task-actions";
+import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask, sendAllEmailTasks } from "@/app/dashboard/task-actions";
 import { channelLabel, waLink, type Channel } from "@/lib/cadence";
 
 type Task = {
@@ -24,6 +24,19 @@ const chanStyle: Record<Channel, string> = {
 export default function TaskQueue({ tasks, hotThreshold }: { tasks: Task[]; hotThreshold: number }) {
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+
+  const pendingEmails = tasks.filter((t) => t.channel === "email").length;
+
+  function sendAll() {
+    setErr(null);
+    setBulkMsg(null);
+    start(async () => {
+      const res = (await sendAllEmailTasks()) as { sent?: number; failed?: number; error?: string };
+      if (res?.error) setErr(res.error);
+      else setBulkMsg(`✓ ${res.sent} e-mails enviados${res.failed ? `, ${res.failed} falharam (cap diário/sem caixa)` : ""}.`);
+    });
+  }
 
   function act(fn: () => Promise<unknown>) {
     start(async () => {
@@ -54,6 +67,15 @@ export default function TaskQueue({ tasks, hotThreshold }: { tasks: Task[]; hotT
 
   return (
     <div className="space-y-2">
+      {pendingEmails > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-brand/30 bg-brand-soft/60 p-3">
+          <span className="text-sm font-semibold">{pendingEmails} e-mail{pendingEmails > 1 ? "s" : ""} na fila</span>
+          <button className="btn-brand py-1.5 text-sm" onClick={sendAll} disabled={pending}>
+            {pending ? "Enviando..." : "Enviar todos os e-mails"}
+          </button>
+          {bulkMsg && <span className="text-sm text-signal">{bulkMsg}</span>}
+        </div>
+      )}
       {err && <div className="rounded-xl bg-danger/10 p-3 text-sm text-danger">{err}</div>}
       {tasks.map((t) => {
         const c = t.contacts;

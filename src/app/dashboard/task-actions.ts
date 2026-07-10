@@ -172,3 +172,29 @@ export async function sendWhatsAppTask(taskId: string) {
   revalidatePath("/dashboard");
   return { ok: true };
 }
+
+// Envia TODAS as tarefas de e-mail pendentes de hoje, respeitando o cap diário.
+export async function sendAllEmailTasks() {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: tasks } = await supabase
+    .from("tasks")
+    .select("id")
+    .eq("channel", "email")
+    .eq("status", "pending")
+    .lte("due_date", today)
+    .limit(500);
+  const ids = ((tasks as any[]) || []).map((t) => t.id);
+  if (!ids.length) return { ok: true, sent: 0, failed: 0 };
+
+  let sent = 0;
+  let failed = 0;
+  for (const id of ids) {
+    const res = (await sendEmailTask(id)) as { ok?: boolean; error?: string };
+    if (res?.ok) sent++;
+    else failed++;
+  }
+  revalidatePath("/dashboard");
+  return { ok: true, sent, failed };
+}

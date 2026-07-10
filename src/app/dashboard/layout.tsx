@@ -1,22 +1,9 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import SignOut from "@/components/SignOut";
+import DashboardNav from "@/components/DashboardNav";
 
 export const dynamic = "force-dynamic";
-
-const nav = [
-  { href: "/dashboard", label: "Hoje" },
-  { href: "/dashboard/pipeline", label: "Pipeline" },
-  { href: "/dashboard/metricas", label: "Métricas" },
-  { href: "/dashboard/equipe", label: "Equipe" },
-  { href: "/dashboard/reunioes", label: "Reuniões" },
-  { href: "/dashboard/propostas", label: "Propostas" },
-  { href: "/dashboard/cadencias", label: "Cadências" },
-  { href: "/dashboard/contatos", label: "Contatos" },
-  { href: "/dashboard/contas", label: "Empresas" },
-  { href: "/dashboard/radar", label: "Radar" },
-  { href: "/dashboard/config", label: "Config" },
-];
 
 export default async function DashboardLayout({
   children,
@@ -42,18 +29,16 @@ export default async function DashboardLayout({
         <p className="font-display text-xl font-bold">
           Contat<span className="text-brand">ia</span>
         </p>
-        <nav className="mt-8 space-y-1">
-          {nav.map((n) => (
-            <Link
-              key={n.href}
-              href={n.href}
-              className="block rounded-xl px-3 py-2 text-sm font-medium text-ink hover:bg-muted"
-            >
-              {n.label}
-            </Link>
-          ))}
-        </nav>
+
+        <DashboardNav />
+
         <div className="mt-auto border-t border-line pt-4">
+          <Link
+            href="/dashboard/config"
+            className="mb-3 flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-ink hover:bg-muted"
+          >
+            <span aria-hidden>⚙️</span> Configurações
+          </Link>
           <p className="truncate text-sm font-medium">{profile?.full_name || user?.email}</p>
           <p className="mb-2 text-xs text-subtle">{profile?.role === "owner" ? "Owner" : "Parceiro"}</p>
           <SignOut />

@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import TaskQueue from "@/components/TaskQueue";
+import OnboardingChecklist from "@/components/OnboardingChecklist";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,11 @@ export default async function Today() {
       <h1 className="font-display text-2xl font-bold">O que precisa de você hoje</h1>
       <p className="mt-1 text-sm text-subtle">Sua fila de cadência — quem está mais quente vem primeiro.</p>
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-3">
+      <div className="mt-6">
+        <OnboardingChecklist />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-3">
         {cards.map((c) => (
           <div key={c.label} className="card p-5">
             <div className="flex items-center gap-2">
