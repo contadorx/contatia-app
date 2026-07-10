@@ -20,6 +20,8 @@ export default function SmtpForm() {
     smtp_secure: false,
     smtp_user: "",
     smtp_pass: "",
+    detect_replies: false,
+    imap_host: "",
   });
   const [msg, setMsg] = useState<string | null>(null);
   const [presetHint, setPresetHint] = useState<string | null>(null);
@@ -77,7 +79,7 @@ export default function SmtpForm() {
       const res = await saveSmtpAccount(f);
       if (res?.error) setMsg(res.error);
       else {
-        setF({ from_email: "", display_name: "", smtp_host: "", smtp_port: 587, smtp_secure: false, smtp_user: "", smtp_pass: "" });
+        setF({ from_email: "", display_name: "", smtp_host: "", smtp_port: 587, smtp_secure: false, smtp_user: "", smtp_pass: "", detect_replies: false, imap_host: "" });
         setOpen(false);
       }
     });
@@ -141,6 +143,20 @@ export default function SmtpForm() {
           <input type="password" className="input mt-1" value={f.smtp_pass} onChange={(e) => up("smtp_pass", e.target.value)} />
         </div>
       </div>
+      <div className="mt-4 rounded-xl bg-muted p-3">
+        <label className="flex items-center gap-2 text-sm font-medium">
+          <input type="checkbox" checked={f.detect_replies} onChange={(e) => up("detect_replies", e.target.checked)} />
+          Detectar respostas automaticamente (IMAP)
+        </label>
+        {f.detect_replies && (
+          <div className="mt-3">
+            <label className="label">Host IMAP (se diferente do SMTP)</label>
+            <input className="input mt-1" value={f.imap_host} onChange={(e) => up("imap_host", e.target.value)} placeholder="ex.: imap.empresa.com.br (vazio = usa o host SMTP, porta 993)" />
+            <p className="mt-1 text-xs text-subtle">Usa o mesmo usuário/senha do envio. Não funciona em caixas de envio puro (ex.: Brevo).</p>
+          </div>
+        )}
+      </div>
+
       {msg && <p className="mt-3 text-sm text-danger">{msg}</p>}
 
       {test?.ok && (

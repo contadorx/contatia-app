@@ -24,6 +24,8 @@ export async function saveSmtpAccount(input: {
   smtp_secure: boolean;
   smtp_user: string;
   smtp_pass: string;
+  detect_replies?: boolean;
+  imap_host?: string;
 }) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace atribuído." };
@@ -41,6 +43,8 @@ export async function saveSmtpAccount(input: {
     smtp_secure: !!input.smtp_secure,
     smtp_user: input.smtp_user.trim(),
     smtp_pass: input.smtp_pass,
+    detect_replies: !!input.detect_replies,
+    imap_host: input.imap_host?.trim() || null,
     is_active: true,
   });
   if (error) return { error: error.message };
