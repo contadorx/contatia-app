@@ -21,6 +21,7 @@ export async function createOpportunity(input: {
   value_mrr: number;
   stage_id: string | null;
   primary_contact_id: string | null;
+  account_id?: string | null;
 }) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace atribuído." };
@@ -33,6 +34,7 @@ export async function createOpportunity(input: {
     value_mrr: Number(input.value_mrr) || 0,
     stage_id: input.stage_id,
     primary_contact_id: input.primary_contact_id,
+    account_id: input.account_id || null,
     status: "open",
   });
   if (error) return { error: error.message };

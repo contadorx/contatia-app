@@ -13,6 +13,7 @@ type Opp = {
   contact_name: string | null;
 };
 type Contact = { id: string; name: string };
+type Account = { id: string; name: string };
 
 const brl = (v: number) =>
   (v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
@@ -21,10 +22,12 @@ export default function PipelineBoard({
   stages,
   opportunities,
   contacts,
+  accounts,
 }: {
   stages: Stage[];
   opportunities: Opp[];
   contacts: Contact[];
+  accounts: Account[];
 }) {
   const [opps, setOpps] = useState<Opp[]>(opportunities);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -35,6 +38,7 @@ export default function PipelineBoard({
   const [title, setTitle] = useState("");
   const [value, setValue] = useState("");
   const [contactId, setContactId] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
   function onDrop(stageId: string) {
@@ -55,12 +59,14 @@ export default function PipelineBoard({
         value_mrr: Number(value) || 0,
         stage_id: stages[0]?.id ?? null,
         primary_contact_id: contactId || null,
+        account_id: accountId || null,
       });
       if (res?.error) setMsg(res.error);
       else {
         setTitle("");
         setValue("");
         setContactId("");
+        setAccountId("");
         setShowForm(false);
         // recarrega via revalidate (server) — otimista simples: adiciona local
         setOpps((l) => [
@@ -101,7 +107,7 @@ export default function PipelineBoard({
 
       {showForm && (
         <div className="card mb-4 p-5">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-4">
             <div className="sm:col-span-1">
               <label className="label">Título *</label>
               <input className="input mt-1" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Assinatura — Escritório X" />
@@ -109,6 +115,17 @@ export default function PipelineBoard({
             <div>
               <label className="label">Valor recorrente (R$/mês)</label>
               <input type="number" className="input mt-1" value={value} onChange={(e) => setValue(e.target.value)} placeholder="179" />
+            </div>
+            <div>
+              <label className="label">Empresa (opcional)</label>
+              <select className="input mt-1" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+                <option value="">—</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="label">Contato (opcional)</label>

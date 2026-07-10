@@ -6,13 +6,14 @@ export const dynamic = "force-dynamic";
 export default async function Pipeline() {
   const supabase = createClient();
 
-  const [{ data: stages }, { data: opps }, { data: contacts }] = await Promise.all([
+  const [{ data: stages }, { data: opps }, { data: contacts }, { data: accounts }] = await Promise.all([
     supabase.from("pipeline_stages").select("id, name, position, is_won, is_lost").order("position", { ascending: true }),
     supabase
       .from("opportunities")
       .select("id, title, value_mrr, stage_id, status, contacts:primary_contact_id(name)")
       .order("created_at", { ascending: false }),
     supabase.from("contacts").select("id, name").order("created_at", { ascending: false }).limit(500),
+    supabase.from("accounts").select("id, name").order("created_at", { ascending: false }).limit(500),
   ]);
 
   const opportunities = ((opps as any[]) || []).map((o) => ({
@@ -34,6 +35,7 @@ export default async function Pipeline() {
           stages={(stages as any[]) || []}
           opportunities={opportunities}
           contacts={(contacts as { id: string; name: string }[]) || []}
+          accounts={(accounts as { id: string; name: string }[]) || []}
         />
       </div>
     </div>
