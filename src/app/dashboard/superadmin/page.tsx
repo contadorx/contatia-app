@@ -91,8 +91,13 @@ export default async function Superadmin() {
 
   return (
     <div>
-      <h1 className="font-display text-2xl font-bold">Plataforma</h1>
-      <p className="mt-1 text-sm text-subtle">Visão do dono do Contatia sobre todos os workspaces. Leitura apenas.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="font-display text-2xl font-bold">Plataforma</h1>
+          <p className="mt-1 text-sm text-subtle">Visão do dono do Contatia sobre todos os workspaces. Leitura apenas.</p>
+        </div>
+        <a href="/dashboard/superadmin/parceiros" className="btn-ghost">Parceiros & comissões →</a>
+      </div>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-4">
         {[
