@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import TeamTools from "@/components/TeamTools";
 import InviteTools from "@/components/InviteTools";
+import TeamRoleSelect from "@/components/TeamRoleSelect";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +11,14 @@ const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "cu
 export default async function Equipe() {
   const supabase = createClient();
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: meProfile } = await supabase.from("profiles").select("role, team_role").eq("id", user?.id ?? "").maybeSingle();
+  const canManage = (meProfile as any)?.role === "owner" || ["admin", "gestor"].includes((meProfile as any)?.team_role);
+
   const [{ data: members }, { data: contacts }, { data: opps }, { count: unassignedCount }, { data: invites }] = await Promise.all([
-    supabase.from("profiles").select("id, full_name, email, role, is_active").order("full_name", { ascending: true }),
+    supabase.from("profiles").select("id, full_name, email, role, team_role, is_active").order("full_name", { ascending: true }),
     supabase.from("contacts").select("assigned_to, score"),
     supabase.from("opportunities").select("owner_id, status, value_mrr"),
     supabase.from("contacts").select("id", { count: "exact", head: true }).is("assigned_to", null),
@@ -31,6 +38,7 @@ export default async function Equipe() {
       id: m.id,
       name: m.full_name || m.email,
       role: m.role,
+      team_role: m.team_role,
       active: m.is_active,
       contacts: myContacts.length,
       hot,
@@ -57,6 +65,7 @@ export default async function Equipe() {
           <thead className="border-b border-line text-left text-subtle">
             <tr>
               <th className="px-4 py-3 font-medium">Vendedor</th>
+              <th className="px-4 py-3 font-medium">Nível</th>
               <th className="px-4 py-3 font-medium">Contatos</th>
               <th className="px-4 py-3 font-medium">Quentes</th>
               <th className="px-4 py-3 font-medium">Pipeline aberto</th>
@@ -70,6 +79,9 @@ export default async function Equipe() {
                   {r.name}
                   {r.role === "owner" && <span className="ml-1 rounded-full bg-muted px-2 py-0.5 text-xs text-subtle">owner</span>}
                   {!r.active && <span className="ml-1 text-xs text-subtle">(inativo)</span>}
+                </td>
+                <td className="px-4 py-3">
+                  <TeamRoleSelect memberId={r.id} current={r.team_role} canManage={canManage} />
                 </td>
                 <td className="px-4 py-3 text-subtle">{r.contacts}</td>
                 <td className="px-4 py-3">

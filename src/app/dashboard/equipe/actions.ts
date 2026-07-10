@@ -109,3 +109,16 @@ export async function revokeInvite(id: string) {
   revalidatePath("/dashboard/equipe");
   return { ok: true };
 }
+
+// Define o nível de equipe de um membro. Só owner/admin/gestor podem alterar.
+export async function setTeamRole(memberId: string, teamRole: string) {
+  const { supabase, role, user_id } = await ctx();
+  const { data: me } = await supabase.from("profiles").select("team_role").eq("id", user_id ?? "").maybeSingle();
+  const canManage = role === "owner" || ["admin", "gestor"].includes((me as any)?.team_role);
+  if (!canManage) return { error: "Só gestores/admin podem alterar níveis de equipe." };
+  if (!["admin", "gestor", "sdr", "vendedor"].includes(teamRole)) return { error: "Nível inválido." };
+  const { error } = await supabase.from("profiles").update({ team_role: teamRole }).eq("id", memberId);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/equipe");
+  return { ok: true };
+}
