@@ -3,6 +3,8 @@ import { HOT_THRESHOLD } from "@/lib/scoring";
 import TeamTools from "@/components/TeamTools";
 import InviteTools from "@/components/InviteTools";
 import TeamRoleSelect from "@/components/TeamRoleSelect";
+import PermissionMatrix from "@/components/PermissionMatrix";
+import { isManager as isMgr } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +17,7 @@ export default async function Equipe() {
     data: { user },
   } = await supabase.auth.getUser();
   const { data: meProfile } = await supabase.from("profiles").select("role, team_role").eq("id", user?.id ?? "").maybeSingle();
-  const canManage = (meProfile as any)?.role === "owner" || ["admin", "gestor"].includes((meProfile as any)?.team_role);
+  const canManage = isMgr((meProfile as any)?.role, (meProfile as any)?.team_role);
 
   const [{ data: members }, { data: contacts }, { data: opps }, { count: unassignedCount }, { data: invites }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, email, role, team_role, is_active").order("full_name", { ascending: true }),
@@ -93,6 +95,15 @@ export default async function Equipe() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Matriz de permissões — o que cada papel faz */}
+      <div className="card mt-6 p-5">
+        <h2 className="font-display text-lg font-bold">O que cada papel faz</h2>
+        <p className="mt-1 text-sm text-subtle">Ao mudar o nível de alguém na tabela acima, estas permissões passam a valer para a pessoa.</p>
+        <div className="mt-4">
+          <PermissionMatrix />
+        </div>
       </div>
 
       <p className="mt-4 text-xs text-subtle">

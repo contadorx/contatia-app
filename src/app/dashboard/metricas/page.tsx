@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { isManager as isMgr } from "@/lib/permissions";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import GoalPanel from "@/components/GoalPanel";
 
@@ -14,7 +15,7 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
     data: { user },
   } = await supabase.auth.getUser();
   const { data: me } = await supabase.from("profiles").select("role, team_role").eq("id", user?.id ?? "").maybeSingle();
-  const isManager = (me as any)?.role === "owner" || ["admin", "gestor"].includes((me as any)?.team_role);
+  const isManager = isMgr((me as any)?.role, (me as any)?.team_role);
 
   // filtros
   const dias = Number(searchParams.dias) || 30;

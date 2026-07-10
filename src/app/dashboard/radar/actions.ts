@@ -126,12 +126,45 @@ export async function enrichAndPush(radarId: string, sequenceId?: string) {
   const company = L.nome_fantasia || L.razao_social || null;
   const name = contato || company || L.cnpj || "Empresa";
 
+  // Radar é só descoberta: ao puxar, a empresa vai para Empresas (accounts) e o contato
+  // fica amarrado a ela. Encontra por CNPJ (preferência) ou nome; senão cria com dados ricos.
+  let account_id: string | null = null;
+  if (company || L.cnpj) {
+    let found: any = null;
+    if (L.cnpj) {
+      const { data } = await supabase.from("accounts").select("id").eq("tenant_id", tenant_id).eq("cnpj", L.cnpj).limit(1).maybeSingle();
+      found = data;
+    }
+    if (!found && company) {
+      const { data } = await supabase.from("accounts").select("id").eq("tenant_id", tenant_id).ilike("name", company).limit(1).maybeSingle();
+      found = data;
+    }
+    if (found) {
+      account_id = found.id;
+    } else {
+      const { data: acc } = await supabase
+        .from("accounts")
+        .insert({
+          tenant_id,
+          name: company || L.razao_social || L.cnpj || "Empresa",
+          cnpj: L.cnpj || null,
+          cnae: L.cnae || null,
+          uf: L.uf || null,
+          municipio: L.municipio || null,
+        })
+        .select("id")
+        .maybeSingle();
+      account_id = (acc as any)?.id || null;
+    }
+  }
+
   const { data: contact, error } = await supabase
     .from("contacts")
     .insert({
       tenant_id,
       name,
       company,
+      account_id,
       cnpj: L.cnpj || null,
       email,
       phone,
@@ -172,6 +205,7 @@ export async function enrichAndPush(radarId: string, sequenceId?: string) {
       tenant_id,
       title: company || name,
       primary_contact_id: (contact as any).id,
+      account_id,
       owner_id: (me as any)?.id || null,
       stage_id: (firstStage as any).id,
       status: "open",
@@ -186,6 +220,7 @@ export async function enrichAndPush(radarId: string, sequenceId?: string) {
 
   revalidatePath("/dashboard/radar");
   revalidatePath("/dashboard/contatos");
+  revalidatePath("/dashboard/contas");
   revalidatePath("/dashboard/pipeline");
   return { ok: true };
 }
