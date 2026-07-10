@@ -1,7 +1,7 @@
 "use client";
 
-import { useTransition } from "react";
-import { completeTask, skipTask, snoozeTask } from "@/app/dashboard/task-actions";
+import { useTransition, useState } from "react";
+import { completeTask, skipTask, snoozeTask, sendEmailTask } from "@/app/dashboard/task-actions";
 import { channelLabel, waLink, type Channel } from "@/lib/cadence";
 
 type Task = {
@@ -22,10 +22,19 @@ const chanStyle: Record<Channel, string> = {
 
 export default function TaskQueue({ tasks }: { tasks: Task[] }) {
   const [pending, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
 
   function act(fn: () => Promise<unknown>) {
     start(async () => {
       await fn();
+    });
+  }
+
+  function send(id: string) {
+    setErr(null);
+    start(async () => {
+      const res = (await sendEmailTask(id)) as { error?: string } | undefined;
+      if (res?.error) setErr(res.error);
     });
   }
 
@@ -38,6 +47,7 @@ export default function TaskQueue({ tasks }: { tasks: Task[] }) {
 
   return (
     <div className="space-y-2">
+      {err && <div className="rounded-xl bg-danger/10 p-3 text-sm text-danger">{err}</div>}
       {tasks.map((t) => {
         const c = t.contacts;
         const content = t.generated_content || "";
@@ -66,13 +76,18 @@ export default function TaskQueue({ tasks }: { tasks: Task[] }) {
               </a>
             )}
             {t.channel === "email" && c?.email && (
-              <a
-                className="btn-ghost py-1.5 text-xs"
-                href={`mailto:${c.email}?subject=${encodeURIComponent(t.title || "")}&body=${encodeURIComponent(content)}`}
-                onClick={() => act(() => completeTask(t.id))}
-              >
-                Abrir e-mail
-              </a>
+              <>
+                <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => send(t.id)}>
+                  Enviar
+                </button>
+                <a
+                  className="text-xs text-subtle hover:text-ink"
+                  href={`mailto:${c.email}?subject=${encodeURIComponent(t.title || "")}&body=${encodeURIComponent(content)}`}
+                  title="Abrir no seu cliente de e-mail"
+                >
+                  ✎
+                </a>
+              </>
             )}
             {t.channel === "linkedin" && (
               <button className="btn-ghost py-1.5 text-xs" onClick={() => act(() => completeTask(t.id))}>

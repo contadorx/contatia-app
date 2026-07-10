@@ -11,6 +11,7 @@ const nav = [
   { href: "/dashboard/contatos", label: "Contatos" },
   { href: "/dashboard/contas", label: "Empresas" },
   { href: "/dashboard/radar", label: "Radar" },
+  { href: "/dashboard/config", label: "Config" },
 ];
 
 export default async function DashboardLayout({
