@@ -26,7 +26,7 @@ export async function generateSequence(brief: {
 }): Promise<{ steps?: AiStep[]; error?: string }> {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return { error: "Falta ANTHROPIC_API_KEY no ambiente (Vercel)." };
-  const model = process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest";
+  const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
 
   const system = [
     "Você é especialista em cadências de prospecção B2B outbound no Brasil.",
@@ -63,6 +63,11 @@ export async function generateSequence(brief: {
     });
     if (!res.ok) {
       const t = await res.text();
+      if (res.status === 404 && /model/i.test(t)) {
+        return {
+          error: `Modelo "${model}" indisponível na sua conta. Ajuste a env var ANTHROPIC_MODEL (ex.: claude-sonnet-4-5, claude-haiku-4-5) e refaça o deploy. Liste os seus em GET /v1/models.`,
+        };
+      }
       return { error: `API ${res.status}: ${t.slice(0, 180)}` };
     }
     const data = await res.json();

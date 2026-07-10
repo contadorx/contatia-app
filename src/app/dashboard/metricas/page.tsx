@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { HOT_THRESHOLD } from "@/lib/scoring";
+import GoalPanel from "@/components/GoalPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -12,13 +13,26 @@ export default async function Metricas() {
   since.setDate(since.getDate() - 30);
   const sinceISO = since.toISOString();
 
-  const [{ data: stages }, { data: opps }, { data: events }, { data: meetings }, hot] = await Promise.all([
-    supabase.from("pipeline_stages").select("id, name, position, is_won, is_lost").order("position", { ascending: true }),
-    supabase.from("opportunities").select("stage_id, status, value_mrr"),
-    supabase.from("events").select("type, created_at").gte("created_at", sinceISO),
-    supabase.from("meetings").select("status"),
-    supabase.from("contacts").select("id", { count: "exact", head: true }).gte("score", HOT_THRESHOLD),
-  ]);
+  // período corrente (YYYY-MM) e início do mês
+  const now = new Date();
+  const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const [{ data: stages }, { data: opps }, { data: events }, { data: meetings }, hot, { data: goal }, { data: monthEvents }, { data: monthWon }] =
+    await Promise.all([
+      supabase.from("pipeline_stages").select("id, name, position, is_won, is_lost").order("position", { ascending: true }),
+      supabase.from("opportunities").select("stage_id, status, value_mrr"),
+      supabase.from("events").select("type, created_at").gte("created_at", sinceISO),
+      supabase.from("meetings").select("status"),
+      supabase.from("contacts").select("id", { count: "exact", head: true }).gte("score", HOT_THRESHOLD),
+      supabase.from("goals").select("mrr_target, touch_target").eq("user_id", user?.id ?? "").eq("period", period).maybeSingle(),
+      supabase.from("events").select("type").in("type", ["task_done", "email_sent"]).gte("created_at", monthStart),
+      supabase.from("opportunities").select("value_mrr").eq("status", "won").gte("updated_at", monthStart),
+    ]);
 
   const stageList = (stages as any[]) || [];
   const oppList = (opps as any[]) || [];
@@ -66,6 +80,16 @@ export default async function Metricas() {
     <div>
       <h1 className="font-display text-2xl font-bold">Métricas</h1>
       <p className="mt-1 text-sm text-subtle">A saúde do funil e a atividade da sua operação de vendas.</p>
+
+      <div className="mt-6">
+        <GoalPanel
+          period={period}
+          mrrTarget={Number((goal as any)?.mrr_target) || 0}
+          touchTarget={Number((goal as any)?.touch_target) || 0}
+          wonMrr={((monthWon as any[]) || []).reduce((s, o) => s + Number(o.value_mrr || 0), 0)}
+          touchesDone={((monthEvents as any[]) || []).length}
+        />
+      </div>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-4">
         {cards.map((c) => (
