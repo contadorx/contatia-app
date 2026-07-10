@@ -22,6 +22,9 @@ export async function scheduleMeeting(input: {
   contact_id: string;
   title: string;
   datetime: string; // ISO local do input datetime-local
+  duration_min?: number;
+  location?: string;
+  notes?: string;
   remind_24h: boolean;
   remind_1h: boolean;
   channels: ("email" | "whatsapp")[];
@@ -48,6 +51,9 @@ export async function scheduleMeeting(input: {
       assigned_to: assigned,
       title: input.title?.trim() || "Reunião",
       datetime: when.toISOString(),
+      duration_min: Number(input.duration_min) || 30,
+      location: input.location?.trim() || null,
+      notes: input.notes?.trim() || null,
       status: "agendada",
       reminder_config: { "24h": input.remind_24h, "1h": input.remind_1h, canais: input.channels },
     })
@@ -128,5 +134,39 @@ export async function setMeetingStatus(id: string, status: string, contactId?: s
     }
   }
   revalidatePath("/dashboard/reunioes");
+  return { ok: true };
+}
+
+// Registra o resultado da reunião (pós-call): marca realizada + guarda outcome.
+export async function recordOutcome(input: {
+  id: string;
+  contact_id?: string;
+  outcome_status: string;   // avancou | sem_interesse | remarcar | fechou
+  outcome?: string;
+}) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const status = input.outcome_status === "remarcar" ? "remarcada" : "realizada";
+  const { error } = await supabase
+    .from("meetings")
+    .update({ status, outcome_status: input.outcome_status, outcome: input.outcome?.trim() || null })
+    .eq("id", input.id);
+  if (error) return { error: error.message };
+
+  // registra na timeline do contato
+  if (input.contact_id) {
+    const label =
+      input.outcome_status === "fechou" ? "Reunião: fechou negócio" :
+      input.outcome_status === "avancou" ? "Reunião: avançou" :
+      input.outcome_status === "sem_interesse" ? "Reunião: sem interesse" : "Reunião: remarcar";
+    await supabase.from("events").insert({
+      tenant_id,
+      contact_id: input.contact_id,
+      type: "meeting",
+      meta: { text: input.outcome ? `${label} — ${input.outcome}` : label },
+    });
+  }
+  revalidatePath("/dashboard/reunioes");
+  revalidatePath("/dashboard/contatos");
   return { ok: true };
 }

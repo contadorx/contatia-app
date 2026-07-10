@@ -10,6 +10,9 @@ export default function MeetingForm({ contacts }: { contacts: Contact[] }) {
   const [contactId, setContactId] = useState("");
   const [title, setTitle] = useState("");
   const [datetime, setDatetime] = useState("");
+  const [duration, setDuration] = useState("30");
+  const [location, setLocation] = useState("");
+  const [notes, setNotes] = useState("");
   const [r24, setR24] = useState(true);
   const [r1, setR1] = useState(true);
   const [chEmail, setChEmail] = useState(true);
@@ -27,6 +30,9 @@ export default function MeetingForm({ contacts }: { contacts: Contact[] }) {
         contact_id: contactId,
         title,
         datetime,
+        duration_min: Number(duration),
+        location,
+        notes,
         remind_24h: r24,
         remind_1h: r1,
         channels,
@@ -36,6 +42,8 @@ export default function MeetingForm({ contacts }: { contacts: Contact[] }) {
         setContactId("");
         setTitle("");
         setDatetime("");
+        setLocation("");
+        setNotes("");
         setOpen(false);
       }
     });
@@ -69,6 +77,23 @@ export default function MeetingForm({ contacts }: { contacts: Contact[] }) {
         <div>
           <label className="label">Data e hora *</label>
           <input type="datetime-local" className="input mt-1" value={datetime} onChange={(e) => setDatetime(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">Duração</label>
+          <select className="input mt-1" value={duration} onChange={(e) => setDuration(e.target.value)}>
+            <option value="15">15 min</option>
+            <option value="30">30 min</option>
+            <option value="45">45 min</option>
+            <option value="60">1 hora</option>
+          </select>
+        </div>
+        <div className="sm:col-span-2">
+          <label className="label">Local / link</label>
+          <input className="input mt-1" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Google Meet, Zoom, endereço…" />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="label">Pauta / preparação (opcional)</label>
+          <textarea className="input mt-1 min-h-[60px]" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="O que levar, objeções esperadas, próximo passo desejado…" />
         </div>
         <div>
           <label className="label">Lembretes</label>
