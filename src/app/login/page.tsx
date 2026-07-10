@@ -1,0 +1,84 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+
+export default function LoginPage() {
+  const router = useRouter();
+  const supabase = createClient();
+  const [mode, setMode] = useState<"in" | "up">("in");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function submit() {
+    setLoading(true);
+    setMsg(null);
+    if (mode === "in") {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setMsg(error.message);
+      else router.push("/dashboard");
+    } else {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) setMsg(error.message);
+      else setMsg("Conta criada. Confirme o e-mail se a verificação estiver ativa, depois entre.");
+    }
+    setLoading(false);
+  }
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-ink px-4">
+      <div className="card w-full max-w-sm p-8">
+        <div className="mb-6">
+          <p className="font-display text-2xl font-bold text-ink">
+            Contat<span className="text-brand">ia</span>
+          </p>
+          <p className="mt-1 text-sm text-subtle">
+            {mode === "in" ? "Entre na sua conta" : "Crie sua conta"}
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="label">E-mail</label>
+            <input
+              className="input mt-1"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="voce@escritorio.com.br"
+            />
+          </div>
+          <div>
+            <label className="label">Senha</label>
+            <input
+              className="input mt-1"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+            />
+          </div>
+
+          {msg && <p className="text-sm text-danger">{msg}</p>}
+
+          <button className="btn-brand w-full" onClick={submit} disabled={loading}>
+            {loading ? "..." : mode === "in" ? "Entrar" : "Criar conta"}
+          </button>
+        </div>
+
+        <button
+          className="mt-4 w-full text-center text-sm text-subtle hover:text-brand"
+          onClick={() => {
+            setMode(mode === "in" ? "up" : "in");
+            setMsg(null);
+          }}
+        >
+          {mode === "in" ? "Não tem conta? Cadastre-se" : "Já tem conta? Entrar"}
+        </button>
+      </div>
+    </main>
+  );
+}
