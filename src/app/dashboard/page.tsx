@@ -58,21 +58,42 @@ export default async function Today() {
     if (!lastActivity[e.contact_id]) lastActivity[e.contact_id] = { type: e.type, created_at: e.created_at, text: e.meta?.text };
   }
 
+  // "quente agora": engajamento forte (respondeu / abriu proposta / abriu e-mail) nas últimas 48h
+  const HOT_NOW_TYPES = new Set(["replied", "doc_opened", "email_opened"]);
+  const now48 = Date.now() - 48 * 3600000;
+  const hotNowByContact: Record<string, { type: string; created_at: string }> = {};
+  for (const e of (evs as any[]) || []) {
+    if (!e.contact_id || hotNowByContact[e.contact_id]) continue;
+    if (HOT_NOW_TYPES.has(e.type) && new Date(e.created_at).getTime() >= now48) {
+      hotNowByContact[e.contact_id] = { type: e.type, created_at: e.created_at };
+    }
+  }
+
   // anexa cadência + tags a cada task; separa "hoje/atrasados" de "próximos"
   const tasks = sorted.map((t) => ({
     ...t,
     cadence: t.enrollment_id ? cadenceByEnrollment[t.enrollment_id] || null : null,
     tags: t.contact_id ? tagsByContact[t.contact_id] || [] : [],
     is_future: (t.due_date || "") > today,
+    hot_now: t.contact_id ? hotNowByContact[t.contact_id] || null : null,
   }));
+
+  // re-ordena: quem engajou agora (hot_now) vem no topo absoluto, mantendo o resto por score
+  tasks.sort((a, b) => {
+    const ha = a.hot_now ? 1 : 0;
+    const hb = b.hot_now ? 1 : 0;
+    if (hb !== ha) return hb - ha;
+    return 0; // estável: preserva a ordem anterior (score/vencimento)
+  });
 
   // tags disponíveis para o filtro
   const { data: allTags } = await supabase.from("tags").select("id, name, color").order("name", { ascending: true });
   const todayCount = tasks.filter((t) => !t.is_future).length;
+  const hotNowCount = new Set(tasks.filter((t) => t.hot_now).map((t) => t.contact_id)).size;
 
   const cards = [
     { label: "Toques de hoje", value: todayCount, live: true },
-    { label: "Leads quentes", value: hotCount.count ?? 0, hot: true },
+    { label: "Engajou agora", value: hotNowCount, fire: true },
     { label: "Contatos", value: contactsCount.count ?? 0 },
   ];
 
@@ -90,10 +111,10 @@ export default async function Today() {
           <div key={c.label} className="card p-5">
             <div className="flex items-center gap-2">
               {c.live && <span className="h-2 w-2 rounded-full bg-signal" />}
-              {c.hot && <span className="h-2 w-2 rounded-full bg-warn" />}
+              {c.fire && <span className="text-xs">🔥</span>}
               <span className="label">{c.label}</span>
             </div>
-            <p className={`mt-2 font-display text-3xl font-bold ${c.hot ? "text-warn" : ""}`}>{c.value}</p>
+            <p className={`mt-2 font-display text-3xl font-bold ${c.fire ? "text-warn" : ""}`}>{c.value}</p>
           </div>
         ))}
       </div>

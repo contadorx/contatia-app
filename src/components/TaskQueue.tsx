@@ -14,6 +14,7 @@ type Task = {
   cadence?: string | null;
   tags?: { id: string; name: string; color: string }[];
   is_future?: boolean;
+  hot_now?: { type: string; created_at: string } | null;
   contacts: { name: string; company: string | null; phone: string | null; email: string | null; score: number | null } | null;
 };
 type LastActivity = Record<string, { type: string; created_at: string; text?: string }>;
@@ -235,12 +236,17 @@ export default function TaskQueue({
         const hot = score >= hotThreshold;
         const focused = i === focus;
         const la = t.contact_id ? lastActivity[t.contact_id] : undefined;
+        const hotNowLabel = t.hot_now
+          ? t.hot_now.type === "replied" ? "🔥 RESPONDEU"
+          : t.hot_now.type === "doc_opened" ? "🔥 ABRIU PROPOSTA"
+          : "🔥 ABRIU E-MAIL"
+          : null;
         return (
           <div
             key={t.id}
             ref={(el) => { rowRefs.current[i] = el; }}
             onClick={() => setFocus(i)}
-            className={`card p-4 transition ${hot ? "ring-1 ring-warn/40" : ""} ${focused ? "ring-2 ring-brand" : ""}`}
+            className={`card p-4 transition ${t.hot_now ? "ring-2 ring-warn bg-warn/5" : hot ? "ring-1 ring-warn/40" : ""} ${focused ? "ring-2 ring-brand" : ""}`}
           >
             <div className="flex items-center gap-3">
               <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${chanStyle[t.channel]}`}>
@@ -250,7 +256,8 @@ export default function TaskQueue({
                 <p className="flex items-center gap-2 truncate text-sm font-semibold">
                   {c?.name || "Contato"}
                   {c?.company ? <span className="font-normal text-subtle">· {c.company}</span> : null}
-                  {hot && <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[10px] font-bold text-warn">QUENTE</span>}
+                  {hotNowLabel && <span className="rounded-full bg-warn px-2 py-0.5 text-[10px] font-bold text-white">{hotNowLabel}</span>}
+                  {!hotNowLabel && hot && <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[10px] font-bold text-warn">QUENTE</span>}
                 </p>
                 <p className="truncate text-xs text-subtle">{t.title || content || channelLabel[t.channel]}</p>
               </div>
