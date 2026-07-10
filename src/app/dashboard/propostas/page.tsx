@@ -12,7 +12,7 @@ export default async function Propostas() {
   const supabase = createClient();
 
   const [{ data: docs }, { data: contacts }, { data: shares }] = await Promise.all([
-    supabase.from("documents").select("id, name, type, url, created_at").order("created_at", { ascending: false }),
+    supabase.from("documents").select("id, name, type, url, storage_path, created_at").order("created_at", { ascending: false }),
     supabase.from("contacts").select("id, name").order("name", { ascending: true }).limit(500),
     supabase
       .from("document_shares")
@@ -53,6 +53,11 @@ export default async function Propostas() {
                   <a href={d.url} target="_blank" rel="noreferrer" className="text-xs text-brand-dark hover:underline">
                     {d.url}
                   </a>
+                  {d.storage_path && !d.url && (
+                    <span className="inline-flex items-center gap-1 text-xs text-subtle">
+                      <span className="rounded bg-brand-soft px-1.5 py-0.5 text-brand-dark">PDF</span> arquivo enviado (privado)
+                    </span>
+                  )}
                 </div>
               </div>
               <ShareControl documentId={d.id} contacts={contactList} />

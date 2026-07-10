@@ -41,12 +41,16 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-export default function DashboardNav() {
+export default function DashboardNav({ isSuperadmin = false }: { isSuperadmin?: boolean }) {
   const pathname = usePathname();
+
+  const allGroups = isSuperadmin
+    ? [...groups, { title: "Plataforma", items: [{ href: "/dashboard/superadmin", label: "Superadmin" }] }]
+    : groups;
 
   return (
     <nav className="mt-8 space-y-5">
-      {groups.map((g, i) => (
+      {allGroups.map((g, i) => (
         <div key={i}>
           {g.title && <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">{g.title}</p>}
           <div className="space-y-0.5">

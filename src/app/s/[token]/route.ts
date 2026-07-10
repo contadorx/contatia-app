@@ -12,13 +12,14 @@ export async function GET(_req: Request, { params }: { params: { token: string }
 
   const { data: share } = await admin
     .from("document_shares")
-    .select("id, tenant_id, contact_id, total_opens, first_open_at, documents(url)")
+    .select("id, tenant_id, contact_id, total_opens, first_open_at, documents(url, storage_path)")
     .eq("token", params.token)
     .maybeSingle();
 
   if (!share) return new NextResponse("Link inválido ou expirado.", { status: 404 });
 
   const url = (share as any).documents?.url as string | undefined;
+  const storagePath = (share as any).documents?.storage_path as string | undefined;
 
   // registra a abertura
   await admin
@@ -54,6 +55,12 @@ export async function GET(_req: Request, { params }: { params: { token: string }
     }
   }
 
+  // arquivo no Storage → signed URL temporária; senão, link externo
+  if (storagePath) {
+    const { data: signed } = await admin.storage.from("proposals").createSignedUrl(storagePath, 60 * 60);
+    if (signed?.signedUrl) return NextResponse.redirect(signed.signedUrl);
+    return new NextResponse("Não foi possível abrir o arquivo.", { status: 500 });
+  }
   if (url) return NextResponse.redirect(url);
   return new NextResponse("Documento sem link de destino.", { status: 200 });
 }

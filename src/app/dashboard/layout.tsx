@@ -17,11 +17,12 @@ export default async function DashboardLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, role, tenant_id")
+    .select("full_name, role, tenant_id, is_superadmin")
     .eq("id", user?.id ?? "")
     .maybeSingle();
 
   const noTenant = !profile?.tenant_id;
+  const isSuperadmin = !!(profile as any)?.is_superadmin;
 
   return (
     <div className="flex min-h-screen">
@@ -30,7 +31,7 @@ export default async function DashboardLayout({
           Contat<span className="text-brand">ia</span>
         </p>
 
-        <DashboardNav />
+        <DashboardNav isSuperadmin={isSuperadmin} />
 
         <div className="mt-auto border-t border-line pt-4">
           <Link

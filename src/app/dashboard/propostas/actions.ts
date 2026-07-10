@@ -17,6 +17,38 @@ async function ctx() {
   return { supabase, tenant_id: (data?.tenant_id as string) || null, user_id: user?.id };
 }
 
+// Sobe um PDF para o Storage (bucket 'proposals') e cria o documento.
+export async function uploadDocument(form: FormData) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const name = String(form.get("name") || "").trim();
+  const type = String(form.get("type") || "proposta");
+  const file = form.get("file") as File | null;
+  if (!name) return { error: "Dê um nome ao documento." };
+  if (!file || typeof file === "string") return { error: "Selecione um arquivo PDF." };
+  if (file.type !== "application/pdf") return { error: "Só aceitamos PDF por enquanto." };
+  if (file.size > 15 * 1024 * 1024) return { error: "Arquivo muito grande (máx. 15 MB)." };
+
+  const path = `${tenant_id}/${randomUUID()}.pdf`;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const { error: upErr } = await supabase.storage.from("proposals").upload(path, bytes, {
+    contentType: "application/pdf",
+    upsert: false,
+  });
+  if (upErr) return { error: "Falha no upload: " + upErr.message + " (o bucket 'proposals' foi criado no Supabase?)" };
+
+  const { error } = await supabase.from("documents").insert({
+    tenant_id,
+    name,
+    type,
+    storage_path: path,
+    created_by: user_id,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/propostas");
+  return { ok: true };
+}
+
 export async function createDocument(input: { name: string; type: string; url: string }) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
