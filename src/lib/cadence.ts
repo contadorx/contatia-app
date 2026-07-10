@@ -27,11 +27,19 @@ export function renderTemplate(text: string | null | undefined, c: ContactLike):
     .replace(/\{\{\s*email\s*\}\}/gi, c.email || "");
 }
 
-// Monta link wa.me com a mensagem pré-preenchida.
+// Monta link do WhatsApp com a mensagem pré-preenchida.
+// Retorna string vazia se não houver número válido (o chamador some com o botão).
 export function waLink(phone: string | null | undefined, text: string): string {
   let digits = (phone || "").replace(/\D/g, "");
-  if (digits && digits.length <= 11) digits = "55" + digits; // assume BR sem DDI
-  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+  // remove zeros à esquerda (ex.: 0 antes do DDD)
+  digits = digits.replace(/^0+/, "");
+  if (!digits) return "";
+  // DDI Brasil quando vier só com DDD+numero (10 ou 11 dígitos)
+  if (digits.length <= 11) digits = "55" + digits;
+  // número precisa ter DDI+DDD+numero (12 ou 13 dígitos no BR); senão é inválido
+  if (digits.length < 12) return "";
+  // api.whatsapp.com/send é mais confiável que wa.me em desktop e apps embutidos
+  return `https://api.whatsapp.com/send?phone=${digits}&text=${encodeURIComponent(text)}`;
 }
 
 // Soma dias a uma data e devolve YYYY-MM-DD.

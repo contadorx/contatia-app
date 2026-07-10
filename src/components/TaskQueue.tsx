@@ -257,7 +257,9 @@ export default function TaskQueue({
               {t.channel === "whatsapp" && c?.phone && (
                 <>
                   <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => sendWa(t.id)}>Enviar</button>
-                  <a className="text-xs text-subtle hover:text-ink" href={waLink(c.phone, content)} target="_blank" rel="noreferrer" title="Abrir no WhatsApp Web/app">↗</a>
+                  {waLink(c.phone, content) && (
+                    <a className="text-xs text-subtle hover:text-ink" href={waLink(c.phone, content)} target="_blank" rel="noreferrer" title="Abrir no WhatsApp Web/app" onClick={(e) => e.stopPropagation()}>↗</a>
+                  )}
                 </>
               )}
               {t.channel === "email" && c?.email && (
