@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { createSequence, type StepInput } from "@/app/dashboard/cadencias/actions";
+import { createSequence, generateSequenceAI, type StepInput } from "@/app/dashboard/cadencias/actions";
 import type { Channel } from "@/lib/cadence";
 
 const CHANNELS: { v: Channel; l: string }[] = [
@@ -20,6 +20,27 @@ export default function SequenceBuilder() {
   const [steps, setSteps] = useState<StepInput[]>([emptyStep()]);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
+
+  // IA
+  const [aiOpen, setAiOpen] = useState(false);
+  const [market, setMarket] = useState("");
+  const [product, setProduct] = useState("");
+  const [icp, setIcp] = useState("");
+  const [aiMsg, setAiMsg] = useState<string | null>(null);
+  const [aiPending, startAi] = useTransition();
+
+  function generateAI() {
+    setAiMsg(null);
+    startAi(async () => {
+      const res = (await generateSequenceAI({ market, product, icp })) as { steps?: StepInput[]; error?: string };
+      if (res?.error) setAiMsg(res.error);
+      else if (res?.steps?.length) {
+        setSteps(res.steps);
+        if (!name && market) setName(`Cadência — ${market}`.slice(0, 60));
+        setAiOpen(false);
+      }
+    });
+  }
 
   function update(i: number, patch: Partial<StepInput>) {
     setSteps((s) => s.map((st, idx) => (idx === i ? { ...st, ...patch } : st)));
@@ -54,6 +75,34 @@ export default function SequenceBuilder() {
 
   return (
     <div className="card p-5">
+      {/* Gerar com IA */}
+      <div className="mb-4 rounded-xl border border-brand/30 bg-brand-soft/40 p-4">
+        {!aiOpen ? (
+          <button className="btn-brand py-1.5 text-sm" onClick={() => setAiOpen(true)}>
+            ✨ Gerar cadência com IA
+          </button>
+        ) : (
+          <div>
+            <p className="text-sm font-semibold">Descreva e a IA monta a cadência</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <input className="input" value={market} onChange={(e) => setMarket(e.target.value)} placeholder="Mercado (ex.: contadores)" />
+              <input className="input" value={product} onChange={(e) => setProduct(e.target.value)} placeholder="Seu produto/serviço" />
+              <input className="input" value={icp} onChange={(e) => setIcp(e.target.value)} placeholder="Cliente ideal (ICP)" />
+            </div>
+            {aiMsg && <p className="mt-2 text-sm text-danger">{aiMsg}</p>}
+            <div className="mt-3 flex gap-2">
+              <button className="btn-brand py-1.5 text-sm" onClick={generateAI} disabled={aiPending}>
+                {aiPending ? "Gerando..." : "Gerar rascunho"}
+              </button>
+              <button className="btn-ghost py-1.5 text-sm" onClick={() => setAiOpen(false)}>
+                Cancelar
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-subtle">A IA preenche os passos abaixo — você revisa e edita antes de salvar.</p>
+          </div>
+        )}
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className="label">Nome da sequência *</label>

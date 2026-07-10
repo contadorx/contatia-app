@@ -108,3 +108,12 @@ export async function enrollContact(contactId: string, sequenceId: string) {
   revalidatePath("/dashboard/contatos");
   return { ok: true, count: tasks.length };
 }
+
+// Gera uma cadência com IA a partir de um briefing (a IA rascunha; humano aprova).
+export async function generateSequenceAI(brief: { market: string; product: string; icp: string; tone?: string }) {
+  if (!brief.market?.trim() || !brief.product?.trim()) {
+    return { error: "Descreva ao menos o mercado e o produto." };
+  }
+  const { generateSequence } = await import("@/lib/anthropic");
+  return await generateSequence(brief);
+}
