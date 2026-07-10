@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import SmtpForm from "@/components/SmtpForm";
+import { DomainHealthPanel } from "@/components/DomainHealthPanel";
 import AccountRowActions from "@/components/AccountRowActions";
 import WebToLeadSnippet from "@/components/WebToLeadSnippet";
 import AiSettingsForm from "@/components/AiSettingsForm";
@@ -137,6 +138,14 @@ export default async function Config() {
               <div className="mt-3">
                 <SmtpForm />
               </div>
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <p className="text-sm font-semibold">Saúde do domínio (entregabilidade)</p>
+            <p className="mt-1 text-sm text-subtle">Cheque se seu domínio tem MX, SPF, DKIM e DMARC — os quatro registros que fazem seus e-mails chegarem à caixa de entrada em vez do spam.</p>
+            <div className="mt-2">
+              <DomainHealthPanel />
             </div>
           </div>
         </div>
