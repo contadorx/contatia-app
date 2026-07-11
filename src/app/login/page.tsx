@@ -10,6 +10,8 @@ export default function LoginPage() {
   const [mode, setMode] = useState<"in" | "up">("in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [company, setCompany] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -24,7 +26,16 @@ export default function LoginPage() {
         router.push(next || "/dashboard");
       }
     } else {
-      const { error } = await supabase.auth.signUp({ email, password });
+      if (!fullName.trim() || !company.trim()) {
+        setMsg("Informe seu nome e o nome da empresa.");
+        setLoading(false);
+        return;
+      }
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { full_name: fullName.trim(), company: company.trim() } },
+      });
       if (error) setMsg(error.message);
       else setMsg("Conta criada. Confirme o e-mail se a verificação estiver ativa, depois entre.");
     }
@@ -44,6 +55,29 @@ export default function LoginPage() {
         </div>
 
         <div className="space-y-3">
+          {mode === "up" && (
+            <>
+              <div>
+                <label className="label">Seu nome</label>
+                <input
+                  className="input mt-1"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Maria Silva"
+                />
+              </div>
+              <div>
+                <label className="label">Nome da empresa</label>
+                <input
+                  className="input mt-1"
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                  placeholder="Agência Nova"
+                />
+                <p className="mt-1 text-xs text-subtle">Será o nome do seu workspace. Dá pra mudar depois.</p>
+              </div>
+            </>
+          )}
           <div>
             <label className="label">E-mail</label>
             <input
