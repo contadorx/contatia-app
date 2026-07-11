@@ -1,60 +1,61 @@
 "use server";
 
+import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
 
-// Resolve o tenant + config de agendamento pelo token público.
+// Resolve o tenant + config via RPC pública (não depende de SERVICE_ROLE_KEY).
 async function resolveTenant(token: string) {
-  const admin = createAdminClient();
-  if (!admin) return { admin: null, tenant: null };
-  const { data: tenant } = await admin
-    .from("tenants")
-    .select("id, name, booking_enabled, booking_duration_min, booking_days, booking_start_hour, booking_end_hour, booking_title")
-    .eq("inbound_token", token)
-    .maybeSingle();
-  return { admin, tenant: tenant as any };
+  const supabase = createClient();
+  const { data } = await supabase.rpc("get_booking_config", { p_token: token });
+  const tenant = Array.isArray(data) ? data[0] : data;
+  return { supabase, tenant: (tenant as any) || null };
 }
 
 // Gera os horários livres dos próximos N dias, respeitando dias/horário e reuniões já marcadas.
 export async function getBookingSlots(token: string) {
-  const { admin, tenant } = await resolveTenant(token);
-  if (!admin || !tenant) return { error: "Agenda não encontrada." };
-  if (!tenant.booking_enabled) return { error: "Este link de agendamento está desativado." };
+  const { tenant } = await resolveTenant(token);
+  if (!tenant) return { error: "Agenda não encontrada ou desativada." };
 
   const dur = Number(tenant.booking_duration_min) || 30;
   const days = String(tenant.booking_days || "1,2,3,4,5").split(",").map((d) => Number(d.trim()));
   const startH = Number(tenant.booking_start_hour ?? 9);
   const endH = Number(tenant.booking_end_hour ?? 18);
 
-  // reuniões futuras já marcadas no Contatia (para bloquear horários ocupados)
+  // admin client (opcional): usado só para ler reuniões e free/busy do Google.
+  // Se não houver SERVICE_ROLE_KEY, a página ainda funciona (sem esses bloqueios).
+  const admin = createAdminClient();
   const nowISO = new Date().toISOString();
-  const { data: booked } = await admin
-    .from("meetings")
-    .select("datetime, duration_min")
-    .eq("tenant_id", tenant.id)
-    .gte("datetime", nowISO)
-    .in("status", ["agendada", "confirmada"]);
-  const busy = ((booked as any[]) || []).map((b) => new Date(b.datetime).getTime());
-
-  // free/busy do Google Calendar (bloqueia QUALQUER compromisso da agenda, não só do Contatia)
+  let busy: number[] = [];
   const googleBusy: { start: number; end: number }[] = [];
-  try {
-    const { data: gacct } = await admin
-      .from("email_accounts")
-      .select("oauth_refresh_token")
+
+  if (admin) {
+    const { data: booked } = await admin
+      .from("meetings")
+      .select("datetime, duration_min")
       .eq("tenant_id", tenant.id)
-      .eq("provider", "gmail")
-      .eq("is_active", true)
-      .not("oauth_refresh_token", "is", null)
-      .limit(1)
-      .maybeSingle();
-    const refresh = (gacct as any)?.oauth_refresh_token;
-    if (refresh) {
-      const { getBusyBlocks } = await import("@/lib/gcal");
-      const timeMax = new Date(Date.now() + 15 * 86400000).toISOString();
-      const blocks = await getBusyBlocks(refresh, nowISO, timeMax);
-      googleBusy.push(...blocks);
-    }
-  } catch { /* free/busy é best-effort; não quebra o agendamento */ }
+      .gte("datetime", nowISO)
+      .in("status", ["agendada", "confirmada"]);
+    busy = ((booked as any[]) || []).map((b) => new Date(b.datetime).getTime());
+
+    try {
+      const { data: gacct } = await admin
+        .from("email_accounts")
+        .select("oauth_refresh_token")
+        .eq("tenant_id", tenant.id)
+        .eq("provider", "gmail")
+        .eq("is_active", true)
+        .not("oauth_refresh_token", "is", null)
+        .limit(1)
+        .maybeSingle();
+      const refresh = (gacct as any)?.oauth_refresh_token;
+      if (refresh) {
+        const { getBusyBlocks } = await import("@/lib/gcal");
+        const timeMax = new Date(Date.now() + 15 * 86400000).toISOString();
+        const blocks = await getBusyBlocks(refresh, nowISO, timeMax);
+        googleBusy.push(...blocks);
+      }
+    } catch { /* free/busy é best-effort; não quebra o agendamento */ }
+  }
 
   const slots: { date: string; times: { iso: string; label: string }[] }[] = [];
   const now = new Date();
@@ -95,104 +96,63 @@ export async function getBookingSlots(token: string) {
 
 // Cria o agendamento: contato (se novo), reunião (source=booking) e evento no Google.
 export async function createBooking(token: string, input: { name: string; email: string; phone?: string; company?: string; datetime: string; note?: string }) {
-  const { admin, tenant } = await resolveTenant(token);
-  if (!admin || !tenant) return { error: "Agenda não encontrada." };
-  if (!tenant.booking_enabled) return { error: "Este link está desativado." };
+  const { supabase, tenant } = await resolveTenant(token);
+  if (!tenant) return { error: "Agenda não encontrada ou desativada." };
+
   const name = (input.name || "").trim();
   const email = (input.email || "").trim().toLowerCase();
   if (!name || !email) return { error: "Informe nome e e-mail." };
   if (!input.datetime) return { error: "Escolha um horário." };
-
   const when = new Date(input.datetime);
   if (isNaN(when.getTime()) || when.getTime() < Date.now()) return { error: "Horário inválido." };
 
-  // horário ainda livre? (checa reuniões do Contatia + free/busy do Google)
   const dur = Number(tenant.booking_duration_min) || 30;
-  const { data: booked } = await admin
-    .from("meetings")
-    .select("datetime")
-    .eq("tenant_id", tenant.id)
-    .gte("datetime", new Date(Date.now() - dur * 60000).toISOString())
-    .in("status", ["agendada", "confirmada"]);
-  const collide = ((booked as any[]) || []).some((b) => Math.abs(new Date(b.datetime).getTime() - when.getTime()) < dur * 60000);
-  if (collide) return { error: "Esse horário acabou de ser reservado. Escolha outro." };
 
-  // valida contra o free/busy do Google (compromisso que possa ter surgido)
-  try {
-    const { data: gacct } = await admin
-      .from("email_accounts")
-      .select("oauth_refresh_token")
-      .eq("tenant_id", tenant.id)
-      .eq("provider", "gmail")
-      .eq("is_active", true)
-      .not("oauth_refresh_token", "is", null)
-      .limit(1)
-      .maybeSingle();
-    const refresh = (gacct as any)?.oauth_refresh_token;
-    if (refresh) {
-      const { getBusyBlocks } = await import("@/lib/gcal");
-      const slotStart = when.getTime();
-      const slotEnd = slotStart + dur * 60000;
-      const blocks = await getBusyBlocks(refresh, new Date(slotStart - 60000).toISOString(), new Date(slotEnd + 60000).toISOString());
-      if (blocks.some((b) => slotStart < b.end && slotEnd > b.start)) {
-        return { error: "Esse horário acabou de ficar ocupado na agenda. Escolha outro." };
-      }
-    }
-  } catch { /* best-effort */ }
-
-  // contato: acha por e-mail ou cria
-  let contactId: string | null = null;
-  const { data: existing } = await admin.from("contacts").select("id").eq("tenant_id", tenant.id).eq("email", email).limit(1).maybeSingle();
-  if (existing) contactId = (existing as any).id;
-  else {
-    const { data: c } = await admin.from("contacts").insert({
-      tenant_id: tenant.id, name, email, phone: input.phone?.trim() || null, company: input.company?.trim() || null,
-      origin: "Agendamento", status: "new",
-    }).select("id").maybeSingle();
-    contactId = (c as any)?.id || null;
-  }
-
-  const title = tenant.booking_title || `Reunião com ${name}`;
-  const { data: meeting, error } = await admin.from("meetings").insert({
-    tenant_id: tenant.id,
-    contact_id: contactId,
-    title,
-    datetime: when.toISOString(),
-    duration_min: dur,
-    status: "agendada",
-    notes: input.note?.trim() || null,
-    source: "booking",
-  }).select("id").maybeSingle();
+  // cria o agendamento via RPC (funciona sem SERVICE_ROLE_KEY; valida token+horário no banco)
+  const { data, error } = await supabase.rpc("create_public_booking", {
+    p_token: token,
+    p_name: name,
+    p_email: email,
+    p_phone: input.phone || null,
+    p_company: input.company || null,
+    p_datetime: when.toISOString(),
+    p_note: input.note || null,
+  });
+  const row = Array.isArray(data) ? data[0] : data;
   if (error) return { error: error.message };
+  if (!row || !row.ok) return { error: (row && row.msg) || "Não foi possível agendar. Tente outro horário." };
+  const meetingId = row.meeting_id as string;
 
-  // cria evento no Google Calendar se houver caixa Gmail conectada
+  // bônus: cria o evento no Google Calendar (só se o admin client estiver disponível)
   try {
-    const { data: acct } = await admin
-      .from("email_accounts")
-      .select("oauth_refresh_token")
-      .eq("tenant_id", tenant.id)
-      .eq("provider", "gmail")
-      .eq("is_active", true)
-      .not("oauth_refresh_token", "is", null)
-      .limit(1)
-      .maybeSingle();
-    const refresh = (acct as any)?.oauth_refresh_token;
-    if (refresh) {
-      const { createCalendarEvent } = await import("@/lib/gcal");
-      const ev = await createCalendarEvent(refresh, {
-        summary: title,
-        description: input.note || "Agendado pelo link público da Contatia.",
-        startISO: when.toISOString(),
-        durationMin: dur,
-        attendeeEmail: email,
-      });
-      if (ev?.id && meeting) {
-        await admin.from("meetings").update({ google_event_id: ev.id, google_event_link: ev.link || null }).eq("id", (meeting as any).id);
+    const admin = createAdminClient();
+    if (admin && meetingId) {
+      const { data: acct } = await admin
+        .from("email_accounts")
+        .select("oauth_refresh_token")
+        .eq("tenant_id", tenant.id)
+        .eq("provider", "gmail")
+        .eq("is_active", true)
+        .not("oauth_refresh_token", "is", null)
+        .limit(1)
+        .maybeSingle();
+      const refresh = (acct as any)?.oauth_refresh_token;
+      if (refresh) {
+        const title = tenant.booking_title || `Reunião com ${name}`;
+        const { createCalendarEvent } = await import("@/lib/gcal");
+        const ev = await createCalendarEvent(refresh, {
+          summary: title,
+          description: input.note || "Agendado pelo link público da Contatia.",
+          startISO: when.toISOString(),
+          durationMin: dur,
+          attendeeEmail: email,
+        });
+        if (ev?.id) {
+          await admin.from("meetings").update({ google_event_id: ev.id, google_event_link: ev.link || null }).eq("id", meetingId);
+        }
       }
     }
-  } catch {
-    /* falha no Google não impede o agendamento */
-  }
+  } catch { /* falha no Google não impede o agendamento */ }
 
   return { ok: true, whenLabel: when.toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "short" }) };
 }

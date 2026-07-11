@@ -47,32 +47,13 @@ export default async function Config() {
       <h1 className="font-display text-2xl font-bold">Configurações</h1>
       <p className="mt-1 mb-6 text-sm text-subtle">A ficha do seu negócio, os canais de envio e as integrações.</p>
 
-      <ConfigTabs tabs={["Negócio", "E-mail", "WhatsApp", "Captação"]}>
+      <ConfigTabs tabs={["Negócio", "E-mail", "WhatsApp", "Vendas", "Captação"]}>
         {/* Negócio */}
         <div>
           <p className="text-sm text-subtle">Identidade e marca do workspace — usadas nos entregáveis white-label.</p>
           <div className="card mt-3 p-5">
             <BusinessProfileForm biz={(tenant as any) || {}} canEdit={isOwner} />
           </div>
-
-          <p className="mt-6 text-sm font-semibold">Assinatura de e-mail</p>
-          <p className="text-sm text-subtle">Anexada ao fim dos e-mails enviados pela fila.</p>
-          <div className="card mt-2 p-5">
-            <SignatureForm initial={((tenant as any)?.email_signature as string) || ""} />
-          </div>
-
-          <p className="mt-6 text-sm font-semibold">Inteligência (IA)</p>
-          <p className="text-sm text-subtle">Modelo e chave usados pelo &ldquo;Gerar cadência com IA&rdquo;. Definidos aqui, valem sem mexer no ambiente.</p>
-          <div className="card mt-2 p-5">
-            <AiSettingsForm currentModel={aiModel} hasKey={aiHasKey} />
-          </div>
-
-          <p className="mt-6 text-sm font-semibold">Produtos & Serviços</p>          <p className="text-sm text-subtle">Seu catálogo do que você vende, para vincular às oportunidades e medir receita por produto.</p>
-          <a href="/dashboard/config/produtos" className="btn-ghost mt-2 inline-flex">Gerenciar catálogo →</a>
-
-          <p className="mt-6 text-sm font-semibold">Entregabilidade & reputação</p>
-          <p className="text-sm text-subtle">E-mails que devolveram, marcaram spam ou pediram descadastro são bloqueados automaticamente para proteger seu domínio.</p>
-          <a href="/dashboard/config/supressao" className="btn-ghost mt-2 inline-flex">Ver lista de supressão →</a>
 
           <p className="mt-6 text-sm font-semibold">Retenção de arquivos</p>
           <p className="text-sm text-subtle">Os PDFs de proposta ficam guardados por um prazo definido pelo seu <b>plano</b>. Depois do prazo, o arquivo é automaticamente excluído (o registro do documento permanece no histórico) — por LGPD e economia de armazenamento.</p>
@@ -179,6 +160,20 @@ export default async function Config() {
               <DomainHealthPanel />
             </div>
           </div>
+
+          <div className="mt-6">
+            <p className="text-sm font-semibold">Assinatura de e-mail</p>
+            <p className="text-sm text-subtle">Anexada ao fim dos e-mails enviados pela fila.</p>
+            <div className="card mt-2 p-5">
+              <SignatureForm initial={((tenant as any)?.email_signature as string) || ""} />
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <p className="text-sm font-semibold">Lista de supressão</p>
+            <p className="text-sm text-subtle">E-mails que devolveram, marcaram spam ou pediram descadastro são bloqueados automaticamente para proteger seu domínio.</p>
+            <a href="/dashboard/config/supressao" className="btn-ghost mt-2 inline-flex">Ver lista de supressão →</a>
+          </div>
         </div>
 
         {/* WhatsApp */}
@@ -186,6 +181,23 @@ export default async function Config() {
           <p className="text-sm text-subtle">Conecte sua instância Evolution (você a hospeda). Envia da fila e detecta respostas via webhook.</p>
           <div className="card mt-3 p-5">
             <WhatsAppConnect accounts={(waAccounts as any[]) || []} />
+          </div>
+        </div>
+
+        {/* Vendas */}
+        <div>
+          <p className="text-sm text-subtle">Ferramentas que apoiam a venda: seu catálogo e a IA que monta cadências.</p>
+
+          <p className="mt-4 text-sm font-semibold">Produtos & Serviços</p>
+          <p className="text-sm text-subtle">Seu catálogo do que você vende, para vincular às oportunidades e medir receita por produto.</p>
+          <a href="/dashboard/config/produtos" className="btn-ghost mt-2 inline-flex">Gerenciar catálogo →</a>
+
+          <div className="mt-6">
+            <p className="text-sm font-semibold">Inteligência (IA)</p>
+            <p className="text-sm text-subtle">Modelo e chave usados pelo &ldquo;Gerar cadência com IA&rdquo;. Definidos aqui, valem sem mexer no ambiente.</p>
+            <div className="card mt-2 p-5">
+              <AiSettingsForm currentModel={aiModel} hasKey={aiHasKey} />
+            </div>
           </div>
         </div>
 
