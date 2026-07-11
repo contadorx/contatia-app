@@ -22,31 +22,61 @@ export default async function Superadmin() {
     );
   }
 
+  // Fonte dos dados de plataforma: usa a service role se existir; senão, cai na RPC
+  // superadmin_list_tenants() (SECURITY DEFINER, checa is_superadmin no servidor).
+  // Assim o painel funciona mesmo sem SUPABASE_SERVICE_ROLE_KEY no ambiente.
   const admin = createAdminClient();
-  if (!admin) {
-    return (
-      <div className="rounded-xl bg-warn/10 p-4 text-sm text-warn">
-        Configure <b>SUPABASE_SERVICE_ROLE_KEY</b> no ambiente para a visão de plataforma ler todos os tenants.
-      </div>
-    );
-  }
 
-  // todos os tenants + métricas por tenant (via service role — leitura de plataforma)
-  const { data: tenants } = await admin.from("tenants").select("id, name, legal_name, segment, created_at, mrr, subscription_status").order("created_at", { ascending: false });
-  const tList = (tenants as any[]) || [];
+  let tList: any[] = [];
+  let rpcFallback = false;
+
+  if (admin) {
+    const { data: tenants } = await admin
+      .from("tenants")
+      .select("id, name, legal_name, segment, created_at, mrr, subscription_status")
+      .order("created_at", { ascending: false });
+    tList = (tenants as any[]) || [];
+  } else {
+    rpcFallback = true;
+    const { data: rows, error: rpcErr } = await supabase.rpc("superadmin_list_tenants");
+    if (rpcErr) {
+      return (
+        <div className="rounded-xl bg-warn/10 p-4 text-sm text-warn">
+          Não consegui carregar os workspaces: {rpcErr.message}. Rode a migration
+          <b> 0047</b> no Supabase (ou configure SUPABASE_SERVICE_ROLE_KEY no ambiente).
+        </div>
+      );
+    }
+    tList = ((rows as any[]) || []).map((r) => ({
+      id: r.id,
+      name: r.name,
+      legal_name: r.legal_name,
+      segment: r.segment,
+      created_at: r.created_at,
+      mrr: r.mrr,
+      subscription_status: r.subscription_status,
+      _users: Number(r.users_count || 0),
+      _contacts: Number(r.contacts_count || 0),
+      _opps: Number(r.opps_open || 0),
+    }));
+  }
 
   const subscriptionMrr = tList.filter((t) => t.subscription_status === "active").reduce((s, t) => s + Number(t.mrr || 0), 0);
 
-  // --- Engajamento: workspaces com atividade recente (eventos ou tarefas) ---
+  // --- Engajamento: workspaces com atividade recente (exige service role) ---
   const now = Date.now();
   const d7 = new Date(now - 7 * 86400000).toISOString();
   const d30 = new Date(now - 30 * 86400000).toISOString();
-  const [{ data: ev7 }, { data: ev30 }] = await Promise.all([
-    admin.from("events").select("tenant_id").gte("created_at", d7).limit(5000),
-    admin.from("events").select("tenant_id").gte("created_at", d30).limit(5000),
-  ]);
-  const active7 = new Set(((ev7 as any[]) || []).map((e) => e.tenant_id)).size;
-  const active30 = new Set(((ev30 as any[]) || []).map((e) => e.tenant_id)).size;
+  let active7 = 0;
+  let active30 = 0;
+  if (admin) {
+    const [{ data: ev7 }, { data: ev30 }] = await Promise.all([
+      admin.from("events").select("tenant_id").gte("created_at", d7).limit(5000),
+      admin.from("events").select("tenant_id").gte("created_at", d30).limit(5000),
+    ]);
+    active7 = new Set(((ev7 as any[]) || []).map((e) => e.tenant_id)).size;
+    active30 = new Set(((ev30 as any[]) || []).map((e) => e.tenant_id)).size;
+  }
 
   // --- Crescimento: novos workspaces por mês (últimos 6 meses) ---
   const months: { label: string; count: number }[] = [];
@@ -67,6 +97,19 @@ export default async function Superadmin() {
 
   const rows = await Promise.all(
     tList.map(async (t) => {
+      // sem service role: as contagens já vieram da RPC
+      if (!admin) {
+        return {
+          id: t.id,
+          name: t.name || t.legal_name || "(sem nome)",
+          segment: t.segment || "—",
+          created_at: t.created_at,
+          users: t._users ?? 0,
+          contacts: t._contacts ?? 0,
+          oppsOpen: t._opps ?? 0,
+          mrr: Number(t.mrr || 0),
+        };
+      }
       const [users, contacts, oppsOpen, mrr] = await Promise.all([
         admin.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", t.id),
         admin.from("contacts").select("id", { count: "exact", head: true }).eq("tenant_id", t.id),
@@ -94,6 +137,13 @@ export default async function Superadmin() {
 
   return (
     <div>
+      {rpcFallback && (
+        <div className="mb-4 rounded-xl bg-warn/10 p-3 text-sm text-warn">
+          Lendo os workspaces sem <b>SUPABASE_SERVICE_ROLE_KEY</b>. A lista funciona normalmente;
+          apenas as métricas de engajamento (ativos em 7/30 dias) ficam zeradas. Para habilitá-las,
+          adicione a variável no ambiente do Vercel.
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold">Plataforma</h1>

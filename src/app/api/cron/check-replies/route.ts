@@ -207,5 +207,23 @@ export async function GET(req: Request) {
     errors.push(`lifecycle: ${e?.message || "erro"}`);
   }
 
-  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, autoRan, purged, reminders, lifecycle, errors });
+  // sincronia com CRMs (push de leads quentes; pull de ganhos/perdas)
+  let crm = { pushed: 0, failed: 0, pulled: 0 };
+  try {
+    const { processCrmQueue } = await import("@/lib/crmSync");
+    crm = await processCrmQueue(admin);
+  } catch (e: any) {
+    errors.push(`crm: ${e?.message || "erro"}`);
+  }
+
+  // descoberta de e-mail dos leads sem endereço (chama o worker no VPS)
+  let discovery = { found: 0, notFound: 0, errors: 0 };
+  try {
+    const { processEmailDiscovery } = await import("@/lib/emailDiscoverySync");
+    discovery = await processEmailDiscovery(admin);
+  } catch (e: any) {
+    errors.push(`discovery: ${e?.message || "erro"}`);
+  }
+
+  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, autoRan, purged, reminders, lifecycle, crm, discovery, errors });
 }

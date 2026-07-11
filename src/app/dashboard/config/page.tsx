@@ -1,3 +1,4 @@
+import { CrmIntegrations } from "@/components/CrmIntegrations";
 import { createClient } from "@/lib/supabase/server";
 import SmtpForm from "@/components/SmtpForm";
 import { DomainHealthPanel } from "@/components/DomainHealthPanel";
@@ -39,6 +40,10 @@ export default async function Config() {
     .select("id, evolution_url, instance, is_active, inbound_token")
     .order("created_at", { ascending: false });
 
+  const { data: crmConns } = await supabase
+    .from("crm_connections")
+    .select("*");
+
   const rows = (accounts as any[]) || [];
   const gmailReady = !!process.env.GOOGLE_CLIENT_ID;
 
@@ -47,7 +52,7 @@ export default async function Config() {
       <h1 className="font-display text-2xl font-bold">Configurações</h1>
       <p className="mt-1 mb-6 text-sm text-subtle">A ficha do seu negócio, os canais de envio e as integrações.</p>
 
-      <ConfigTabs tabs={["Negócio", "E-mail", "WhatsApp", "Vendas", "Captação"]}>
+      <ConfigTabs tabs={["Negócio", "E-mail", "WhatsApp", "Vendas", "Captação", "Integrações"]}>
         {/* Negócio */}
         <div>
           <p className="text-sm text-subtle">Identidade e marca do workspace — usadas nos entregáveis white-label.</p>
@@ -227,6 +232,11 @@ export default async function Config() {
               }}
             />
           </div>
+        </div>
+
+        {/* Integrações */}
+        <div>
+          <CrmIntegrations connections={(crmConns as any[]) || []} />
         </div>
       </ConfigTabs>
     </div>
