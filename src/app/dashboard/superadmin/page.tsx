@@ -31,11 +31,33 @@ export default async function Superadmin() {
   let rpcFallback = false;
 
   if (admin) {
-    const { data: tenants } = await admin
+    // Pede só o essencial. Se alguma coluna opcional não existir no banco, a query
+    // inteira falharia — por isso as extras vêm numa segunda tentativa tolerante.
+    const base = await admin
       .from("tenants")
-      .select("id, name, legal_name, segment, created_at, mrr, subscription_status")
+      .select("id, name, created_at")
       .order("created_at", { ascending: false });
-    tList = (tenants as any[]) || [];
+
+    if (base.error) {
+      return (
+        <div className="rounded-xl bg-danger/10 p-4 text-sm text-danger">
+          <p className="font-semibold">Não consegui ler os workspaces.</p>
+          <p className="mt-1">Erro do banco: {base.error.message}</p>
+        </div>
+      );
+    }
+
+    tList = (base.data as any[]) || [];
+
+    // enriquece com as colunas opcionais (se existirem)
+    const extra = await admin
+      .from("tenants")
+      .select("id, legal_name, segment, mrr, subscription_status");
+    if (!extra.error && extra.data) {
+      const by: Record<string, any> = {};
+      for (const e of extra.data as any[]) by[e.id] = e;
+      tList = tList.map((t) => ({ ...t, ...(by[t.id] || {}) }));
+    }
   } else {
     rpcFallback = true;
     const { data: rows, error: rpcErr } = await supabase.rpc("superadmin_list_tenants");
@@ -237,7 +259,16 @@ export default async function Superadmin() {
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-subtle">Nenhum workspace ainda.</td>
+                <td colSpan={8} className="px-4 py-8 text-center text-subtle">
+                  <p className="font-semibold text-ink">Nenhum workspace retornado.</p>
+                  <p className="mt-1 text-xs">
+                    A consulta funcionou, mas veio vazia. Fonte dos dados:{" "}
+                    <b>{rpcFallback ? "função do banco (sem service role)" : "service role"}</b>.
+                    {rpcFallback
+                      ? " Se você tem workspaces, rode a migration 0047 no Supabase."
+                      : " Se você tem workspaces, verifique se a SUPABASE_SERVICE_ROLE_KEY do Vercel aponta para o projeto certo."}
+                  </p>
+                </td>
               </tr>
             )}
           </tbody>
