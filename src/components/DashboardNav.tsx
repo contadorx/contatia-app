@@ -31,6 +31,7 @@ const groups: { title?: string; items: { href: string; label: string; primary?: 
     title: "Gestão",    items: [
       { href: "/dashboard/metricas", label: "Métricas" },
       { href: "/dashboard/equipe", label: "Equipe" },
+      { href: "/dashboard/planos", label: "Planos" },
       { href: "/dashboard/suporte", label: "Suporte" },
     ],
   },

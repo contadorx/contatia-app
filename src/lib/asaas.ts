@@ -63,3 +63,51 @@ export async function createAsaasCharge(input: {
   const j = (await res.json()) as { id?: string; invoiceUrl?: string; bankSlipUrl?: string };
   return { id: j.id, link: j.invoiceUrl || j.bankSlipUrl };
 }
+
+// Cria uma ASSINATURA recorrente mensal e devolve o link da 1ª cobrança.
+// value = preço por assento × nº de assentos.
+export async function createAsaasSubscription(input: {
+  customerId: string;
+  value: number;
+  description?: string;
+  billingType?: "BOLETO" | "PIX" | "CREDIT_CARD" | "UNDEFINED";
+}): Promise<{ id?: string; link?: string; error?: string }> {
+  const h = headers();
+  if (!h) return { error: "ASAAS_API_KEY não configurada." };
+
+  const next = new Date();
+  next.setDate(next.getDate() + 3); // primeira cobrança em 3 dias
+  const dueDate = next.toISOString().slice(0, 10);
+
+  const res = await fetch(`${base()}/subscriptions`, {
+    method: "POST",
+    headers: h,
+    body: JSON.stringify({
+      customer: input.customerId,
+      billingType: input.billingType || "UNDEFINED",
+      value: Number(input.value),
+      nextDueDate: dueDate,
+      cycle: "MONTHLY",
+      description: input.description || "Assinatura Contatia",
+    }),
+  });
+  if (!res.ok) {
+    let d = `${res.status}`;
+    try { const j = await res.json(); d = j?.errors?.[0]?.description || d; } catch {}
+    return { error: `Asaas (assinatura): ${d}` };
+  }
+  const sub = (await res.json()) as { id?: string };
+
+  // busca a 1ª cobrança da assinatura para devolver o link de pagamento
+  let link: string | undefined;
+  try {
+    const pr = await fetch(`${base()}/subscriptions/${sub.id}/payments`, { headers: h });
+    if (pr.ok) {
+      const pj = (await pr.json()) as { data?: { invoiceUrl?: string; bankSlipUrl?: string }[] };
+      const first = pj.data?.[0];
+      link = first?.invoiceUrl || first?.bankSlipUrl;
+    }
+  } catch { /* link vem depois pelo webhook se necessário */ }
+
+  return { id: sub.id, link };
+}

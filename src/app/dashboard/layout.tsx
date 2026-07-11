@@ -26,6 +26,20 @@ export default async function DashboardLayout({
   const noTenant = !profile?.tenant_id;
   const isSuperadmin = !!(profile as any)?.is_superadmin;
 
+  // status de assinatura para o banner de conversão (só quando há workspace)
+  let subStatus: string | undefined;
+  if (profile?.tenant_id) {
+    const { data: t } = await supabase.from("tenants").select("subscription_status").eq("id", profile.tenant_id).maybeSingle();
+    subStatus = (t as any)?.subscription_status;
+  }
+  const showSubBanner = !isSuperadmin && (!subStatus || ["trialing", "pending", "past_due", "canceled"].includes(subStatus));
+  const bannerText: Record<string, string> = {
+    past_due: "Seu pagamento está em atraso. Regularize para não perder o acesso.",
+    pending: "Falta o pagamento para ativar sua assinatura.",
+    canceled: "Sua assinatura foi cancelada. Reative quando quiser.",
+  };
+  const bannerMsg = (subStatus && bannerText[subStatus]) || "Você está no período de teste. Escolha um plano para continuar sem interrupção.";
+
   return (
     <div className="flex min-h-screen flex-col">
       <MobileNav
@@ -55,6 +69,12 @@ export default async function DashboardLayout({
         </aside>
 
         <main className="flex-1 p-6 md:p-10">
+          {showSubBanner && !noTenant && (
+            <a href="/dashboard/planos" className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand/30 bg-brand-soft px-4 py-3 text-sm hover:border-brand">
+              <span className="font-medium text-brand-dark">{bannerMsg}</span>
+              <span className="font-semibold text-brand">Ver planos →</span>
+            </a>
+          )}
         {noTenant ? (
           <div className="card mx-auto max-w-lg p-8 text-center">
             <p className="font-display text-lg font-bold">Conta ainda sem workspace</p>
