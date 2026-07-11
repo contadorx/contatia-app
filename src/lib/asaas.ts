@@ -17,12 +17,31 @@ function headers() {
 export async function ensureAsaasCustomer(input: { name: string; email?: string | null; cpfCnpj?: string | null; existingId?: string | null }): Promise<{ id?: string; error?: string }> {
   const h = headers();
   if (!h) return { error: "ASAAS_API_KEY não configurada." };
-  if (input.existingId) return { id: input.existingId };
+
+  const doc = (input.cpfCnpj || "").replace(/\D/g, "") || undefined;
+
+  // customer já existe: atualiza com o documento (o Asaas exige CPF/CNPJ para cobrar;
+  // customers antigos podem ter sido criados sem ele)
+  if (input.existingId) {
+    if (doc) {
+      const up = await fetch(`${base()}/customers/${input.existingId}`, {
+        method: "POST",
+        headers: h,
+        body: JSON.stringify({ name: input.name, email: input.email || undefined, cpfCnpj: doc }),
+      });
+      if (!up.ok) {
+        let d = `${up.status}`;
+        try { const j = await up.json(); d = j?.errors?.[0]?.description || d; } catch {}
+        return { error: `Asaas (atualizar cliente): ${d}` };
+      }
+    }
+    return { id: input.existingId };
+  }
 
   const res = await fetch(`${base()}/customers`, {
     method: "POST",
     headers: h,
-    body: JSON.stringify({ name: input.name, email: input.email || undefined, cpfCnpj: (input.cpfCnpj || "").replace(/\D/g, "") || undefined }),
+    body: JSON.stringify({ name: input.name, email: input.email || undefined, cpfCnpj: doc }),
   });
   if (!res.ok) {
     let d = `${res.status}`;

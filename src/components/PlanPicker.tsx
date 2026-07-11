@@ -16,17 +16,20 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
   const [busyId, setBusyId] = useState<string | null>(null);
   const [result, setResult] = useState<{ link?: string; planName?: string; value?: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [needDoc, setNeedDoc] = useState<string | null>(null); // planId aguardando CPF/CNPJ
+  const [doc, setDoc] = useState("");
 
   const brl = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const popular = plans.find((p) => p.name === "Profissional")?.id;
 
-  function pick(planId: string) {
+  function pick(planId: string, docNumber?: string) {
     setErr(null); setResult(null); setBusyId(planId);
     start(async () => {
-      const r = (await subscribePlan(planId)) as any;
+      const r = (await subscribePlan(planId, docNumber)) as any;
       setBusyId(null);
+      if (r?.error === "need_doc") { setNeedDoc(planId); return; }
       if (r?.error) setErr(r.error);
-      else setResult({ link: r.link, planName: r.planName, value: r.value });
+      else { setNeedDoc(null); setResult({ link: r.link, planName: r.planName, value: r.value }); }
     });
   }
 
@@ -76,6 +79,26 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
 
               {isCurrent ? (
                 <span className="btn-ghost mt-5 justify-center opacity-60">Plano atual</span>
+              ) : needDoc === p.id ? (
+                <div className="mt-5">
+                  <label className="text-xs font-medium text-subtle">CPF ou CNPJ do responsável pela cobrança</label>
+                  <input
+                    className="input mt-1"
+                    inputMode="numeric"
+                    placeholder="Só números"
+                    value={doc}
+                    onChange={(e) => setDoc(e.target.value.replace(/\D/g, "").slice(0, 14))}
+                    autoFocus
+                  />
+                  <p className="mt-1 text-[11px] text-subtle">Exigido pelo Asaas para emitir a cobrança. Fica salvo no seu cadastro.</p>
+                  <button
+                    className="btn-brand mt-2 w-full justify-center"
+                    disabled={pending || (doc.length !== 11 && doc.length !== 14)}
+                    onClick={() => pick(p.id, doc)}
+                  >
+                    {busyId === p.id ? "Gerando..." : "Confirmar e assinar"}
+                  </button>
+                </div>
               ) : (
                 <button
                   className={`mt-5 justify-center ${isPopular ? "btn-brand" : "btn-dark"}`}

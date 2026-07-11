@@ -16,7 +16,7 @@ async function seatCount(supabase: any, tenant_id: string): Promise<number> {
   return Math.max(1, count ?? 1);
 }
 
-export async function subscribePlan(planId: string) {
+export async function subscribePlan(planId: string, docNumber?: string) {
   const { supabase, tenant_id, role } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (role !== "owner") return { error: "Apenas o dono do workspace pode assinar." };
@@ -35,16 +35,26 @@ export async function subscribePlan(planId: string) {
     .maybeSingle();
   if (!tenant) return { error: "Workspace não encontrado." };
 
+  // O Asaas exige CPF/CNPJ para cobrar: usa o do cadastro ou o informado agora.
+  const doc = String(docNumber || (tenant as any).cnpj || "").replace(/\D/g, "");
+  if (doc.length !== 11 && doc.length !== 14) {
+    return { error: "need_doc" }; // a tela pede o CPF/CNPJ
+  }
+  // salva no cadastro para as próximas cobranças (e NF)
+  if (doc !== String((tenant as any).cnpj || "").replace(/\D/g, "")) {
+    await supabase.from("tenants").update({ cnpj: doc }).eq("id", tenant_id);
+  }
+
   const seats = await seatCount(supabase, tenant_id);
   const value = Number((plan as any).price_monthly) * seats;
 
   const { ensureAsaasCustomer, createAsaasSubscription, cancelAsaasSubscription } = await import("@/lib/asaas");
 
-  // garante o cliente no Asaas
+  // garante o cliente no Asaas (e atualiza o documento se o customer já existia sem ele)
   const cust = await ensureAsaasCustomer({
     name: (tenant as any).legal_name || (tenant as any).name || "Cliente Contatia",
     email: (tenant as any).contact_email,
-    cpfCnpj: (tenant as any).cnpj,
+    cpfCnpj: doc,
     existingId: (tenant as any).asaas_customer_id,
   });
   if (cust.error || !cust.id) return { error: cust.error || "Falha ao registrar cliente no Asaas." };
