@@ -18,11 +18,27 @@ export default async function DashboardLayout({
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data: profile } = await supabase
+  // Busca o profile. IMPORTANTE: capturamos o erro — se a query falhar (RLS, coluna
+  // ausente, etc.), o app antes concluía "sem workspace" silenciosamente.
+  let { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("full_name, role, tenant_id, is_superadmin, impersonating_tenant_id")
     .eq("id", user?.id ?? "")
     .maybeSingle();
+
+  // Fallback: se a query falhou (ex.: coluna de impersonação ainda não migrada),
+  // tenta de novo só com as colunas essenciais para não travar o app.
+  if (profileError) {
+    const retry = await supabase
+      .from("profiles")
+      .select("full_name, role, tenant_id")
+      .eq("id", user?.id ?? "")
+      .maybeSingle();
+    if (!retry.error && retry.data) {
+      profile = retry.data as any;
+      profileError = null as any;
+    }
+  }
 
   const noTenant = !profile?.tenant_id;
   const isSuperadmin = !!(profile as any)?.is_superadmin;
@@ -93,25 +109,31 @@ export default async function DashboardLayout({
             </a>
           )}
         {noTenant ? (
-          isSuperadmin ? (
-            <div className="card mx-auto max-w-lg p-8 text-center">
-              <p className="font-display text-lg font-bold">Painel do superadmin</p>
-              <p className="mt-2 text-sm text-subtle">
-                Sua conta é de plataforma e não pertence a um workspace. Para ver a
-                configuração de Negócio, o pipeline ou dar suporte a um cliente, use o
-                painel e entre no workspace pelo botão <b>Entrar</b>.
+          <div className="card mx-auto max-w-2xl p-8">
+            <p className="font-display text-lg font-bold">Não consegui carregar seu workspace</p>
+            <p className="mt-2 text-sm text-subtle">
+              Seu login está ativo, mas o app não conseguiu ler o workspace vinculado à conta.
+              O diagnóstico abaixo mostra exatamente o que o sistema enxergou:
+            </p>
+
+            <div className="mt-4 space-y-2 rounded-xl bg-muted p-4 font-mono text-xs">
+              <p>usuário autenticado: <b>{user?.id ? "SIM" : "NÃO"}</b></p>
+              <p>id da sessão: <b>{user?.id || "(vazio)"}</b></p>
+              <p>e-mail da sessão: <b>{user?.email || "(vazio)"}</b></p>
+              <p>perfil encontrado: <b>{profile ? "SIM" : "NÃO"}</b></p>
+              <p>workspace no perfil: <b>{(profile as any)?.tenant_id || "(vazio)"}</b></p>
+              <p className={profileError ? "text-danger" : ""}>
+                erro na consulta: <b>{profileError ? (profileError as any).message : "nenhum"}</b>
               </p>
-              <Link href="/dashboard/superadmin" className="btn-brand mt-4 inline-flex">Abrir painel de workspaces →</Link>
             </div>
-          ) : (
-            <div className="card mx-auto max-w-lg p-8 text-center">
-              <p className="font-display text-lg font-bold">Conta ainda sem workspace</p>
-              <p className="mt-2 text-sm text-subtle">
-                Seu login foi criado. Rode o bloco SEED da migration para atribuir seu
-                tenant e o papel de owner — depois recarregue. (Passo único de bootstrap.)
-              </p>
-            </div>
-          )
+
+            <p className="mt-4 text-sm text-subtle">
+              {!profile
+                ? "O perfil não foi encontrado para o id da sessão acima. Isso indica que o id do login não corresponde a nenhum registro de perfil."
+                : "O perfil existe, mas está sem workspace vinculado."}
+            </p>
+            <p className="mt-2 text-xs text-subtle">Envie um print desta tela para o suporte — ela contém tudo o que é preciso para resolver.</p>
+          </div>
         ) : (
           children
         )}
