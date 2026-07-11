@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import SignOut from "@/components/SignOut";
 import DashboardNav from "@/components/DashboardNav";
 import { MobileNav } from "@/components/MobileNav";
+import { stopImpersonation } from "@/app/dashboard/superadmin/impersonate-actions";
 import { HelpWidget } from "@/components/HelpWidget";
 
 export const dynamic = "force-dynamic";
@@ -19,12 +20,20 @@ export default async function DashboardLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, role, tenant_id, is_superadmin")
+    .select("full_name, role, tenant_id, is_superadmin, impersonating_tenant_id")
     .eq("id", user?.id ?? "")
     .maybeSingle();
 
   const noTenant = !profile?.tenant_id;
   const isSuperadmin = !!(profile as any)?.is_superadmin;
+
+  // impersonação: superadmin dentro de um workspace para dar suporte
+  const impersonatingId = (profile as any)?.impersonating_tenant_id as string | null;
+  let impersonatingName: string | null = null;
+  if (impersonatingId) {
+    const { data: it } = await supabase.from("tenants").select("name").eq("id", impersonatingId).maybeSingle();
+    impersonatingName = (it as any)?.name || "workspace";
+  }
 
   // status de assinatura para o banner de conversão (só quando há workspace)
   let subStatus: string | undefined;
@@ -42,6 +51,14 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-screen flex-col">
+      {impersonatingId && (
+        <div className="flex flex-wrap items-center justify-center gap-3 bg-warn px-4 py-2 text-center text-sm font-semibold text-white">
+          <span>⚠ Modo suporte — você está vendo o workspace <b>{impersonatingName}</b> como o cliente.</span>
+          <form action={stopImpersonation}>
+            <button className="rounded-md bg-white/20 px-3 py-1 text-xs font-bold hover:bg-white/30">Sair do modo suporte</button>
+          </form>
+        </div>
+      )}
       <MobileNav
         isSuperadmin={isSuperadmin}
         userLabel={profile?.full_name || user?.email || undefined}
@@ -76,13 +93,25 @@ export default async function DashboardLayout({
             </a>
           )}
         {noTenant ? (
-          <div className="card mx-auto max-w-lg p-8 text-center">
-            <p className="font-display text-lg font-bold">Conta ainda sem workspace</p>
-            <p className="mt-2 text-sm text-subtle">
-              Seu login foi criado. Rode o bloco SEED da migration para atribuir seu
-              tenant e o papel de owner — depois recarregue. (Passo único de bootstrap.)
-            </p>
-          </div>
+          isSuperadmin ? (
+            <div className="card mx-auto max-w-lg p-8 text-center">
+              <p className="font-display text-lg font-bold">Painel do superadmin</p>
+              <p className="mt-2 text-sm text-subtle">
+                Sua conta é de plataforma e não pertence a um workspace. Para ver a
+                configuração de Negócio, o pipeline ou dar suporte a um cliente, use o
+                painel e entre no workspace pelo botão <b>Entrar</b>.
+              </p>
+              <Link href="/dashboard/superadmin" className="btn-brand mt-4 inline-flex">Abrir painel de workspaces →</Link>
+            </div>
+          ) : (
+            <div className="card mx-auto max-w-lg p-8 text-center">
+              <p className="font-display text-lg font-bold">Conta ainda sem workspace</p>
+              <p className="mt-2 text-sm text-subtle">
+                Seu login foi criado. Rode o bloco SEED da migration para atribuir seu
+                tenant e o papel de owner — depois recarregue. (Passo único de bootstrap.)
+              </p>
+            </div>
+          )
         ) : (
           children
         )}

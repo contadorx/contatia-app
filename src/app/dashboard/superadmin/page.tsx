@@ -1,3 +1,4 @@
+import { ImpersonateButton } from "@/components/ImpersonateButton";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
 
@@ -168,6 +169,7 @@ export default async function Superadmin() {
               <th className="px-4 py-3 font-medium">Negócios abertos</th>
               <th className="px-4 py-3 font-medium">MRR pipeline</th>
               <th className="px-4 py-3 font-medium">Desde</th>
+              <th className="px-4 py-3 font-medium">Suporte</th>
             </tr>
           </thead>
           <tbody>
@@ -180,11 +182,12 @@ export default async function Superadmin() {
                 <td className="px-4 py-3">{r.oppsOpen}</td>
                 <td className="px-4 py-3 font-semibold text-brand-dark">{brl(r.mrr)}</td>
                 <td className="px-4 py-3 text-xs text-subtle">{new Date(r.created_at).toLocaleDateString("pt-BR")}</td>
+                <td className="px-4 py-3"><ImpersonateButton tenantId={r.id} name={r.name} /></td>
               </tr>
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-subtle">Nenhum workspace ainda.</td>
+                <td colSpan={8} className="px-4 py-8 text-center text-subtle">Nenhum workspace ainda.</td>
               </tr>
             )}
           </tbody>
