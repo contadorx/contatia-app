@@ -72,6 +72,7 @@ export async function POST(req: Request) {
           due_date: dueDate || null,
           payment_link: invoiceUrl || null,
           asaas_payment_id: payId,
+          asaas_subscription_id: subId || null,
           status: "pending",
         });
         return NextResponse.json({ ok: true, event, note: "fatura criada a partir do Asaas" });
