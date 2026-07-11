@@ -33,7 +33,7 @@ export async function POST(req: Request, { params }: { params: { token: string }
     /* corpo vazio */
   }
   const name = (body.name || "").toString().trim();
-  const email = (body.email || "").toString().trim();
+  const email = (body.email || "").toString().trim().toLowerCase();
   const phone = (body.phone || "").toString().trim();
   const company = (body.company || "").toString().trim();
   if (!name && !email) {

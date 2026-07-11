@@ -132,8 +132,11 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     .order("created_at", { ascending: true });
   if (!accts || !accts.length) return { error: "Nenhuma caixa de e-mail conectada. Configure em Config." };
 
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
+  // meia-noite BRT (UTC-3, fixo): o servidor roda em UTC — sem isso o "dia" do cap
+  // diário resetaria às 21h de Brasília e a caixa poderia enviar 2x o limite num dia real.
+  const BRT_OFFSET_MS = 3 * 3600000;
+  const nowBRT = new Date(Date.now() - BRT_OFFSET_MS);
+  const startOfDay = new Date(Date.UTC(nowBRT.getUTCFullYear(), nowBRT.getUTCMonth(), nowBRT.getUTCDate()) + BRT_OFFSET_MS);
   const { effectiveDailyCap } = await import("@/lib/warmup");
 
   // contagem de enviados hoje por caixa
@@ -246,8 +249,11 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
     .maybeSingle();
   if (!acc) return { error: "Nenhuma instância WhatsApp conectada. Configure em Config." };
 
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
+  // meia-noite BRT (UTC-3, fixo): o servidor roda em UTC — sem isso o "dia" do cap
+  // diário resetaria às 21h de Brasília e a caixa poderia enviar 2x o limite num dia real.
+  const BRT_OFFSET_MS = 3 * 3600000;
+  const nowBRT = new Date(Date.now() - BRT_OFFSET_MS);
+  const startOfDay = new Date(Date.UTC(nowBRT.getUTCFullYear(), nowBRT.getUTCMonth(), nowBRT.getUTCDate()) + BRT_OFFSET_MS);
   const { count } = await supabase
     .from("events")
     .select("id", { count: "exact", head: true })

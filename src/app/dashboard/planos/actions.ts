@@ -30,7 +30,7 @@ export async function subscribePlan(planId: string) {
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("id, name, legal_name, cnpj, contact_email, asaas_customer_id")
+    .select("id, name, legal_name, cnpj, contact_email, asaas_customer_id, asaas_subscription_id")
     .eq("id", tenant_id)
     .maybeSingle();
   if (!tenant) return { error: "Workspace não encontrado." };
@@ -38,7 +38,7 @@ export async function subscribePlan(planId: string) {
   const seats = await seatCount(supabase, tenant_id);
   const value = Number((plan as any).price_monthly) * seats;
 
-  const { ensureAsaasCustomer, createAsaasSubscription } = await import("@/lib/asaas");
+  const { ensureAsaasCustomer, createAsaasSubscription, cancelAsaasSubscription } = await import("@/lib/asaas");
 
   // garante o cliente no Asaas
   const cust = await ensureAsaasCustomer({
@@ -48,6 +48,13 @@ export async function subscribePlan(planId: string) {
     existingId: (tenant as any).asaas_customer_id,
   });
   if (cust.error || !cust.id) return { error: cust.error || "Falha ao registrar cliente no Asaas." };
+
+  // troca de plano: cancela a assinatura anterior ANTES de criar a nova (evita cobrança dupla)
+  const prevSub = (tenant as any).asaas_subscription_id as string | null;
+  if (prevSub) {
+    const cancel = await cancelAsaasSubscription(prevSub);
+    if (cancel.error) return { error: `Não foi possível cancelar a assinatura anterior: ${cancel.error}` };
+  }
 
   // cria a assinatura recorrente
   const sub = await createAsaasSubscription({
@@ -61,6 +68,7 @@ export async function subscribePlan(planId: string) {
   await supabase.from("tenants").update({
     plan_id: (plan as any).id,
     asaas_customer_id: cust.id,
+    asaas_subscription_id: sub.id || null,
     subscription_status: "pending",
     mrr: value,
   }).eq("id", tenant_id);

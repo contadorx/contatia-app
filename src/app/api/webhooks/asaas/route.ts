@@ -12,7 +12,11 @@ export async function POST(req: Request) {
   const expected = process.env.ASAAS_WEBHOOK_TOKEN;
   const url = new URL(req.url);
   const token = req.headers.get("asaas-access-token") || url.searchParams.get("token");
-  if (expected && token !== expected) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!expected) {
+    // fail-closed: sem o token configurado, não processa nada (evita PAYMENT_CONFIRMED forjado)
+    return NextResponse.json({ error: "ASAAS_WEBHOOK_TOKEN não configurado" }, { status: 503 });
+  }
+  if (token !== expected) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   let body: any;
   try {

@@ -57,38 +57,39 @@ export async function getBookingSlots(token: string) {
     } catch { /* free/busy é best-effort; não quebra o agendamento */ }
   }
 
+  // TODA a matemática de horário em BRT (UTC-3, fixo — sem horário de verão desde 2019).
+  // O servidor (Vercel) roda em UTC; sem isso, "09:00" viraria 06:00 em Brasília.
+  const BRT_OFFSET_MS = 3 * 3600000;
   const slots: { date: string; times: { iso: string; label: string }[] }[] = [];
   const now = new Date();
-  // próximos 14 dias
+  const nowBRT = new Date(now.getTime() - BRT_OFFSET_MS); // "relógio de parede" BRT em campos UTC
   for (let d = 0; d < 14; d++) {
-    const day = new Date(now);
-    day.setDate(now.getDate() + d);
-    if (!days.includes(day.getDay())) continue;
+    // meia-noite BRT do dia d (expressa como timestamp real UTC)
+    const baseBRT = Date.UTC(nowBRT.getUTCFullYear(), nowBRT.getUTCMonth(), nowBRT.getUTCDate() + d, 0, 0, 0);
+    const weekdayBRT = new Date(baseBRT).getUTCDay();
+    if (!days.includes(weekdayBRT)) continue;
     const times: { iso: string; label: string }[] = [];
     for (let h = startH; h < endH; h++) {
       for (const min of [0, 30]) {
-        if (min === 30 && dur >= 60) continue; // se durações de 1h, só de hora em hora
-        const slot = new Date(day);
-        slot.setHours(h, min, 0, 0);
-        if (slot.getTime() <= now.getTime() + 3600000) continue; // pelo menos 1h de antecedência
-        // ocupado se colide com reunião do Contatia
-        const collide = busy.some((b) => Math.abs(b - slot.getTime()) < dur * 60000);
+        if (min === 30 && dur >= 60) continue; // durações de 1h só de hora em hora
+        // h:min no relógio BRT = (h+3):min em UTC real
+        const slotUTC = baseBRT + (h * 60 + min) * 60000 + BRT_OFFSET_MS;
+        if (slotUTC <= now.getTime() + 3600000) continue; // pelo menos 1h de antecedência
+        const collide = busy.some((b) => Math.abs(b - slotUTC) < dur * 60000);
         if (collide) continue;
-        // ocupado se o intervalo do slot cai dentro de um bloco ocupado do Google
-        const slotStart = slot.getTime();
-        const slotEnd = slotStart + dur * 60000;
-        const googleCollide = googleBusy.some((b) => slotStart < b.end && slotEnd > b.start);
+        const slotEnd = slotUTC + dur * 60000;
+        const googleCollide = googleBusy.some((b) => slotUTC < b.end && slotEnd > b.start);
         if (googleCollide) continue;
-        times.push({ iso: slot.toISOString(), label: `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}` });
+        times.push({ iso: new Date(slotUTC).toISOString(), label: `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}` });
       }
     }
     if (times.length) {
       slots.push({
-        date: day.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" }),
+        date: new Date(baseBRT + BRT_OFFSET_MS).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", timeZone: "America/Sao_Paulo" }),
         times,
       });
     }
-    if (slots.length >= 7) break; // no máx. 7 dias com horário
+    if (slots.length >= 7) break;
   }
 
   return { ok: true, tenantName: tenant.name, duration: dur, slots };
@@ -154,5 +155,5 @@ export async function createBooking(token: string, input: { name: string; email:
     }
   } catch { /* falha no Google não impede o agendamento */ }
 
-  return { ok: true, whenLabel: when.toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "short" }) };
+  return { ok: true, whenLabel: when.toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "short", timeZone: "America/Sao_Paulo" }) };
 }

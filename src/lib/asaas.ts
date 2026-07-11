@@ -111,3 +111,16 @@ export async function createAsaasSubscription(input: {
 
   return { id: sub.id, link };
 }
+
+// Cancela uma assinatura recorrente (usado ao trocar de plano, para não cobrar em dobro).
+export async function cancelAsaasSubscription(subscriptionId: string): Promise<{ ok?: boolean; error?: string }> {
+  const h = headers();
+  if (!h) return { error: "ASAAS_API_KEY não configurada." };
+  const res = await fetch(`${base()}/subscriptions/${subscriptionId}`, { method: "DELETE", headers: h });
+  if (!res.ok && res.status !== 404) {
+    let d = `${res.status}`;
+    try { const j = await res.json(); d = j?.errors?.[0]?.description || d; } catch {}
+    return { error: `Asaas (cancelar assinatura): ${d}` };
+  }
+  return { ok: true };
+}

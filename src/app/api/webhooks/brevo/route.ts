@@ -6,7 +6,11 @@ import { createAdminClient } from "@/lib/supabaseAdmin";
 // Protegido por token: /api/webhooks/brevo?token=BREVO_WEBHOOK_TOKEN
 export async function POST(req: NextRequest) {
   const token = req.nextUrl.searchParams.get("token");
-  if (process.env.BREVO_WEBHOOK_TOKEN && token !== process.env.BREVO_WEBHOOK_TOKEN) {
+  if (!process.env.BREVO_WEBHOOK_TOKEN) {
+    // fail-closed: sem o token configurado no ambiente, o webhook não aceita nada
+    return NextResponse.json({ error: "BREVO_WEBHOOK_TOKEN não configurado" }, { status: 503 });
+  }
+  if (token !== process.env.BREVO_WEBHOOK_TOKEN) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
