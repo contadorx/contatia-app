@@ -1,5 +1,5 @@
 import { ImpersonateButton } from "@/components/ImpersonateButton";
-import { SubscriptionModal, SubscriptionButton } from "@/components/SubscriptionModal";
+import { SubscriptionButton } from "@/components/SubscriptionButton";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
 
@@ -265,7 +265,7 @@ export default async function Superadmin() {
                 <td className="px-4 py-3">
                   <div className="flex gap-1.5">
                     <ImpersonateButton tenantId={r.id} name={r.name} />
-                    <SubscriptionButton tenantId={r.id} name={r.name} />
+                    <SubscriptionButton tenantId={r.id} name={r.name} plans={(planos as any[]) || []} />
                   </div>
                 </td>
               </tr>

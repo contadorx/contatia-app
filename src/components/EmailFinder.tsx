@@ -36,10 +36,28 @@ export function EmailFinder({
   );
   const [pending, start] = useTransition();
 
+  /** limpa o que o usuário colar: https://, www., caminho — tudo fora */
+  function limpar(v: string): string {
+    let s = (v || "").trim().toLowerCase();
+    if (s.includes("@")) s = s.split("@").pop() || "";
+    return s
+      .replace(/^[a-z]+:\/\//, "")
+      .replace(/^www\./, "")
+      .split("/")[0]
+      .split("?")[0]
+      .trim();
+  }
+
   function buscar() {
     setMsg(null);
+    const limpo = limpar(dominio);
+    if (!limpo || !limpo.includes(".")) {
+      setMsg({ t: "err", m: "Informe um domínio válido (ex.: empresa.com.br)." });
+      return;
+    }
+    setDominio(limpo);   // mostra ao usuário o que realmente será usado
     start(async () => {
-      const r = (await enqueueEmailDiscovery(contactId, dominio)) as any;
+      const r = (await enqueueEmailDiscovery(contactId, limpo)) as any;
       if (r?.error) setMsg({ t: "err", m: r.error });
       else setMsg({ t: "info", m: r.msg || EXPLICACAO.pending });
     });

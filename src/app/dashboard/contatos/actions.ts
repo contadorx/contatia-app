@@ -1,6 +1,7 @@
 "use server";
 
 import { canCreate, mensagemLimite } from "@/lib/plan";
+import { dominioDe } from "@/lib/emailFinder";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -150,12 +151,9 @@ export async function updateContact(id: string, patch: {
   for (const [k, v] of Object.entries(patch)) {
     if (v !== undefined) clean[k] = (typeof v === "string" ? v.trim() : v) || null;
   }
-  // normaliza o domínio: aceita URL completa, e-mail ou o domínio puro
+  // normaliza o domínio com a função única (trata https://, www., caminho, e-mail)
   if (typeof clean.company_domain === "string") {
-    const d = (clean.company_domain as string).toLowerCase();
-    clean.company_domain = d.includes("@")
-      ? d.split("@")[1]
-      : d.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0] || null;
+    clean.company_domain = dominioDe(clean.company_domain as string);
   }
   if (typeof clean.email === "string") clean.email = (clean.email as string).toLowerCase();
   if (clean.name === null) return { error: "O nome não pode ficar vazio." };
@@ -163,6 +161,22 @@ export async function updateContact(id: string, patch: {
   // empresa alterada → encontra/cria em Empresas e revincula
   if (patch.company !== undefined && tenant_id) {
     clean.account_id = await ensureAccount(supabase, tenant_id, user_id, patch.company, patch.cnpj);
+  }
+
+  // O domínio pertence à EMPRESA, não só ao contato: propaga para Empresas,
+  // para que os outros contatos da mesma empresa também o tenham.
+  if (clean.company_domain && tenant_id) {
+    const accId = (clean.account_id as string) || (await supabase
+      .from("contacts").select("account_id").eq("id", id).maybeSingle()
+      .then((r: any) => r.data?.account_id));
+
+    if (accId) {
+      await supabase
+        .from("accounts")
+        .update({ domain: clean.company_domain, website: `https://${clean.company_domain}` } as any)
+        .eq("id", accId)
+        .eq("tenant_id", tenant_id);
+    }
   }
 
   const { error } = await supabase.from("contacts").update(clean).eq("id", id);

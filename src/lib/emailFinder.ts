@@ -66,15 +66,38 @@ export async function verifyEmail(email: string): Promise<{ status: string; reas
   }
 }
 
-/** Extrai o domínio de um site/e-mail (ex.: "https://www.acme.com.br/x" → "acme.com.br") */
+/**
+ * A ÚNICA fonte da verdade para normalizar domínio.
+ * Aceita qualquer coisa que o usuário cole e devolve só o domínio:
+ *   "https://www.acme.com.br/sobre"  → "acme.com.br"
+ *   "http://acme.com.br"             → "acme.com.br"
+ *   "www.acme.com.br"                → "acme.com.br"
+ *   "joao@acme.com.br"               → "acme.com.br"
+ *   "ACME.COM.BR/  "                 → "acme.com.br"
+ * Devolve null quando não sobra um domínio plausível.
+ */
 export function dominioDe(entrada?: string | null): string | null {
   if (!entrada) return null;
-  const s = entrada.trim().toLowerCase();
-  if (s.includes("@")) return s.split("@")[1] || null;
-  try {
-    const u = new URL(s.startsWith("http") ? s : `https://${s}`);
-    return u.hostname.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
+
+  let s = String(entrada).trim().toLowerCase();
+  if (!s) return null;
+
+  // e-mail? fica com o que vem depois do @
+  if (s.includes("@")) s = s.split("@").pop() || "";
+
+  // tira protocolo, www, caminho, query e barra final
+  s = s
+    .replace(/^[a-z]+:\/\//, "")   // https:// , http:// , ftp://
+    .replace(/^www\./, "")
+    .split("/")[0]
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/:\d+$/, "")           // porta
+    .trim();
+
+  // precisa parecer um domínio (ao menos um ponto e caracteres válidos)
+  if (!s || !s.includes(".") || !/^[a-z0-9.-]+$/.test(s)) return null;
+  if (s.startsWith(".") || s.endsWith(".")) return null;
+
+  return s;
 }

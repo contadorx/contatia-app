@@ -20,7 +20,7 @@ export async function enqueueEmailDiscovery(contactId: string, domainOrSite?: st
 
   const { data: contact } = await supabase
     .from("contacts")
-    .select("id, name, email, company, company_domain")
+    .select("id, name, email, company, company_domain, account_id")
     .eq("id", contactId)
     .maybeSingle();
 
@@ -34,6 +34,23 @@ export async function enqueueEmailDiscovery(contactId: string, domainOrSite?: st
   }
 
   await supabase.from("contacts").update({ company_domain: dominio } as any).eq("id", contactId);
+
+  // o domínio é da EMPRESA: propaga para Empresas e para os outros contatos dela
+  const accId = (contact as any).account_id;
+  if (accId) {
+    await supabase
+      .from("accounts")
+      .update({ domain: dominio, website: `https://${dominio}` } as any)
+      .eq("id", accId)
+      .eq("tenant_id", tenant_id);
+
+    // os demais contatos da mesma empresa que ainda não têm domínio
+    await supabase
+      .from("contacts")
+      .update({ company_domain: dominio } as any)
+      .eq("account_id", accId)
+      .is("company_domain", null);
+  }
 
   const { error } = await supabase.from("email_discovery_queue").upsert({
     tenant_id,
