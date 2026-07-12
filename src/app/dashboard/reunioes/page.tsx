@@ -1,3 +1,4 @@
+import { MeetingsCalendar } from "@/components/MeetingsCalendar";
 import { createClient } from "@/lib/supabase/server";
 import MeetingForm from "@/components/MeetingForm";
 import MeetingStatusButtons from "@/components/MeetingStatusButtons";
@@ -47,6 +48,70 @@ export default async function Reunioes() {
   const up = (upcoming as any[]) || [];
   const pastList = (past as any[]) || [];
 
+  // ---- Calendário: time, permissões de agenda e reuniões do período ----
+  const { data: { user } } = await supabase.auth.getUser();
+  const meuId = user?.id || "";
+  const { data: meuPerfil } = await supabase.from("profiles").select("role, tenant_id").eq("id", meuId).maybeSingle();
+  const souAdmin = (meuPerfil as any)?.role === "owner";
+
+  const { data: time } = await supabase
+    .from("profiles")
+    .select("id, full_name, email, role")
+    .eq("tenant_id", (meuPerfil as any)?.tenant_id ?? "")
+    .order("full_name", { ascending: true });
+
+  // agendas que posso VER e em quais posso MARCAR
+  const { data: perms } = await supabase
+    .from("calendar_permissions")
+    .select("seller_id, can_view, can_book")
+    .eq("sdr_id", meuId);
+
+  const permList = (perms as any[]) || [];
+  const podeVer = new Set<string>([meuId, ...permList.filter((p) => p.can_view).map((p) => p.seller_id)]);
+  const podeAgendarEm = permList.filter((p) => p.can_book).map((p) => p.seller_id);
+
+  // o admin enxerga todas as agendas do time
+  const timeList = ((time as any[]) || []).filter((p) => souAdmin || podeVer.has(p.id));
+  const vendedores = timeList.map((p) => ({
+    id: p.id,
+    name: (p.full_name || p.email || "sem nome") + (p.id === meuId ? " (você)" : ""),
+  }));
+
+  // reuniões do time (para o calendário), agrupadas por dono da agenda
+  const inicioMes = new Date(); inicioMes.setDate(1); inicioMes.setHours(0,0,0,0);
+  const fimJanela = new Date(); fimJanela.setMonth(fimJanela.getMonth() + 3);
+
+  const { data: doTime } = await supabase
+    .from("meetings")
+    .select("id, title, datetime, duration_min, status, assigned_to, contacts(name)")
+    .gte("datetime", inicioMes.toISOString())
+    .lte("datetime", fimJanela.toISOString())
+    .order("datetime", { ascending: true });
+
+  const meetingsPorDono: Record<string, any[]> = {};
+  for (const m of ((doTime as any[]) || [])) {
+    const dono = m.assigned_to || meuId;
+    (meetingsPorDono[dono] ||= []).push({
+      id: m.id, title: m.title, datetime: m.datetime,
+      duration_min: m.duration_min, status: m.status,
+      contact_name: m.contacts?.name || null,
+    });
+  }
+
+  // janela de atendimento do workspace (a mesma do link público)
+  const { data: t } = await supabase
+    .from("tenants")
+    .select("booking_start_hour, booking_end_hour, booking_duration_min, booking_days")
+    .eq("id", (meuPerfil as any)?.tenant_id ?? "")
+    .maybeSingle();
+
+  const janela = {
+    startHour: Number((t as any)?.booking_start_hour ?? 9),
+    endHour: Number((t as any)?.booking_end_hour ?? 18),
+    duration: Number((t as any)?.booking_duration_min ?? 30),
+    days: String((t as any)?.booking_days || "1,2,3,4,5").split(",").map((d) => Number(d.trim())),
+  };
+
   // agrupa próximas por dia (agenda)
   const byDay: { label: string; items: any[] }[] = [];
   for (const m of up) {
@@ -62,6 +127,16 @@ export default async function Reunioes() {
       <p className="mt-1 text-sm text-subtle">Agenda, confirmação e resultado. Os lembretes viram toques na fila e reduzem o no-show.</p>
 
       <div className="mt-6">
+        <MeetingsCalendar
+          meetingsPorDono={meetingsPorDono}
+          vendedores={vendedores}
+          meuId={meuId}
+          podeAgendarEm={podeAgendarEm}
+          janela={janela}
+        />
+      </div>
+
+      <div className="mt-8">
         <MeetingForm contacts={(contacts as { id: string; name: string }[]) || []} />
       </div>
       <p className="mt-2 text-xs text-subtle">

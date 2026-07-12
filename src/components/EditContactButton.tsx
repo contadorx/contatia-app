@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { updateContact } from "@/app/dashboard/contatos/actions";
 
-type C = { id: string; name: string; email?: string | null; phone?: string | null; company?: string | null; role_title?: string | null; cnpj?: string | null; status?: string | null };
+type C = { id: string; name: string; email?: string | null; phone?: string | null; company?: string | null; company_domain?: string | null; role_title?: string | null; cnpj?: string | null; status?: string | null };
 
 export default function EditContactButton({ contact }: { contact: C }) {
   const [open, setOpen] = useState(false);
@@ -12,6 +12,7 @@ export default function EditContactButton({ contact }: { contact: C }) {
     email: contact.email || "",
     phone: contact.phone || "",
     company: contact.company || "",
+    company_domain: contact.company_domain || "",
     role_title: contact.role_title || "",
     cnpj: contact.cnpj || "",
     status: contact.status || "novo",
@@ -30,6 +31,11 @@ export default function EditContactButton({ contact }: { contact: C }) {
         <div><label className="label">E-mail</label><input className="input mt-1" value={f.email} onChange={(e) => up("email", e.target.value)} /></div>
         <div><label className="label">Telefone</label><input className="input mt-1" value={f.phone} onChange={(e) => up("phone", e.target.value)} /></div>
         <div><label className="label">Empresa (texto livre)</label><input className="input mt-1" value={f.company} onChange={(e) => up("company", e.target.value)} /></div>
+        <div>
+          <label className="label">Site / domínio da empresa</label>
+          <input className="input mt-1" value={f.company_domain} onChange={(e) => up("company_domain", e.target.value)} placeholder="empresa.com.br" />
+          <p className="mt-1 text-xs text-subtle">Permite procurar o e-mail do decisor.</p>
+        </div>
         <div><label className="label">CNPJ</label><input className="input mt-1" value={f.cnpj} onChange={(e) => up("cnpj", e.target.value)} /></div>
         <div>
           <label className="label">Situação</label>

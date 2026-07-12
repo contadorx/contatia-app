@@ -1,4 +1,5 @@
 import { ImpersonateButton } from "@/components/ImpersonateButton";
+import { SubscriptionModal, SubscriptionButton } from "@/components/SubscriptionModal";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
 
@@ -84,6 +85,13 @@ export default async function Superadmin() {
   }
 
   const subscriptionMrr = tList.filter((t) => t.subscription_status === "active").reduce((s, t) => s + Number(t.mrr || 0), 0);
+
+  // planos disponíveis (para o modal de assinatura)
+  const { data: planos } = await supabase
+    .from("platform_plans")
+    .select("id, name, price_monthly")
+    .eq("is_active", true)
+    .order("sort", { ascending: true });
 
   // --- Engajamento: workspaces com atividade recente (exige service role) ---
   const now = Date.now();
@@ -254,7 +262,12 @@ export default async function Superadmin() {
                 <td className="px-4 py-3">{r.oppsOpen}</td>
                 <td className="px-4 py-3 font-semibold text-brand-dark">{brl(r.mrr)}</td>
                 <td className="px-4 py-3 text-xs text-subtle">{new Date(r.created_at).toLocaleDateString("pt-BR")}</td>
-                <td className="px-4 py-3"><ImpersonateButton tenantId={r.id} name={r.name} /></td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-1.5">
+                    <ImpersonateButton tenantId={r.id} name={r.name} />
+                    <SubscriptionButton tenantId={r.id} name={r.name} />
+                  </div>
+                </td>
               </tr>
             ))}
             {!rows.length && (

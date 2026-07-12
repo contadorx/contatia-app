@@ -1,3 +1,5 @@
+import { hasFeature } from "@/lib/plan";
+import { FeatureLock } from "@/components/UsageLimits";
 import { createClient } from "@/lib/supabase/server";
 import RadarImport from "@/components/RadarImport";
 import RadarPushButton from "@/components/RadarPushButton";
@@ -10,6 +12,18 @@ export default async function Radar({
 }: {
   searchParams: { cnae?: string; uf?: string; municipio?: string; bairro?: string; capital?: string; porte?: string; tier?: string; q?: string };
 }) {
+  // O Radar é uma feature do Profissional para cima — é ele que faz o Essencial
+  // apertar e o cliente migrar.
+  if (!(await hasFeature("radar"))) {
+    return (
+      <FeatureLock
+        feature="radar"
+        titulo="Radar de CNPJs da Receita"
+        descricao="Encontre empresas brasileiras por atividade, região e porte usando dados públicos — e transforme cada CNPJ em lead com contato."
+      />
+    );
+  }
+
   const supabase = createClient();
 
   let query = supabase

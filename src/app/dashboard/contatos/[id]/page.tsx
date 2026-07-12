@@ -1,3 +1,4 @@
+import { EmailFinder } from "@/components/EmailFinder";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -39,7 +40,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
 
   const { data: contact } = await supabase
     .from("contacts")
-    .select("id, name, email, phone, company, role_title, cnpj, origin, status, score, account_id, custom, accounts(name, domain, website)")
+    .select("id, name, email, phone, company, company_domain, email_discovery, role_title, cnpj, origin, status, score, account_id, custom, accounts(name, domain, website)")
     .eq("id", params.id)
     .maybeSingle();
   if (!contact) notFound();
@@ -103,6 +104,14 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
           <ContactReplyButton contactId={c.id} />
           <EditContactButton contact={c as any} />
         </div>
+
+        {!c.email && (
+          <EmailFinder
+            contactId={c.id}
+            companyDomain={(c as any).company_domain || (c as any).accounts?.domain || null}
+            discovery={(c as any).email_discovery || null}
+          />
+        )}
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">

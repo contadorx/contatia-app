@@ -89,8 +89,20 @@ export async function dedupeByEmail() {
 export async function createInvite(email: string) {
   const { supabase, tenant_id, role, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
-  if (role !== "owner") return { error: "Só o owner convida." };
+  if (role !== "owner") return { error: "Só o admin convida." };
   if (!email.trim() || !email.includes("@")) return { error: "E-mail inválido." };
+
+  // O plano tem teto de usuários? Se encheu, indicamos o plano certo em vez de
+  // bloquear em silêncio.
+  const { data: sc } = await supabase.rpc("seat_check");
+  const seat = Array.isArray(sc) ? sc[0] : sc;
+  if (seat && !(seat as any).pode_adicionar) {
+    const s = seat as any;
+    return {
+      error: `Seu plano ${s.plano_atual} comporta ${s.teto} usuários e você já tem ${s.usuarios_atuais}. Para adicionar mais gente, mude para o plano ${s.plano_sugerido} em Planos.`,
+    };
+  }
+
   const { data, error } = await supabase
     .from("tenant_invites")
     .insert({ tenant_id, email: email.trim().toLowerCase(), role: "partner", created_by: user_id })

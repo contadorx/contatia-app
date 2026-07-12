@@ -1,5 +1,7 @@
 "use server";
 
+import { canCreate, mensagemLimite } from "@/lib/plan";
+
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -27,6 +29,12 @@ export async function saveSmtpAccount(input: {
   detect_replies?: boolean;
   imap_host?: string;
 }) {
+  // limite de caixas de e-mail do plano
+  const lim = await canCreate("caixas");
+  if (!lim.permitido) {
+    return { error: mensagemLimite("caixas", lim.usado, lim.limite, lim.sugerido) };
+  }
+
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace atribuído." };
   if (!input.from_email.trim() || !input.smtp_host.trim() || !input.smtp_user.trim())

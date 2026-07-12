@@ -1,3 +1,5 @@
+import { hasFeature } from "@/lib/plan";
+import { FeatureLock } from "@/components/UsageLimits";
 import { CrmIntegrations } from "@/components/CrmIntegrations";
 import { createClient } from "@/lib/supabase/server";
 import SmtpForm from "@/components/SmtpForm";
@@ -46,6 +48,10 @@ export default async function Config() {
 
   const rows = (accounts as any[]) || [];
   const gmailReady = !!process.env.GOOGLE_CLIENT_ID;
+
+  // features do plano (Essencial não tem WhatsApp nem IA)
+  const temWhats = await hasFeature("whatsapp");
+  const temIA = await hasFeature("ia");
 
   return (
     <div className="max-w-3xl">
@@ -183,10 +189,20 @@ export default async function Config() {
 
         {/* WhatsApp */}
         <div>
-          <p className="text-sm text-subtle">Conecte sua instância Evolution (você a hospeda). Envia da fila e detecta respostas via webhook.</p>
-          <div className="card mt-3 p-5">
-            <WhatsAppConnect accounts={(waAccounts as any[]) || []} />
-          </div>
+          {temWhats ? (
+            <>
+              <p className="text-sm text-subtle">Conecte sua instância Evolution (você a hospeda). Envia da fila e detecta respostas via webhook.</p>
+              <div className="card mt-3 p-5">
+                <WhatsAppConnect accounts={(waAccounts as any[]) || []} />
+              </div>
+            </>
+          ) : (
+            <FeatureLock
+              feature="whatsapp"
+              titulo="WhatsApp na cadência"
+              descricao="O canal que o brasileiro responde, dentro do fluxo: dispare o toque da fila, receba a resposta e deixe a cadência pausar sozinha."
+            />
+          )}
         </div>
 
         {/* Vendas */}
@@ -198,11 +214,21 @@ export default async function Config() {
           <a href="/dashboard/config/produtos" className="btn-ghost mt-2 inline-flex">Gerenciar catálogo →</a>
 
           <div className="mt-6">
-            <p className="text-sm font-semibold">Inteligência (IA)</p>
-            <p className="text-sm text-subtle">Modelo e chave usados pelo &ldquo;Gerar cadência com IA&rdquo;. Definidos aqui, valem sem mexer no ambiente.</p>
-            <div className="card mt-2 p-5">
-              <AiSettingsForm currentModel={aiModel} hasKey={aiHasKey} />
-            </div>
+            {temIA ? (
+              <>
+                <p className="text-sm font-semibold">Inteligência (IA)</p>
+                <p className="text-sm text-subtle">Modelo e chave usados pelo &ldquo;Gerar cadência com IA&rdquo;. Definidos aqui, valem sem mexer no ambiente.</p>
+                <div className="card mt-2 p-5">
+                  <AiSettingsForm currentModel={aiModel} hasKey={aiHasKey} />
+                </div>
+              </>
+            ) : (
+              <FeatureLock
+                feature="ia"
+                titulo="IA que monta a cadência"
+                descricao="Descreva o que você vende e para quem — a IA escreve a sequência completa: assuntos, corpos e intervalos."
+              />
+            )}
           </div>
         </div>
 

@@ -1,5 +1,7 @@
 "use server";
 
+import { canCreate, mensagemLimite, hasFeature } from "@/lib/plan";
+
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { renderTemplate, addDaysISO, channelLabel, type Channel } from "@/lib/cadence";
@@ -30,6 +32,11 @@ export async function createSequence(input: {
   audience: string;
   steps: StepInput[];
 }) {
+  const lim = await canCreate("cadencias");
+  if (!lim.permitido) {
+    return { error: mensagemLimite("cadencias", lim.usado, lim.limite, lim.sugerido) };
+  }
+
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace atribuído." };
   if (!input.name.trim()) return { error: "Dê um nome à sequência." };
@@ -131,6 +138,11 @@ export async function generateSequenceAI(brief: {
   steps?: number;
   channels?: string[];
 }) {
+  // a IA é feature do Profissional para cima
+  if (!(await hasFeature("ia"))) {
+    return { error: "A geração de cadência com IA está disponível a partir do plano Profissional. Veja em Planos." };
+  }
+
   if (!brief.market?.trim() || !brief.product?.trim()) {
     return { error: "Descreva ao menos o mercado e o produto." };
   }

@@ -1,3 +1,5 @@
+import { UsageLimits } from "@/components/UsageLimits";
+import { getUsage } from "@/lib/plan";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import SignOut from "@/components/SignOut";
@@ -58,6 +60,9 @@ export default async function DashboardLayout({
     subStatus = (t as any)?.subscription_status;
   }
   const showSubBanner = !isSuperadmin && (!subStatus || ["trialing", "pending", "past_due", "canceled"].includes(subStatus));
+
+  // uso × limites (avisa a partir de 80%, bloqueia no limite)
+  const usos = profile?.tenant_id && !isSuperadmin ? await getUsage() : [];
   const bannerText: Record<string, string> = {
     past_due: "Seu pagamento está em atraso. Regularize para não perder o acesso.",
     pending: "Falta o pagamento para ativar sua assinatura.",
@@ -102,6 +107,7 @@ export default async function DashboardLayout({
         </aside>
 
         <main className="flex-1 p-6 md:p-10">
+          {usos.length > 0 && <UsageLimits usos={usos} compacto />}
           {showSubBanner && !noTenant && (
             <a href="/dashboard/planos" className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand/30 bg-brand-soft px-4 py-3 text-sm hover:border-brand">
               <span className="font-medium text-brand-dark">{bannerMsg}</span>

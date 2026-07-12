@@ -1,3 +1,4 @@
+import { TeamManager } from "@/components/TeamManager";
 import { createClient } from "@/lib/supabase/server";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import TeamTools from "@/components/TeamTools";
@@ -49,6 +50,21 @@ export default async function Equipe() {
     };
   });
 
+  // --- papéis, permissões de agenda e teto do plano ---
+  const { checkSeats } = await import("@/app/dashboard/equipe/team-actions");
+  const seats = await checkSeats();
+
+  const { data: permsData } = await supabase
+    .from("calendar_permissions")
+    .select("sdr_id, seller_id, can_book");
+
+  const membrosList = ((members as any[]) || []).map((p) => ({
+    id: p.id,
+    name: p.full_name || p.email || "sem nome",
+    email: p.email || "",
+    role: p.role || "partner",
+  }));
+
   return (
     <div>
       <h1 className="font-display text-2xl font-bold">Equipe</h1>
@@ -56,6 +72,16 @@ export default async function Equipe() {
 
       <div className="mt-6">
         <InviteTools pending={(invites as any[]) || []} />
+      </div>
+
+      <div className="mt-6">
+        <TeamManager
+          membros={membrosList}
+          permissoes={(permsData as any[]) || []}
+          meuId={user?.id || ""}
+          souAdmin={(meProfile as any)?.role === "owner"}
+          seats={seats}
+        />
       </div>
 
       <div className="mt-6">

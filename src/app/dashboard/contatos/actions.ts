@@ -1,5 +1,7 @@
 "use server";
 
+import { canCreate, mensagemLimite } from "@/lib/plan";
+
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -38,6 +40,12 @@ async function ensureAccount(supabase: any, tenant_id: string, user_id: string |
 }
 
 export async function addContact(formData: FormData) {
+  // limite de contatos do plano
+  const lim = await canCreate("contatos");
+  if (!lim.permitido) {
+    return { error: mensagemLimite("contatos", lim.usado, lim.limite, lim.sugerido) };
+  }
+
   const { supabase, tenant_id, user_id } = await tenantId();
   if (!tenant_id) return { error: "Sem workspace atribuído." };
 
@@ -65,6 +73,12 @@ export async function addContact(formData: FormData) {
 type Row = { name: string; email?: string; phone?: string; company?: string; origin?: string };
 
 export async function importContacts(rows: Row[]) {
+  // limite de contatos do plano (a importação não pode furar o teto)
+  const limImp = await canCreate("contatos");
+  if (!limImp.permitido) {
+    return { error: mensagemLimite("contatos", limImp.usado, limImp.limite, limImp.sugerido) };
+  }
+
   const { supabase, tenant_id, user_id } = await tenantId();
   if (!tenant_id) return { error: "Sem workspace atribuído." };
 
@@ -128,13 +142,22 @@ export async function importContacts(rows: Row[]) {
 
 // Edita os dados de um contato (corrigir/completar informações).
 export async function updateContact(id: string, patch: {
-  name?: string; email?: string; phone?: string; company?: string; role_title?: string; cnpj?: string; status?: string;
+  name?: string; email?: string; phone?: string; company?: string; company_domain?: string;
+  role_title?: string; cnpj?: string; status?: string;
 }) {
   const { supabase, tenant_id, user_id } = await tenantId();
   const clean: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patch)) {
     if (v !== undefined) clean[k] = (typeof v === "string" ? v.trim() : v) || null;
   }
+  // normaliza o domínio: aceita URL completa, e-mail ou o domínio puro
+  if (typeof clean.company_domain === "string") {
+    const d = (clean.company_domain as string).toLowerCase();
+    clean.company_domain = d.includes("@")
+      ? d.split("@")[1]
+      : d.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0] || null;
+  }
+  if (typeof clean.email === "string") clean.email = (clean.email as string).toLowerCase();
   if (clean.name === null) return { error: "O nome não pode ficar vazio." };
 
   // empresa alterada → encontra/cria em Empresas e revincula

@@ -1,3 +1,5 @@
+import { UsageLimits } from "@/components/UsageLimits";
+import { getUsage } from "@/lib/plan";
 import { createClient } from "@/lib/supabase/server";
 import { PlanPicker } from "@/components/PlanPicker";
 
@@ -70,6 +72,8 @@ export default async function Planos() {
   };
   const sl = status ? statusLabel[status] : null;
 
+  const usos = await getUsage();
+
   return (
     <div className="max-w-5xl">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -82,6 +86,12 @@ export default async function Planos() {
 
       {!isOwner && (
         <div className="mt-4 rounded-lg bg-muted p-3 text-sm text-subtle">Apenas o dono do workspace pode contratar ou trocar de plano.</div>
+      )}
+
+      {usos.length > 0 && (
+        <div className="mt-6">
+          <UsageLimits usos={usos} />
+        </div>
       )}
 
       <div className="mt-6">
