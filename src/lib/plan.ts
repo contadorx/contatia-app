@@ -15,6 +15,22 @@ export async function hasFeature(feature: string): Promise<boolean> {
   return !!data;
 }
 
+/**
+ * A IA (geração de cadência) só é liberada no plano de TOPO (platform_plans.has_ai).
+ * No trial tudo é liberado (o cliente precisa sentir o recurso); depois do trial,
+ * a IA exige o plano com has_ai. Gate data-driven, independente do has_feature.
+ */
+export async function hasAi(): Promise<boolean> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("tenants")
+    .select("subscription_status, platform_plans(has_ai)")
+    .maybeSingle();
+  if (!data) return true; // defensivo: não trava se não conseguiu ler
+  if ((data as any).subscription_status === "trial") return true;
+  return !!(data as any).platform_plans?.has_ai;
+}
+
 /** Uso × limites de todos os recursos. */
 export async function getUsage(): Promise<Uso[]> {
   const supabase = createClient();

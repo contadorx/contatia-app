@@ -1,4 +1,4 @@
-import { hasFeature } from "@/lib/plan";
+import { hasFeature, hasAi } from "@/lib/plan";
 import { FeatureLock } from "@/components/UsageLimits";
 import { CrmIntegrations } from "@/components/CrmIntegrations";
 import { createClient } from "@/lib/supabase/server";
@@ -54,7 +54,7 @@ export default async function Config() {
 
   // features do plano (Essencial não tem WhatsApp nem IA)
   const temWhats = await hasFeature("whatsapp");
-  const temIA = await hasFeature("ia");
+  const temIA = await hasAi();
 
   return (
     <div className="max-w-3xl">
@@ -233,6 +233,7 @@ export default async function Config() {
             ) : (
               <FeatureLock
                 feature="ia"
+                planoSugerido="Performance"
                 titulo="IA que monta a cadência"
                 descricao="Descreva o que você vende e para quem — a IA escreve a sequência completa: assuntos, corpos e intervalos."
               />

@@ -15,7 +15,6 @@ const FEATURES: Record<string, string[]> = {
   Profissional: [
     "Tudo do Essencial",
     "Radar de CNPJs da Receita",
-    "IA que monta a cadência",
     "Alerta de lead quente em tempo real",
     "WhatsApp com captura de resposta",
     "Relatório por passo + teste A/B",
@@ -27,6 +26,12 @@ const FEATURES: Record<string, string[]> = {
     "Roteamento e round-robin de leads",
     "Integrações e webhooks",
     "Suporte prioritário",
+  ],
+  Performance: [
+    "Tudo do Time",
+    "IA que monta a cadência multicanal",
+    "IA com o contexto e o rapport do seu negócio",
+    "Prioridade nos novos recursos de IA",
   ],
 };
 

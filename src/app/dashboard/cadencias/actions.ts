@@ -1,6 +1,6 @@
 "use server";
 
-import { canCreate, mensagemLimite, hasFeature } from "@/lib/plan";
+import { canCreate, mensagemLimite, hasFeature, hasAi } from "@/lib/plan";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -138,9 +138,9 @@ export async function generateSequenceAI(brief: {
   steps?: number;
   channels?: string[];
 }) {
-  // a IA é feature do Profissional para cima
-  if (!(await hasFeature("ia"))) {
-    return { error: "A geração de cadência com IA está disponível a partir do plano Profissional. Veja em Planos." };
+  // a IA é exclusiva do plano de topo (Performance)
+  if (!(await hasAi())) {
+    return { error: "A geração de cadência com IA está disponível no plano Performance. Veja em Planos." };
   }
 
   if (!brief.market?.trim() || !brief.product?.trim()) {
