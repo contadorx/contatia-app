@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import CadenceStart from "@/components/CadenceStart";
 import { SaveAsTemplateButton } from "@/components/TemplateGallery";
+import EditSequenceButton from "@/components/EditSequenceButton";
 import { CadenceReport } from "@/components/CadenceReport";
 import { listTemplates } from "@/app/dashboard/cadencias/actions";
 import { channelLabel, type Channel } from "@/lib/cadence";
@@ -10,13 +11,17 @@ export const dynamic = "force-dynamic";
 export default async function Cadencias() {
   const supabase = createClient();
 
-  const [{ data: sequences }, { templates }] = await Promise.all([
+  const [{ data: sequences }, { templates }, { data: products }, { data: accounts }] = await Promise.all([
     supabase
       .from("sequences")
-      .select("id, name, audience, is_active, created_at, sequence_steps(channel, position)")
+      .select("id, name, audience, is_active, created_at, product_id, email_account_id, sequence_steps(channel, position), products(name), email_accounts(from_email)")
       .order("created_at", { ascending: false }),
     listTemplates(),
+    supabase.from("products").select("id, name").eq("active", true).order("name", { ascending: true }),
+    supabase.from("email_accounts").select("id, from_email, display_name").eq("is_active", true).order("created_at", { ascending: true }),
   ]);
+  const productOpts = (products as any[]) || [];
+  const accountOpts = (accounts as any[]) || [];
 
   return (
     <div>
@@ -27,7 +32,7 @@ export default async function Cadencias() {
       </p>
 
       <div className="mt-6">
-        <CadenceStart templates={(templates as any[]) || []} />
+        <CadenceStart templates={(templates as any[]) || []} products={productOpts} accounts={accountOpts} />
       </div>
 
       <div className="mt-6 space-y-3">
@@ -36,8 +41,11 @@ export default async function Cadencias() {
             Nenhuma sequência ainda. Crie a primeira acima — do zero, com IA, ou a partir de um template.
           </div>
         ) : (
-          sequences.map((s) => {
+          sequences.map((s0) => {
+            const s = s0 as any;
             const steps = (s.sequence_steps as { channel: string; position: number }[]) || [];
+            const prod = Array.isArray(s.products) ? s.products[0] : s.products;
+            const box = Array.isArray(s.email_accounts) ? s.email_accounts[0] : s.email_accounts;
             return (
               <div key={s.id} className="card flex items-center justify-between p-5">
                 <div>
@@ -50,7 +58,15 @@ export default async function Cadencias() {
                       .map((st) => channelLabel[st.channel as Channel])
                       .join(" → ")}
                   </p>
-                  <div className="mt-2">
+                  {(prod?.name || box?.from_email) && (
+                    <p className="mt-1 text-xs text-subtle">
+                      {prod?.name ? `Produto: ${prod.name}` : ""}
+                      {box?.from_email ? `${prod?.name ? " · " : ""}Caixa: ${box.from_email}` : prod?.name ? " · Caixa do produto" : ""}
+                    </p>
+                  )}
+                  <div className="mt-2 flex items-center gap-3">
+                    <EditSequenceButton sequenceId={s.id} products={productOpts} accounts={accountOpts} />
+                    <span className="text-xs text-subtle">·</span>
                     <SaveAsTemplateButton sequenceId={s.id} />
                   </div>
                   <CadenceReport sequenceId={s.id} />

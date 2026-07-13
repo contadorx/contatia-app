@@ -5,10 +5,13 @@ import { createProduct, updateProduct, deleteProduct } from "@/app/dashboard/con
 
 const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
-type Product = { id: string; name: string; kind: string; billing: string; price: number; active: boolean };
+type Account = { id: string; from_email: string; display_name?: string | null };
+type Product = { id: string; name: string; kind: string; billing: string; price: number; active: boolean; email_account_id?: string | null; email_accounts?: { from_email: string } | null };
 
-export function ProductForm() {
-  const [f, setF] = useState({ name: "", kind: "servico", billing: "recorrente", price: "" });
+const boxLabel = (a: Account) => a.display_name ? `${a.display_name} <${a.from_email}>` : a.from_email;
+
+export function ProductForm({ accounts = [] }: { accounts?: Account[] }) {
+  const [f, setF] = useState({ name: "", kind: "servico", billing: "recorrente", price: "", email_account_id: "" });
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const up = (k: string, v: string) => setF((s) => ({ ...s, [k]: v }));
@@ -32,19 +35,27 @@ export function ProductForm() {
           </select>
         </div>
         <div><label className="label">Preço de referência (R$)</label><input className="input mt-1" type="number" value={f.price} onChange={(e) => up("price", e.target.value)} placeholder="0" /></div>
+        <div>
+          <label className="label">Caixa de e-mail deste produto</label>
+          <select className="input mt-1" value={f.email_account_id} onChange={(e) => up("email_account_id", e.target.value)} disabled={!accounts.length}>
+            <option value="">{accounts.length ? "Usar rodízio (padrão)" : "Nenhuma caixa conectada"}</option>
+            {accounts.map((a) => <option key={a.id} value={a.id}>{boxLabel(a)}</option>)}
+          </select>
+        </div>
       </div>
+      <p className="mt-2 text-xs text-subtle">As cadências deste produto enviam por esta caixa (a cadência pode sobrescrever). Sem caixa, o envio usa o rodízio entre as caixas ativas.</p>
       {msg && <p className="mt-2 text-sm text-danger">{msg}</p>}
       <button className="btn-brand mt-4 py-1.5 text-sm" disabled={pending} onClick={() => start(async () => {
         const res = (await createProduct({ ...f, price: Number(f.price) })) as any;
-        if (res?.error) setMsg(res.error); else { setF({ name: "", kind: "servico", billing: "recorrente", price: "" }); setMsg(null); }
+        if (res?.error) setMsg(res.error); else { setF({ name: "", kind: "servico", billing: "recorrente", price: "", email_account_id: "" }); setMsg(null); }
       })}>{pending ? "Salvando..." : "Adicionar ao catálogo"}</button>
     </div>
   );
 }
 
-export function ProductRow({ p }: { p: Product }) {
+export function ProductRow({ p, accounts = [] }: { p: Product; accounts?: Account[] }) {
   const [edit, setEdit] = useState(false);
-  const [f, setF] = useState({ name: p.name, kind: p.kind, billing: p.billing, price: String(p.price) });
+  const [f, setF] = useState({ name: p.name, kind: p.kind, billing: p.billing, price: String(p.price), email_account_id: p.email_account_id || "" });
   const [pending, start] = useTransition();
   const up = (k: string, v: string) => setF((s) => ({ ...s, [k]: v }));
 
@@ -53,10 +64,14 @@ export function ProductRow({ p }: { p: Product }) {
       <tr className="border-b border-line last:border-0">
         <td className="px-4 py-2" colSpan={5}>
           <div className="flex flex-wrap items-center gap-2">
-            <input className="input py-1 text-sm" style={{ width: 200 }} value={f.name} onChange={(e) => up("name", e.target.value)} />
+            <input className="input py-1 text-sm" style={{ width: 180 }} value={f.name} onChange={(e) => up("name", e.target.value)} />
             <select className="input py-1 text-sm" style={{ width: 110 }} value={f.kind} onChange={(e) => up("kind", e.target.value)}><option value="servico">Serviço</option><option value="produto">Produto</option></select>
-            <select className="input py-1 text-sm" style={{ width: 150 }} value={f.billing} onChange={(e) => up("billing", e.target.value)}><option value="recorrente">Recorrente</option><option value="avulso">Avulso</option></select>
-            <input className="input py-1 text-sm" style={{ width: 100 }} type="number" value={f.price} onChange={(e) => up("price", e.target.value)} />
+            <select className="input py-1 text-sm" style={{ width: 130 }} value={f.billing} onChange={(e) => up("billing", e.target.value)}><option value="recorrente">Recorrente</option><option value="avulso">Avulso</option></select>
+            <input className="input py-1 text-sm" style={{ width: 90 }} type="number" value={f.price} onChange={(e) => up("price", e.target.value)} />
+            <select className="input py-1 text-sm" style={{ width: 200 }} value={f.email_account_id} onChange={(e) => up("email_account_id", e.target.value)} disabled={!accounts.length} title="Caixa de e-mail do produto">
+              <option value="">Caixa: rodízio</option>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{boxLabel(a)}</option>)}
+            </select>
             <button className="btn-brand py-1 text-xs" disabled={pending} onClick={() => start(async () => { await updateProduct(p.id, { ...f, price: Number(f.price) }); setEdit(false); })}>Salvar</button>
             <button className="text-xs text-subtle hover:text-ink" onClick={() => setEdit(false)}>cancelar</button>
           </div>
@@ -67,7 +82,14 @@ export function ProductRow({ p }: { p: Product }) {
 
   return (
     <tr className="border-b border-line last:border-0">
-      <td className="px-4 py-3 font-medium">{p.name}{!p.active && <span className="ml-1 text-xs text-subtle">(inativo)</span>}</td>
+      <td className="px-4 py-3 font-medium">
+        {p.name}{!p.active && <span className="ml-1 text-xs text-subtle">(inativo)</span>}
+        {(() => {
+          const ea: any = (p as any).email_accounts;
+          const boxEmail = Array.isArray(ea) ? ea[0]?.from_email : ea?.from_email;
+          return <span className="block text-xs text-subtle">{boxEmail ? `Caixa: ${boxEmail}` : "Caixa: rodízio"}</span>;
+        })()}
+      </td>
       <td className="px-4 py-3"><span className={`rounded-full px-2 py-0.5 text-xs ${p.kind === "produto" ? "bg-brand-soft text-brand-dark" : "bg-muted text-subtle"}`}>{p.kind === "produto" ? "Produto" : "Serviço"}</span></td>
       <td className="px-4 py-3 text-subtle">{p.billing === "recorrente" ? "Recorrente" : "Avulso"}</td>
       <td className="px-4 py-3 font-semibold">{brl(p.price)}{p.billing === "recorrente" ? "/mês" : ""}</td>

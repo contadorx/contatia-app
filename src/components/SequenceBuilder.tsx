@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect, useRef } from "react";
-import { createSequence, generateSequenceAI, loadAiContext, saveAiContext, opusRemaining, type StepInput } from "@/app/dashboard/cadencias/actions";
+import { createSequence, updateSequence, generateSequenceAI, loadAiContext, saveAiContext, opusRemaining, type StepInput } from "@/app/dashboard/cadencias/actions";
 import type { Channel } from "@/lib/cadence";
 
 const CHANNELS: { v: Channel; l: string }[] = [
@@ -13,11 +13,40 @@ const CHANNELS: { v: Channel; l: string }[] = [
 
 const emptyStep = (): StepInput => ({ channel: "email", delay_days: 0, subject: "", body: "" });
 
-export default function SequenceBuilder({ autoOpen = false, autoAi = false, onDone }: { autoOpen?: boolean; autoAi?: boolean; onDone?: () => void } = {}) {
+type ProductOpt = { id: string; name: string };
+type AccountOpt = { id: string; from_email: string; display_name?: string | null };
+
+export default function SequenceBuilder({
+  autoOpen = false,
+  autoAi = false,
+  onDone,
+  editId,
+  initialName,
+  initialAudience,
+  initialSteps,
+  products = [],
+  accounts = [],
+  initialProductId,
+  initialEmailAccountId,
+}: {
+  autoOpen?: boolean;
+  autoAi?: boolean;
+  onDone?: () => void;
+  editId?: string;
+  initialName?: string;
+  initialAudience?: string;
+  initialSteps?: StepInput[];
+  products?: ProductOpt[];
+  accounts?: AccountOpt[];
+  initialProductId?: string;
+  initialEmailAccountId?: string;
+} = {}) {
   const [open, setOpen] = useState(autoOpen);
-  const [name, setName] = useState("");
-  const [audience, setAudience] = useState("");
-  const [steps, setSteps] = useState<StepInput[]>([emptyStep()]);
+  const [name, setName] = useState(initialName ?? "");
+  const [audience, setAudience] = useState(initialAudience ?? "");
+  const [productId, setProductId] = useState(initialProductId ?? "");
+  const [emailAccountId, setEmailAccountId] = useState(initialEmailAccountId ?? "");
+  const [steps, setSteps] = useState<StepInput[]>(initialSteps?.length ? initialSteps : [emptyStep()]);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -119,12 +148,16 @@ export default function SequenceBuilder({ autoOpen = false, autoAi = false, onDo
   function save() {
     setMsg(null);
     start(async () => {
-      const res = await createSequence({ name, audience, steps });
+      const res = editId
+        ? await updateSequence(editId, { name, audience, steps, product_id: productId || null, email_account_id: emailAccountId || null })
+        : await createSequence({ name, audience, steps, product_id: productId || null, email_account_id: emailAccountId || null });
       if (res?.error) setMsg(res.error);
       else {
-        setName("");
-        setAudience("");
-        setSteps([emptyStep()]);
+        if (!editId) {
+          setName("");
+          setAudience("");
+          setSteps([emptyStep()]);
+        }
         setOpen(false);
         onDone?.();
       }
@@ -261,6 +294,27 @@ export default function SequenceBuilder({ autoOpen = false, autoAi = false, onDo
         </div>
       </div>
 
+      {(products.length > 0 || accounts.length > 0) && (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="label">Produto</label>
+            <select className="input mt-1" value={productId} onChange={(e) => setProductId(e.target.value)} disabled={!products.length}>
+              <option value="">{products.length ? "Nenhum (rodízio de caixas)" : "Nenhum produto cadastrado"}</option>
+              {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-subtle">A cadência envia pela caixa deste produto.</p>
+          </div>
+          <div>
+            <label className="label">Caixa de envio (sobrescrever)</label>
+            <select className="input mt-1" value={emailAccountId} onChange={(e) => setEmailAccountId(e.target.value)} disabled={!accounts.length}>
+              <option value="">{accounts.length ? "Usar a do produto" : "Nenhuma caixa conectada"}</option>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.display_name ? `${a.display_name} <${a.from_email}>` : a.from_email}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-subtle">Opcional. Força uma caixa específica, ignorando a do produto.</p>
+          </div>
+        </div>
+      )}
+
       <div className="mt-5 space-y-3">
         {steps.map((s, i) => (
           <div key={i} className="rounded-xl border border-line p-4">
@@ -371,7 +425,7 @@ export default function SequenceBuilder({ autoOpen = false, autoAi = false, onDo
 
       <div className="mt-5 flex gap-2">
         <button className="btn-brand" onClick={save} disabled={pending}>
-          {pending ? "Salvando..." : "Salvar sequência"}
+          {pending ? "Salvando..." : editId ? "Salvar alterações" : "Salvar sequência"}
         </button>
         <button className="btn-ghost" onClick={() => { setOpen(false); onDone?.(); }}>
           Cancelar

@@ -5,15 +5,17 @@ import SequenceBuilder from "@/components/SequenceBuilder";
 import { TemplateGallery } from "@/components/TemplateGallery";
 
 type Template = { id: string; name: string; audience: string | null; description: string | null; steps: any[]; is_global: boolean };
+type ProductOpt = { id: string; name: string };
+type AccountOpt = { id: string; from_email: string; display_name?: string | null };
 
 // Entrada única "Começar": três caminhos claros (do zero / com IA / template).
 // Ao escolher, revela o construtor certo; ao terminar/cancelar, volta às opções.
-export default function CadenceStart({ templates }: { templates: Template[] }) {
+export default function CadenceStart({ templates, products = [], accounts = [] }: { templates: Template[]; products?: ProductOpt[]; accounts?: AccountOpt[] }) {
   const [mode, setMode] = useState<"idle" | "scratch" | "ai" | "template">("idle");
   const back = () => setMode("idle");
 
-  if (mode === "scratch") return <SequenceBuilder autoOpen onDone={back} />;
-  if (mode === "ai") return <SequenceBuilder autoOpen autoAi onDone={back} />;
+  if (mode === "scratch") return <SequenceBuilder autoOpen onDone={back} products={products} accounts={accounts} />;
+  if (mode === "ai") return <SequenceBuilder autoOpen autoAi onDone={back} products={products} accounts={accounts} />;
   if (mode === "template") return <TemplateGallery templates={templates} autoOpen onDone={back} />;
 
   const opts: { key: "scratch" | "ai" | "template"; icon: string; title: string; desc: string }[] = [

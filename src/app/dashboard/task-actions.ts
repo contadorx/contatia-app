@@ -95,7 +95,7 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
 
   const { data: task } = await supabase
     .from("tasks")
-    .select("id, channel, title, generated_content, contact_id, contacts(email, name, email_status)")
+    .select("id, channel, title, generated_content, contact_id, email_account_id, contacts(email, name, email_status)")
     .eq("id", taskId)
     .single();
   if (!task) return { error: "Tarefa não encontrada." };
@@ -162,6 +162,20 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     const slack = cap - used;
     if (warming) anyWarming = true;
     if (slack > bestSlack) { bestSlack = slack; acct = a; }
+  }
+
+  // CAIXA DESIGNADA (produto/cadência): se a tarefa foi carimbada com uma caixa e
+  // ela está ativa e com folga hoje, envia POR ELA (mantém a marca certa). Se estiver
+  // inativa ou sem folga, cai no rodízio acima (degradação segura — o e-mail sai).
+  const desiredBoxId = (task as any).email_account_id as string | null;
+  if (desiredBoxId) {
+    const d = (accts as any[]).find((a) => a.id === desiredBoxId);
+    if (d) {
+      const warmupOn = (d.warmup_stage ?? 0) !== -1;
+      const { cap } = effectiveDailyCap(d.created_at, d.daily_cap ?? 40, warmupOn);
+      const dSlack = cap - (sentByAcct[d.id] || 0);
+      if (dSlack > 0) { acct = d; bestSlack = dSlack; }
+    }
   }
 
   if (!acct || bestSlack <= 0) {

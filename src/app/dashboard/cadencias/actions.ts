@@ -31,6 +31,8 @@ export async function createSequence(input: {
   name: string;
   audience: string;
   steps: StepInput[];
+  product_id?: string | null;
+  email_account_id?: string | null;
 }) {
   const lim = await canCreate("cadencias");
   if (!lim.permitido) {
@@ -44,13 +46,87 @@ export async function createSequence(input: {
 
   const { data: seq, error } = await supabase
     .from("sequences")
-    .insert({ tenant_id, name: input.name.trim(), audience: input.audience || null, created_by: user_id })
+    .insert({
+      tenant_id,
+      name: input.name.trim(),
+      audience: input.audience || null,
+      created_by: user_id,
+      product_id: input.product_id || null,
+      email_account_id: input.email_account_id || null,
+    })
     .select()
     .single();
   if (error) return { error: error.message };
 
   const steps = input.steps.map((s, i) => ({
     sequence_id: seq.id,
+    tenant_id,
+    position: i,
+    channel: s.channel,
+    delay_days: Number(s.delay_days) || 0,
+    subject: s.subject || null,
+    subject_b: s.channel === "email" && s.subject_b?.trim() ? s.subject_b.trim() : null,
+    body_template: s.body || null,
+  }));
+  const { error: e2 } = await supabase.from("sequence_steps").insert(steps);
+  if (e2) return { error: e2.message };
+
+  revalidatePath("/dashboard/cadencias");
+  return { ok: true };
+}
+
+// Carrega uma cadência salva (com todos os passos) para edição.
+export async function loadSequence(id: string) {
+  const { supabase } = await ctx();
+  const { data: seq } = await supabase.from("sequences").select("id, name, audience, product_id, email_account_id").eq("id", id).maybeSingle();
+  if (!seq) return { error: "Cadência não encontrada." };
+  const { data: steps } = await supabase
+    .from("sequence_steps")
+    .select("position, channel, delay_days, subject, subject_b, body_template")
+    .eq("sequence_id", id)
+    .order("position", { ascending: true });
+  return {
+    ok: true,
+    name: (seq as any).name || "",
+    audience: (seq as any).audience || "",
+    product_id: (seq as any).product_id || "",
+    email_account_id: (seq as any).email_account_id || "",
+    steps: ((steps as any[]) || []).map((s) => ({
+      channel: s.channel as Channel,
+      delay_days: Number(s.delay_days) || 0,
+      subject: s.subject || "",
+      subject_b: s.subject_b || "",
+      body: s.body_template || "",
+    })) as StepInput[],
+  };
+}
+
+// Atualiza uma cadência salva (nome/público + substitui os passos).
+// As inscrições JÁ FEITAS não mudam — as tarefas delas foram geradas na inscrição
+// (snapshot). A edição vale para as PRÓXIMAS inscrições.
+export async function updateSequence(id: string, input: { name: string; audience: string; steps: StepInput[]; product_id?: string | null; email_account_id?: string | null }) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace atribuído." };
+  if (!input.name.trim()) return { error: "Dê um nome à sequência." };
+  if (!input.steps.length) return { error: "Adicione ao menos um passo." };
+
+  const { error: e1 } = await supabase
+    .from("sequences")
+    .update({
+      name: input.name.trim(),
+      audience: input.audience || null,
+      product_id: input.product_id || null,
+      email_account_id: input.email_account_id || null,
+    })
+    .eq("id", id)
+    .eq("tenant_id", tenant_id);
+  if (e1) return { error: e1.message };
+
+  const { error: eDel } = await supabase.from("sequence_steps").delete().eq("sequence_id", id).eq("tenant_id", tenant_id);
+  if (eDel) return { error: eDel.message };
+
+  const steps = input.steps.map((s, i) => ({
+    sequence_id: id,
     tenant_id,
     position: i,
     channel: s.channel,
@@ -85,6 +161,23 @@ export async function enrollContact(contactId: string, sequenceId: string) {
     .order("position", { ascending: true });
   if (!steps?.length) return { error: "Sequência sem passos." };
 
+  // RESOLVE a caixa de e-mail desta cadência: override da cadência → caixa do
+  // produto → null (rodízio no envio). Carimba na tarefa para o envio usar direto.
+  const { data: seqRow } = await supabase
+    .from("sequences")
+    .select("product_id, email_account_id")
+    .eq("id", sequenceId)
+    .maybeSingle();
+  let resolvedBox: string | null = ((seqRow as any)?.email_account_id as string) || null;
+  if (!resolvedBox && (seqRow as any)?.product_id) {
+    const { data: prod } = await supabase
+      .from("products")
+      .select("email_account_id")
+      .eq("id", (seqRow as any).product_id)
+      .maybeSingle();
+    resolvedBox = ((prod as any)?.email_account_id as string) || null;
+  }
+
   const assigned = (contact.assigned_to as string) || user_id;
 
   const { data: enr, error } = await supabase
@@ -114,6 +207,7 @@ export async function enrollContact(contactId: string, sequenceId: string) {
       status: "pending",
       step_position: s.position,
       subject_variant: variant,
+      email_account_id: s.channel === "email" ? resolvedBox : null,
     };
   });
   const { error: e2 } = await supabase.from("tasks").insert(tasks);

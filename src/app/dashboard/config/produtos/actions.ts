@@ -12,7 +12,7 @@ async function ctx() {
   return { supabase, tenant_id: (data as any)?.tenant_id as string | null };
 }
 
-export async function createProduct(input: { name: string; kind: string; billing: string; price: number }) {
+export async function createProduct(input: { name: string; kind: string; billing: string; price: number; email_account_id?: string | null }) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (!input.name.trim()) return { error: "Dê um nome ao item." };
@@ -22,13 +22,14 @@ export async function createProduct(input: { name: string; kind: string; billing
     kind: input.kind === "produto" ? "produto" : "servico",
     billing: input.billing === "avulso" ? "avulso" : "recorrente",
     price: Number(input.price) || 0,
+    email_account_id: input.email_account_id || null,
   });
   if (error) return { error: error.message };
   revalidatePath("/dashboard/config/produtos");
   return { ok: true };
 }
 
-export async function updateProduct(id: string, patch: { name?: string; kind?: string; billing?: string; price?: number; active?: boolean }) {
+export async function updateProduct(id: string, patch: { name?: string; kind?: string; billing?: string; price?: number; active?: boolean; email_account_id?: string | null }) {
   const { supabase } = await ctx();
   const clean: Record<string, unknown> = {};
   if (patch.name !== undefined) { if (!patch.name.trim()) return { error: "Nome não pode ficar vazio." }; clean.name = patch.name.trim(); }
@@ -36,6 +37,7 @@ export async function updateProduct(id: string, patch: { name?: string; kind?: s
   if (patch.billing !== undefined) clean.billing = patch.billing === "avulso" ? "avulso" : "recorrente";
   if (patch.price !== undefined) clean.price = Number(patch.price) || 0;
   if (patch.active !== undefined) clean.active = patch.active;
+  if (patch.email_account_id !== undefined) clean.email_account_id = patch.email_account_id || null;
   const { error } = await supabase.from("products").update(clean).eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/dashboard/config/produtos");
