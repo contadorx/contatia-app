@@ -10,6 +10,9 @@ export default async function Today() {
   const today = new Date().toISOString().slice(0, 10);
   const in3 = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
 
+  const { data: tenantRow } = await supabase.from("tenants").select("whatsapp_mode").maybeSingle();
+  const waMode = ((tenantRow as any)?.whatsapp_mode as string) || "assistido";
+
   const [{ data: rawTasks }, contactsCount, hotCount] = await Promise.all([
     supabase
       .from("tasks")
@@ -120,7 +123,7 @@ export default async function Today() {
       </div>
 
       <h2 className="mt-8 mb-3 font-display text-lg font-bold">Fila de hoje</h2>
-      <TaskQueue tasks={tasks} hotThreshold={HOT_THRESHOLD} lastActivity={lastActivity} allTags={(allTags as any[]) || []} />
+      <TaskQueue tasks={tasks} hotThreshold={HOT_THRESHOLD} lastActivity={lastActivity} allTags={(allTags as any[]) || []} waMode={waMode} />
     </div>
   );
 }

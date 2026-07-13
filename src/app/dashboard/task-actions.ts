@@ -226,6 +226,12 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
 
+  // envio automático só no modo Evolution; no assistido o envio é manual pelo link
+  const { data: tmode } = await supabase.from("tenants").select("whatsapp_mode").eq("id", tenant_id).maybeSingle();
+  if (((tmode as any)?.whatsapp_mode || "assistido") !== "evolution") {
+    return { error: "Modo assistido: abra o link do WhatsApp para enviar (botão “Abrir WhatsApp”)." };
+  }
+
   if (overrideBody !== undefined) {
     await supabase.from("tasks").update({ generated_content: overrideBody }).eq("id", taskId);
   }

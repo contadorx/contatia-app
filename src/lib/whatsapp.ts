@@ -1,10 +1,36 @@
 import "server-only";
+import QRCode from "qrcode";
 
 export type WaAccount = {
   evolution_url: string;
   api_key: string;
   instance: string;
 };
+
+// Servidor Evolution da PLATAFORMA (gerenciado por nós). Quando configurado,
+// o cliente não precisa saber de URL/chave — ao ativar o modo Evolution, criamos
+// a instância dele no nosso servidor e ele só escaneia o QR. Sem estas envs, o
+// app cai no modo "traga seu servidor" (BYO), com os campos avançados na tela.
+export function platformEvolution(): { url: string; api_key: string } | null {
+  const url = process.env.EVOLUTION_URL;
+  const key = process.env.EVOLUTION_API_KEY;
+  if (!url || !key) return null;
+  return { url: url.replace(/\/+$/, ""), api_key: key };
+}
+
+export function platformEvolutionReady(): boolean {
+  return !!platformEvolution();
+}
+
+// Gera a IMAGEM do QR a partir do TEXTO, LOCALMENTE (nunca manda o código de
+// pareamento — que é a credencial da sessão do cliente — para um serviço externo).
+async function qrFromText(texto: string): Promise<string | undefined> {
+  try {
+    return await QRCode.toDataURL(texto, { width: 300, margin: 1 });
+  } catch {
+    return undefined;
+  }
+}
 
 function normalizePhone(phone: string): string {
   let d = (phone || "").replace(/\D/g, "");
@@ -57,14 +83,14 @@ export async function getQR(acc: WaAccount): Promise<{ base64?: string; error?: 
    *   - code:   é o TEXTO do QR ("2@LyVeq...") — precisa virar imagem
    * Devolvemos sempre algo que o <img> consiga exibir.
    */
-  const extrairQR = (data: any): string | undefined => {
+  const extrairQR = async (data: any): Promise<string | undefined> => {
     const img = data?.base64 || data?.qrcode?.base64;
     if (img) return img;
 
     const texto = data?.qrcode?.code || data?.code;
     if (texto) {
-      // gera a imagem do QR a partir do texto (serviço público, sem dependência)
-      return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(texto)}`;
+      // gera a imagem do QR LOCALMENTE — o código de pareamento nunca sai do servidor
+      return await qrFromText(texto);
     }
     return undefined;
   };
@@ -92,7 +118,7 @@ export async function getQR(acc: WaAccount): Promise<{ base64?: string; error?: 
       });
       const data = await criar.json().catch(() => ({}));
 
-      const b64 = extrairQR(data);
+      const b64 = await extrairQR(data);
       if (b64) return { base64: b64 };
 
       // já existia (corrida) → cai para o connect abaixo
@@ -107,7 +133,7 @@ export async function getQR(acc: WaAccount): Promise<{ base64?: string; error?: 
       headers: { apikey: acc.api_key },
     });
     const data = await res.json().catch(() => ({}));
-    const b64 = extrairQR(data);
+    const b64 = await extrairQR(data);
     if (b64) return { base64: b64 };
 
     // sem QR: ou já está conectada, ou está num estado ruim

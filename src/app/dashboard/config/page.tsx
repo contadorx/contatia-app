@@ -31,7 +31,7 @@ export default async function Config() {
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("inbound_token, ai_model, ai_api_key, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature, file_retention_months, booking_enabled, booking_duration_min, booking_days, booking_start_hour, booking_end_hour, booking_title, platform_plans(name, file_retention_months)")
+    .select("inbound_token, ai_model, ai_api_key, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature, file_retention_months, whatsapp_mode, whatsapp_risk_ack_at, booking_enabled, booking_duration_min, booking_days, booking_start_hour, booking_end_hour, booking_title, platform_plans(name, file_retention_months)")
     .maybeSingle();
   const inboundToken = (tenant as any)?.inbound_token as string | undefined;
   const aiModel = ((tenant as any)?.ai_model as string) || "";
@@ -48,6 +48,9 @@ export default async function Config() {
 
   const rows = (accounts as any[]) || [];
   const gmailReady = !!process.env.GOOGLE_CLIENT_ID;
+  const waMode = ((tenant as any)?.whatsapp_mode as string) || "assistido";
+  const waAcked = !!(tenant as any)?.whatsapp_risk_ack_at;
+  const waPlatformReady = !!process.env.EVOLUTION_URL && !!process.env.EVOLUTION_API_KEY;
 
   // features do plano (Essencial não tem WhatsApp nem IA)
   const temWhats = await hasFeature("whatsapp");
@@ -191,9 +194,14 @@ export default async function Config() {
         <div>
           {temWhats ? (
             <>
-              <p className="text-sm text-subtle">Conecte sua instância Evolution (você a hospeda). Envia da fila e detecta respostas via webhook.</p>
+              <p className="text-sm text-subtle">Escolha COMO usar o WhatsApp na cadência — o nível é seu, por trade-off de risco: do link sem risco à API automática.</p>
               <div className="card mt-3 p-5">
-                <WhatsAppConnect accounts={(waAccounts as any[]) || []} />
+                <WhatsAppConnect
+                  accounts={(waAccounts as any[]) || []}
+                  mode={waMode as any}
+                  acked={waAcked}
+                  platformReady={waPlatformReady}
+                />
               </div>
             </>
           ) : (

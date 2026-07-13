@@ -52,11 +52,13 @@ export default function TaskQueue({
   hotThreshold,
   lastActivity = {},
   allTags = [],
+  waMode = "assistido",
 }: {
   tasks: Task[];
   hotThreshold: number;
   lastActivity?: LastActivity;
   allTags?: Tag[];
+  waMode?: string;
 }) {
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
@@ -131,7 +133,8 @@ export default function TaskQueue({
   // ação primária por canal (Enter)
   function primary(t: Task) {
     if (t.channel === "email" && t.contacts?.email) send(t.id, editing[t.id] ? { subject: editing[t.id].subject, body: editing[t.id].body } : undefined);
-    else if (t.channel === "whatsapp" && t.contacts?.phone) sendWa(t.id, editing[t.id] ? editing[t.id].body : undefined);
+    // WhatsApp automático (Evolution) → envia pela instância; modo assistido → concluir (o envio é manual pelo link)
+    else if (t.channel === "whatsapp" && t.contacts?.phone && waMode === "evolution") sendWa(t.id, editing[t.id] ? editing[t.id].body : undefined);
     else act(() => completeTask(t.id, t.contact_id ?? undefined));
   }
 
@@ -267,9 +270,24 @@ export default function TaskQueue({
                   <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={(e) => { e.stopPropagation(); setEditing((s) => s[t.id] ? (() => { const n = { ...s }; delete n[t.id]; return n; })() : { ...s, [t.id]: { subject: "", body: content } }); }}>
                     {editing[t.id] ? "Fechar" : "Editar"}
                   </button>
-                  <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => sendWa(t.id, editing[t.id] ? editing[t.id].body : undefined)}>Enviar</button>
-                  {waLink(c.phone, editing[t.id]?.body ?? content) && (
-                    <a className="text-xs text-subtle hover:text-ink" href={waLink(c.phone, editing[t.id]?.body ?? content)} target="_blank" rel="noreferrer" title="Abrir no WhatsApp Web/app" onClick={(e) => e.stopPropagation()}>↗</a>
+                  {waMode === "evolution" ? (
+                    <>
+                      {/* modo automático: envia pela instância + link como plano B */}
+                      <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => sendWa(t.id, editing[t.id] ? editing[t.id].body : undefined)}>Enviar</button>
+                      {waLink(c.phone, editing[t.id]?.body ?? content) && (
+                        <a className="text-xs text-subtle hover:text-ink" href={waLink(c.phone, editing[t.id]?.body ?? content)} target="_blank" rel="noreferrer" title="Abrir no WhatsApp Web/app" onClick={(e) => e.stopPropagation()}>↗</a>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {/* modo assistido: abre o SEU WhatsApp com a mensagem pronta, depois marca como feito */}
+                      {waLink(c.phone, editing[t.id]?.body ?? content) ? (
+                        <a className="btn-brand py-1.5 text-xs" href={waLink(c.phone, editing[t.id]?.body ?? content)} target="_blank" rel="noreferrer" title="Abrir no seu WhatsApp com a mensagem pronta" onClick={(e) => e.stopPropagation()}>Abrir WhatsApp</a>
+                      ) : (
+                        <span className="text-xs text-subtle" title="Telefone inválido">sem nº válido</span>
+                      )}
+                      <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={() => act(() => completeTask(t.id, t.contact_id ?? undefined))}>Feito</button>
+                    </>
                   )}
                 </>
               )}
