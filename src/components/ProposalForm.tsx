@@ -70,7 +70,7 @@ export default function ProposalForm() {
           <select className="input mt-1" value={type} onChange={(e) => setType(e.target.value)}>
             <option value="proposta">Proposta</option>
             <option value="deck">Apresentação</option>
-            <option value="one-pager">One-pager</option>
+            <option value="one-pager">Resumo (1 página)</option>
             <option value="case">Case</option>
           </select>
         </div>

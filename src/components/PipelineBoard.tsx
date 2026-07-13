@@ -108,7 +108,7 @@ export default function PipelineBoard({
   if (!stages.length)
     return (
       <div className="card p-10 text-center text-sm text-subtle">
-        Nenhum estágio de pipeline. Rode o bloco SEED da migration para criar os estágios.
+        Nenhum estágio no seu funil ainda. Fale com o suporte para configurar os estágios do pipeline.
       </div>
     );
 

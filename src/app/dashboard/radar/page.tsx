@@ -124,7 +124,7 @@ export default async function Radar({
       </div>
 
       <p className="mt-4 text-xs text-subtle">
-        O enriquecimento consulta a API de CNPJ (BrasilAPI por padrão) só na empresa escolhida — descoberta na base local, dados quentes sob demanda.
+        Os dados de contato (telefone, e-mail, sócios) são buscados só quando você escolhe a empresa — não antes.
       </p>
     </div>
   );

@@ -94,7 +94,7 @@ export default async function DashboardLayout({
       <MobileNav
         isSuperadmin={isSuperadmin}
         userLabel={profile?.full_name || user?.email || undefined}
-        roleLabel={profile?.role === "owner" ? "Owner" : "Parceiro"}
+        roleLabel={profile?.role === "owner" ? "Dono" : "Parceiro"}
         unreadReplies={unreadReplies}
       />
       <div className="flex flex-1">
@@ -113,7 +113,7 @@ export default async function DashboardLayout({
               <span aria-hidden>⚙️</span> Configurações
             </Link>
             <p className="truncate text-sm font-medium">{profile?.full_name || user?.email}</p>
-            <p className="mb-2 text-xs text-subtle">{profile?.role === "owner" ? "Owner" : "Parceiro"}</p>
+            <p className="mb-2 text-xs text-subtle">{profile?.role === "owner" ? "Dono" : "Parceiro"}</p>
             <SignOut />
           </div>
         </aside>

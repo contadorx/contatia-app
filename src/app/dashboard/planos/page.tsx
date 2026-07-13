@@ -23,7 +23,7 @@ const FEATURES: Record<string, string[]> = {
     "Pacote Opus (qualidade máxima) por assento",
     "Papéis e níveis de equipe",
     "Dashboard e metas por vendedor",
-    "Roteamento round-robin de leads",
+    "Distribuição automática de leads entre vendedores",
     "Múltiplas caixas + rotação de envio",
     "Integrações e webhooks",
   ],
@@ -44,7 +44,7 @@ export default async function Planos() {
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("plan_id, subscription_status, platform_plans(name)")
+    .select("plan_id, subscription_status, file_retention_months, platform_plans(name, file_retention_months)")
     .eq("id", tenantId ?? "")
     .maybeSingle();
 
@@ -86,6 +86,15 @@ export default async function Planos() {
       {!isOwner && (
         <div className="mt-4 rounded-lg bg-muted p-3 text-sm text-subtle">Apenas o dono do workspace pode contratar ou trocar de plano.</div>
       )}
+
+      {(() => {
+        const months = Number((tenant as any)?.platform_plans?.file_retention_months ?? (tenant as any)?.file_retention_months ?? 6);
+        return (
+          <p className="mt-4 text-xs text-subtle">
+            <b>Retenção de arquivos:</b> os PDFs de proposta ficam guardados por <b>{months} meses</b> (política do seu plano) e depois são excluídos automaticamente — o registro do documento permanece no histórico. Baixe o que precisar antes do prazo.
+          </p>
+        );
+      })()}
 
       {usos.length > 0 && (
         <div className="mt-6">

@@ -116,7 +116,7 @@ export default function AutomationBuilder({ sequences, stages, tags }: { sequenc
         <button className="btn-ghost py-1.5 text-sm" onClick={() => setOpen(false)}>Cancelar</button>
       </div>
       <p className="mt-3 text-xs text-subtle">
-        Gatilhos de evento (abriu/clicou/respondeu/score) disparam na hora. &ldquo;Sem atividade há X dias&rdquo; roda no cron diário.
+        Gatilhos de evento (abriu, clicou, respondeu) disparam na hora. &ldquo;Sem atividade há X dias&rdquo; é verificado uma vez por dia.
       </p>
     </div>
   );

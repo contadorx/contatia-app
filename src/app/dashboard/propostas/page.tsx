@@ -44,7 +44,7 @@ export default async function Propostas() {
 
       {!trackingReady && (
         <div className="mt-4 rounded-xl bg-warn/10 p-3 text-sm text-warn">
-          Para o rastreio funcionar, configure <b>SUPABASE_SERVICE_ROLE_KEY</b> no ambiente (Vercel). Sem ela, os links de rastreio não abrem.
+          O rastreio de aberturas está indisponível no momento. Fale com o suporte para ativá-lo.
         </div>
       )}
 

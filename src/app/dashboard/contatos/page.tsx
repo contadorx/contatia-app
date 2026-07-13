@@ -46,7 +46,7 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
         </div>
         {(suggestionCount ?? 0) > 0 && (
           <a href="/dashboard/contatos/sugestoes" className="shrink-0 rounded-lg bg-warn/10 px-3 py-2 text-sm font-semibold text-warn hover:bg-warn/20">
-            {suggestionCount} sugestão(ões) →
+            {suggestionCount} {suggestionCount === 1 ? "sugestão" : "sugestões"} →
           </a>
         )}
       </div>

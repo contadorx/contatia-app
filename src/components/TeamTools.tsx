@@ -26,7 +26,7 @@ export default function TeamTools() {
     <div>
       <div className="flex flex-wrap gap-2">
         <button className="btn-brand py-1.5 text-sm" onClick={distribute} disabled={pending}>
-          Distribuir sem dono (round-robin)
+          Dividir contatos sem dono igualmente entre os vendedores
         </button>
         <button className="btn-ghost py-1.5 text-sm" onClick={dedupe} disabled={pending}>
           Marcar duplicados por e-mail

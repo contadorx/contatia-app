@@ -21,7 +21,10 @@ export default async function Cadencias() {
   return (
     <div>
       <h1 className="font-display text-2xl font-bold">Cadências</h1>
-      <p className="mt-1 text-sm text-subtle">As sequências multicanal que alimentam a fila do &ldquo;Hoje&rdquo;.</p>
+      <p className="mt-1 text-sm text-subtle">
+        <b>Cadência</b> é a sua sequência de follow-ups multicanal (e-mail, WhatsApp, ligação, LinkedIn) — os toques
+        entram sozinhos na fila do &ldquo;Hoje&rdquo;, no ritmo que você definir.
+      </p>
 
       <div className="mt-6 flex flex-wrap gap-2">
         <SequenceBuilder />

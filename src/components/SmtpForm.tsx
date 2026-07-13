@@ -148,7 +148,7 @@ export default function SmtpForm() {
           <div>
             <p className="text-sm font-semibold">Detecção de respostas (IMAP)</p>
             <p className="mt-0.5 text-xs text-subtle">
-              Quando o lead responde seu e-mail, a Contatia detecta e <b>pausa a cadência</b> automaticamente — sem você marcar na mão. Lê a caixa por IMAP uma vez por dia (no cron).
+              Quando o lead responde seu e-mail, a Contatia detecta e <b>pausa a cadência</b> automaticamente — sem você marcar na mão. Verifica a caixa uma vez por dia.
             </p>
           </div>
           <label className="flex shrink-0 items-center gap-2 text-sm font-medium">

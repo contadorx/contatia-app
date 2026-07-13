@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AssignSelect from "@/components/AssignSelect";
 import EnrollButton from "@/components/EnrollButton";
@@ -33,6 +34,7 @@ export default function ContactsTable({
   members: Member[];
   tags?: Tag[];
 }) {
+  const router = useRouter();
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [seq, setSeq] = useState("");
   const [assignTo, setAssignTo] = useState("");
@@ -106,7 +108,8 @@ export default function ContactsTable({
       if (res?.error) setMsg(res.error);
       else {
         setNewTag("");
-        setMsg("✓ tag criada. Recarregue para vê-la nas listas.");
+        setMsg("✓ Tag criada.");
+        router.refresh();
       }
     });
   }
