@@ -54,6 +54,7 @@ export default function PipelineBoard({
   const [fProduct, setFProduct] = useState("");
   const cadences = Array.from(new Set(opps.map((o) => o.active_cadence).filter(Boolean))) as string[];
   const [fCadName, setFCadName] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
 
   // form
   const [title, setTitle] = useState("");
@@ -129,6 +130,8 @@ export default function PipelineBoard({
     return true;
   });
   const hasFilter = !!(fTag || fCad !== "todos" || fCadName || fBusca || fProduct);
+  const activeCount = [fTag, fCad !== "todos", fCadName, fProduct].filter(Boolean).length;
+  function clearFilters() { setFTag(""); setFCad("todos"); setFCadName(""); setFBusca(""); setFProduct(""); }
 
   return (
     <div>
@@ -138,7 +141,7 @@ export default function PipelineBoard({
           <b className="text-ink">{brl(total)}/mês</b> em potencial
         </p>
         <button className="btn-brand" onClick={() => setShowForm((s) => !s)}>
-          + Oportunidade
+          + Negócio
         </button>
       </div>
 
@@ -183,37 +186,50 @@ export default function PipelineBoard({
         </div>
       )}
 
-      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-2.5">
-        <input className="input py-1 text-xs" style={{ width: 160, flex: "0 0 auto" }} value={fBusca} onChange={(e) => setFBusca(e.target.value)} placeholder="Buscar negócio/contato" />
-        <div className="flex shrink-0 gap-1">
-          {(["todos", "com", "sem"] as const).map((v) => (
-            <button key={v} className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium ${fCad === v ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`} onClick={() => setFCad(v)}>
-              {v === "todos" ? "Todos" : v === "com" ? "Em cadência" : "Sem cadência"}
-            </button>
-          ))}
+      <div className="mb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <input className="input py-1.5 text-sm" style={{ width: 220, flex: "0 0 auto" }} value={fBusca} onChange={(e) => setFBusca(e.target.value)} placeholder="Buscar negócio ou contato" />
+          <button
+            className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium ${showFilters || activeCount ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}
+            onClick={() => setShowFilters((s) => !s)}
+          >
+            Filtros{activeCount > 0 ? ` (${activeCount})` : ""}
+          </button>
+          {hasFilter && (
+            <button className="shrink-0 text-xs text-subtle hover:text-ink" onClick={clearFilters}>limpar</button>
+          )}
+          <span className="ml-auto shrink-0 text-xs text-subtle">{filtered.length} de {opps.length}</span>
         </div>
-        {cadences.length > 0 && (
-          <select className="input py-1 text-xs" style={{ width: 150, flex: "0 0 auto" }} value={fCadName} onChange={(e) => setFCadName(e.target.value)}>
-            <option value="">Qualquer cadência</option>
-            {cadences.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+
+        {showFilters && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-2.5">
+            <div className="flex shrink-0 gap-1">
+              {(["todos", "com", "sem"] as const).map((v) => (
+                <button key={v} className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium ${fCad === v ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`} onClick={() => setFCad(v)}>
+                  {v === "todos" ? "Todos" : v === "com" ? "Em cadência" : "Sem cadência"}
+                </button>
+              ))}
+            </div>
+            {cadences.length > 0 && (
+              <select className="input py-1 text-xs" style={{ width: 150, flex: "0 0 auto" }} value={fCadName} onChange={(e) => setFCadName(e.target.value)}>
+                <option value="">Qualquer cadência</option>
+                {cadences.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            )}
+            {allTags.length > 0 && (
+              <select className="input py-1 text-xs" style={{ width: 130, flex: "0 0 auto" }} value={fTag} onChange={(e) => setFTag(e.target.value)}>
+                <option value="">Todas as tags</option>
+                {allTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
+            {products.length > 0 && (
+              <select className="input py-1 text-xs" style={{ width: 160, flex: "0 0 auto" }} value={fProduct} onChange={(e) => setFProduct(e.target.value)}>
+                <option value="">Todos os produtos</option>
+                {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
+          </div>
         )}
-        {allTags.length > 0 && (
-          <select className="input py-1 text-xs" style={{ width: 130, flex: "0 0 auto" }} value={fTag} onChange={(e) => setFTag(e.target.value)}>
-            <option value="">Todas as tags</option>
-            {allTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        )}
-        {products.length > 0 && (
-          <select className="input py-1 text-xs" style={{ width: 160, flex: "0 0 auto" }} value={fProduct} onChange={(e) => setFProduct(e.target.value)}>
-            <option value="">Todos os produtos</option>
-            {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        )}
-        {hasFilter && (
-          <button className="shrink-0 text-xs text-subtle hover:text-ink" onClick={() => { setFTag(""); setFCad("todos"); setFCadName(""); setFBusca(""); setFProduct(""); }}>limpar</button>
-        )}
-        <span className="shrink-0 text-xs text-subtle">{filtered.length} de {opps.length}</span>
       </div>
 
       <div className="overflow-x-auto">
@@ -239,16 +255,16 @@ export default function PipelineBoard({
                   key={o.id}
                   draggable
                   onDragStart={() => setDragId(o.id)}
-                  className="mb-2 cursor-grab rounded-lg border border-line bg-surface p-2.5 shadow-sm active:cursor-grabbing"
+                  className="group mb-2 cursor-grab rounded-lg border border-line bg-surface p-2.5 shadow-sm active:cursor-grabbing"
                 >
                   <div
                     className="h-0.5 rounded"
                     style={{ background: st.is_won ? "var(--tw-signal,#12B76A)" : "#4A3AFF", marginBottom: 6 }}
                   />
                   <div className="flex items-start justify-between gap-1">
-                    <p className="text-xs font-semibold leading-tight">{o.title}</p>
+                    <p className="text-sm font-semibold leading-tight">{o.title}</p>
                     <button
-                      className="shrink-0 text-[11px] text-subtle hover:text-brand-dark"
+                      className="shrink-0 text-[11px] text-subtle opacity-0 transition hover:text-brand-dark group-hover:opacity-100"
                       title="Editar"
                       onMouseDown={(e) => e.stopPropagation()}
                       onClick={(e) => { e.stopPropagation(); setEditOpp({ id: o.id, title: o.title, value_mrr: String(o.value_mrr || ""), contact_id: o.contact_id || "", account_id: (o as any).account_id || "", product_id: (o as any).product_id || "" }); }}
@@ -280,7 +296,7 @@ export default function PipelineBoard({
                         })}>Salvar</button>
                         <button className="text-[11px] text-subtle hover:text-ink" onClick={() => setEditOpp(null)}>cancelar</button>
                         <button className="ml-auto text-[11px] text-subtle hover:text-danger" onClick={() => start(async () => {
-                          if (confirm("Excluir esta oportunidade?")) { await deleteOpportunity(o.id); setOpps((prev) => prev.filter((x) => x.id !== o.id)); setEditOpp(null); }
+                          if (confirm("Excluir este negócio?")) { await deleteOpportunity(o.id); setOpps((prev) => prev.filter((x) => x.id !== o.id)); setEditOpp(null); }
                         })}>excluir</button>
                       </div>
                     </div>
@@ -297,9 +313,9 @@ export default function PipelineBoard({
                       {(o.contact_score ?? 0) >= 25 && <span className="rounded-full bg-warn/15 px-1 py-0.5 text-[9px] font-bold text-warn">QUENTE</span>}
                     </p>
                   )}
-                  <p className="mt-1 text-[11px] font-bold text-brand-dark">{brl(Number(o.value_mrr))}/mês</p>
+                  <p className="mt-1 text-sm font-bold text-brand-dark">{brl(Number(o.value_mrr))}/mês</p>
                   {(o.last_activity || o.active_cadence) && (
-                    <div className="mt-1.5 border-t border-line pt-1.5">
+                    <div className="mt-1.5 hidden border-t border-line pt-1.5 group-hover:block">
                       {o.last_activity && <p className="text-[10px] text-subtle">↳ {o.last_activity}</p>}
                       {o.active_cadence && (
                         <p className="mt-0.5 truncate text-[10px]">
