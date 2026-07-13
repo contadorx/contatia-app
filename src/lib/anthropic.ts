@@ -34,7 +34,7 @@ export type Brief = {
 
 export async function generateSequence(
   brief: Brief,
-  opts?: { apiKey?: string; model?: string }
+  opts?: { apiKey?: string; model?: string; rapport?: boolean }
 ): Promise<{ steps?: AiStep[]; error?: string }> {
   const key = opts?.apiKey || process.env.ANTHROPIC_API_KEY;
   if (!key) return { error: "Configure a chave da IA em Config (ou ANTHROPIC_API_KEY no ambiente)." };
@@ -43,15 +43,22 @@ export async function generateSequence(
   const nSteps = Math.min(8, Math.max(3, Number(brief.steps) || 5));
   const channels = brief.channels?.length ? brief.channels.join(", ") : "email, whatsapp, linkedin, call";
 
+  const rapportLines = opts?.rapport
+    ? [
+        "USE DADOS DE RAPPORT: além das variáveis básicas, aproveite {{interesses}}, {{contexto}} e {{como_conheceu}}",
+        "para deixar a abordagem pessoal. Regra: só use rapport dentro de uma FRASE INTEIRA que possa ser omitida —",
+        "nem todo contato terá o dado; se estiver vazio, o resto da mensagem tem que continuar lendo bem.",
+      ]
+    : [];
+
   const system = [
     "Você é especialista em cadências de prospecção B2B outbound no Brasil, no estilo consultivo.",
     `Gere uma cadência de EXATAMENTE ${nSteps} passos, em português do Brasil, usando só estes canais: ${channels}.`,
     "Princípios: mensagens curtas e humanas (2-5 frases no email; 1-3 no whatsapp); cada passo com UM CTA claro;",
     "foco na DOR e no VALOR, nunca em features; variar o ângulo a cada passo (não repetir a mesma abertura);",
     "PERSONALIZAÇÃO POR VARIÁVEIS (trocadas por contato na hora do envio, sem custo): use quando fizer sentido",
-    "{{primeiro_nome}}, {{empresa}}, {{cargo}}, {{cidade}}, {{cnae}}, e as de RAPPORT {{interesses}}, {{contexto}}, {{como_conheceu}}.",
-    "Regra do rapport: só use {{interesses}}/{{contexto}}/{{como_conheceu}} dentro de uma FRASE INTEIRA que possa ser omitida —",
-    "porque nem todo contato terá esse dado; se estiver vazio, o resto da mensagem tem que continuar lendo bem.",
+    "{{primeiro_nome}}, {{empresa}}, {{cargo}}, {{cidade}}, {{cnae}}.",
+    ...rapportLines,
     "escalonar o tom (educar → prova → urgência leve → despedida).",
     "NUNCA inventar dados, números ou casos que não foram fornecidos. Um humano vai revisar antes de enviar.",
     "Responda APENAS com um array JSON, sem texto ao redor. Cada item:",

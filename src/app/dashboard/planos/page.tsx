@@ -11,20 +11,21 @@ const FEATURES: Record<string, string[]> = {
     "Cadência multicanal (e-mail + WhatsApp)",
     "Pipeline de vendas completo",
     "Radar de CNPJs da Receita",
-    "WhatsApp com captura de resposta",
+    "WhatsApp com captura + Caixa de Respostas",
     "IA que monta a cadência (contexto + rapport)",
+    "Pacote Opus: 20 cadências em qualidade máxima / mês",
     "Propostas com link rastreado",
     "Agendamento e lembretes de reunião",
     "Lead scoring + alerta de lead quente",
   ],
   Equipes: [
     "Tudo do Individual, para cada vendedor",
+    "Pacote Opus (qualidade máxima) por assento",
     "Papéis e níveis de equipe",
     "Dashboard e metas por vendedor",
     "Roteamento round-robin de leads",
     "Múltiplas caixas + rotação de envio",
     "Integrações e webhooks",
-    "IA incluída para todo o time",
   ],
 };
 

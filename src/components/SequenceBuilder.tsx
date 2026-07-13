@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect, useRef } from "react";
-import { createSequence, generateSequenceAI, loadAiContext, saveAiContext, type StepInput } from "@/app/dashboard/cadencias/actions";
+import { createSequence, generateSequenceAI, loadAiContext, saveAiContext, opusRemaining, type StepInput } from "@/app/dashboard/cadencias/actions";
 import type { Channel } from "@/lib/cadence";
 
 const CHANNELS: { v: Channel; l: string }[] = [
@@ -30,6 +30,9 @@ export default function SequenceBuilder() {
   const [ctxLoaded, setCtxLoaded] = useState(false);
   const [aiMsg, setAiMsg] = useState<string | null>(null);
   const [aiPending, startAi] = useTransition();
+  const [premium, setPremium] = useState(false);
+  const [useRapport, setUseRapport] = useState(false);
+  const [opus, setOpus] = useState<{ used: number; quota: number } | null>(null);
 
   function bf(k: string, v: string | number | string[]) {
     setBrief((s) => ({ ...s, [k]: v }));
@@ -46,17 +49,21 @@ export default function SequenceBuilder() {
         setBrief((s) => ({ ...s, ...c, steps: c.steps || s.steps, channels: c.channels?.length ? c.channels : s.channels }));
         setCtxLoaded(true);
       });
+      opusRemaining().then((r: any) => setOpus(r)).catch(() => {});
     }
   }, [aiOpen, ctxLoaded]);
+
+  const opusLeft = opus ? Math.max(0, opus.quota - opus.used) : null;
 
   function generateAI() {
     setAiMsg(null);
     startAi(async () => {
-      const res = (await generateSequenceAI(brief)) as { steps?: StepInput[]; error?: string };
+      const res = (await generateSequenceAI(brief, { premium, rapport: useRapport })) as { steps?: StepInput[]; error?: string };
       if (res?.error) setAiMsg(res.error);
       else if (res?.steps?.length) {
         setSteps(res.steps);
         if (!name && brief.market) setName(`Cadência — ${brief.market}`.slice(0, 60));
+        if (premium) opusRemaining().then((r: any) => setOpus(r)).catch(() => {});
         setAiOpen(false);
       }
     });
@@ -173,10 +180,38 @@ export default function SequenceBuilder() {
               </div>
             </div>
 
+            {/* Considerar rapport na cadência */}
+            <label className="mt-3 flex items-start gap-2 rounded-xl border border-line bg-muted/40 p-3 text-sm">
+              <input type="checkbox" className="mt-0.5" checked={useRapport} onChange={(e) => setUseRapport(e.target.checked)} />
+              <span>
+                <b>Considerar dados de rapport</b> — a IA costura ganchos de {`{{interesses}}`} e {`{{contexto}}`} no texto
+                (trocados por contato, sem custo extra). <span className="text-subtle">Use quando seus contatos têm esses campos preenchidos.</span>
+              </span>
+            </label>
+
+            {/* Qualidade máxima (pacote Opus) */}
+            <label className="mt-3 flex items-start gap-2 rounded-xl border border-brand/30 bg-brand-soft/40 p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={premium}
+                onChange={(e) => setPremium(e.target.checked)}
+                disabled={opusLeft === 0}
+              />
+              <span>
+                <b>Qualidade máxima (Opus)</b> — o modelo topo, para a cadência que você quer impecável.
+                {opus ? (
+                  <span className={`ml-1 ${opusLeft === 0 ? "text-danger" : "text-subtle"}`}>
+                    {opusLeft === 0 ? "Pacote do mês esgotado." : `${opusLeft} de ${opus.quota} no pacote deste mês.`}
+                  </span>
+                ) : null}
+              </span>
+            </label>
+
             {aiMsg && <p className={`mt-2 text-sm ${aiMsg.startsWith("✓") ? "text-signal" : "text-danger"}`}>{aiMsg}</p>}
             <div className="mt-3 flex flex-wrap gap-2">
               <button className="btn-brand py-1.5 text-sm" onClick={generateAI} disabled={aiPending}>
-                {aiPending ? "Gerando..." : "Gerar rascunho"}
+                {aiPending ? "Gerando..." : premium ? "Gerar no Opus" : "Gerar rascunho"}
               </button>
               <button className="btn-ghost py-1.5 text-sm" onClick={saveContext} disabled={aiPending} title="Salva o contexto no negócio para reusar">
                 Salvar contexto

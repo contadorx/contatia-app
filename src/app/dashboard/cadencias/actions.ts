@@ -125,19 +125,22 @@ export async function enrollContact(contactId: string, sequenceId: string) {
 }
 
 // Gera uma cadência com IA a partir de um briefing rico (a IA rascunha; humano aprova).
-export async function generateSequenceAI(brief: {
-  market: string;
-  product: string;
-  icp: string;
-  tone?: string;
-  pain?: string;
-  proof?: string;
-  goal?: string;
-  cta?: string;
-  avoid?: string;
-  steps?: number;
-  channels?: string[];
-}) {
+export async function generateSequenceAI(
+  brief: {
+    market: string;
+    product: string;
+    icp: string;
+    tone?: string;
+    pain?: string;
+    proof?: string;
+    goal?: string;
+    cta?: string;
+    avoid?: string;
+    steps?: number;
+    channels?: string[];
+  },
+  opts?: { premium?: boolean; rapport?: boolean },
+) {
   // a IA está inclusa nos planos pagos (Individual e Equipes)
   if (!(await hasAi())) {
     return { error: "A geração de cadência com IA está inclusa nos planos pagos. Veja em Planos." };
@@ -152,41 +155,76 @@ export async function generateSequenceAI(brief: {
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("ai_model, ai_api_key, platform_plans(ai_quota, segment)")
+    .select("ai_model, ai_api_key, platform_plans(ai_quota, opus_quota, segment)")
     .eq("id", tenant_id)
     .maybeSingle();
 
-  // ---- TRAVA DE USO JUSTO (protege a margem contra abuso) ----
-  // cota mensal: base do plano (100), x assentos nas Equipes; trial/sem plano = 50.
   const plan = (tenant as any)?.platform_plans;
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+
+  // ---- TRAVA DE USO JUSTO (todas as gerações do mês, padrão + Opus) ----
   let quota = plan?.ai_quota ? Number(plan.ai_quota) : 50;
   if (plan?.segment === "equipe") {
     const { count: seats } = await supabase.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenant_id);
     quota = quota * Math.max(1, seats ?? 1);
   }
-  const now = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-  const { count: used } = await supabase
+  const { count: usedTotal } = await supabase
     .from("events")
     .select("id", { count: "exact", head: true })
     .eq("tenant_id", tenant_id)
-    .eq("type", "ai_generation")
+    .in("type", ["ai_generation", "ai_generation_opus"])
     .gte("created_at", monthStart);
-  if ((used ?? 0) >= quota) {
+  if ((usedTotal ?? 0) >= quota) {
     return { error: `Você atingiu o limite de ${quota} gerações de IA neste mês. O limite renova no dia 1º. Precisa de mais volume? Fale com a gente.` };
+  }
+
+  // ---- PACOTE OPUS (qualidade máxima, cota própria e bounded) ----
+  const premium = !!opts?.premium;
+  let model = (tenant as any)?.ai_model || undefined;
+  if (premium) {
+    const opusQuota = plan?.opus_quota != null ? Number(plan.opus_quota) : 5;
+    const { count: usedOpus } = await supabase
+      .from("events")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenant_id)
+      .eq("type", "ai_generation_opus")
+      .gte("created_at", monthStart);
+    if ((usedOpus ?? 0) >= opusQuota) {
+      return { error: `Você já usou as ${opusQuota} gerações no Opus (qualidade máxima) deste mês. Gere no modelo padrão ou aguarde a renovação no dia 1º.` };
+    }
+    model = process.env.ANTHROPIC_MODEL_PREMIUM || "claude-opus-4-5";
   }
 
   const { generateSequence } = await import("@/lib/anthropic");
   const result = await generateSequence(brief, {
     apiKey: (tenant as any)?.ai_api_key || undefined,
-    model: (tenant as any)?.ai_model || undefined,
+    model,
+    rapport: !!opts?.rapport,
   });
 
   // conta a geração só quando deu certo (não penaliza erro de API)
   if ((result as any)?.steps) {
-    await supabase.from("events").insert({ tenant_id, type: "ai_generation", meta: {} } as any);
+    await supabase.from("events").insert({ tenant_id, type: premium ? "ai_generation_opus" : "ai_generation", meta: {} } as any);
   }
   return result;
+}
+
+// Quanto resta do pacote Opus no mês (para a UI).
+export async function opusRemaining(): Promise<{ used: number; quota: number }> {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { used: 0, quota: 0 };
+  const { data: tenant } = await supabase.from("tenants").select("platform_plans(opus_quota)").eq("id", tenant_id).maybeSingle();
+  const quota = (tenant as any)?.platform_plans?.opus_quota != null ? Number((tenant as any).platform_plans.opus_quota) : 5;
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+  const { count } = await supabase
+    .from("events")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenant_id)
+    .eq("type", "ai_generation_opus")
+    .gte("created_at", monthStart);
+  return { used: count ?? 0, quota };
 }
 
 // Carrega o contexto salvo do negócio (para pré-preencher o painel de IA).
