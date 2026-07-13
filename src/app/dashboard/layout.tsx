@@ -98,7 +98,7 @@ export default async function DashboardLayout({
         unreadReplies={unreadReplies}
       />
       <div className="flex flex-1">
-        <aside className="hidden w-56 flex-col border-r border-line bg-surface p-5 md:flex">
+        <aside className="hidden w-56 flex-col self-start sticky top-0 h-screen overflow-y-auto border-r border-line bg-surface p-5 md:flex">
           <p className="font-display text-xl font-bold">
             Contat<span className="text-brand">ia</span>
           </p>

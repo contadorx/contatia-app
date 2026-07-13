@@ -121,6 +121,32 @@ export async function subscribePlan(planId: string, docNumber?: string, couponCo
     coupon_reverts_on: revertsOn,
   }).eq("id", tenant_id);
 
+  // registra JÁ a 1ª fatura na central de cobranças (não espera o webhook do Asaas).
+  // Deduplica por asaas_payment_id → quando o webhook PAYMENT_CREATED chegar, ele
+  // encontra esta fatura e não cria outra.
+  if ((sub as any).firstPayment?.asaasId) {
+    try {
+      const { createAdminClient } = await import("@/lib/supabaseAdmin");
+      const admin = createAdminClient();
+      if (admin) {
+        const fp = (sub as any).firstPayment;
+        const { data: existing } = await admin.from("platform_invoices").select("id").eq("asaas_payment_id", fp.asaasId).maybeSingle();
+        if (!existing) {
+          await admin.from("platform_invoices").insert({
+            tenant_id,
+            amount: fp.value ?? value,
+            description: fp.description || `Contatia ${(plan as any).name} — ${billedSeats} usuário(s)`,
+            due_date: fp.dueDate || null,
+            payment_link: fp.invoiceUrl || sub.link || null,
+            asaas_payment_id: fp.asaasId,
+            asaas_subscription_id: sub.id || null,
+            status: "pending",
+          });
+        }
+      }
+    } catch { /* a fatura também chega pelo webhook; não bloqueia a assinatura */ }
+  }
+
   // resgata o cupom (conta a redenção)
   if (coupon) {
     try {

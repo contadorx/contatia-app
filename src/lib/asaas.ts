@@ -90,7 +90,7 @@ export async function createAsaasSubscription(input: {
   value: number;
   description?: string;
   billingType?: "BOLETO" | "PIX" | "CREDIT_CARD" | "UNDEFINED";
-}): Promise<{ id?: string; link?: string; error?: string }> {
+}): Promise<{ id?: string; link?: string; error?: string; firstPayment?: { asaasId?: string; value?: number; dueDate?: string; invoiceUrl?: string; description?: string } }> {
   const h = headers();
   if (!h) return { error: "ASAAS_API_KEY não configurada." };
 
@@ -117,18 +117,29 @@ export async function createAsaasSubscription(input: {
   }
   const sub = (await res.json()) as { id?: string };
 
-  // busca a 1ª cobrança da assinatura para devolver o link de pagamento
+  // busca a 1ª cobrança da assinatura: devolve o link de pagamento E os dados para
+  // já registrar a fatura na central (sem esperar o webhook do Asaas).
   let link: string | undefined;
+  let firstPayment: { asaasId?: string; value?: number; dueDate?: string; invoiceUrl?: string; description?: string } | undefined;
   try {
     const pr = await fetch(`${base()}/subscriptions/${sub.id}/payments`, { headers: h });
     if (pr.ok) {
-      const pj = (await pr.json()) as { data?: { invoiceUrl?: string; bankSlipUrl?: string }[] };
+      const pj = (await pr.json()) as { data?: { id?: string; value?: number; dueDate?: string; invoiceUrl?: string; bankSlipUrl?: string; description?: string }[] };
       const first = pj.data?.[0];
-      link = first?.invoiceUrl || first?.bankSlipUrl;
+      if (first) {
+        link = first.invoiceUrl || first.bankSlipUrl;
+        firstPayment = {
+          asaasId: first.id,
+          value: Number(first.value) || undefined,
+          dueDate: first.dueDate,
+          invoiceUrl: first.invoiceUrl || first.bankSlipUrl,
+          description: first.description,
+        };
+      }
     }
-  } catch { /* link vem depois pelo webhook se necessário */ }
+  } catch { /* link/fatura vêm pelo webhook se necessário */ }
 
-  return { id: sub.id, link };
+  return { id: sub.id, link, firstPayment };
 }
 
 // Atualiza o VALOR de uma assinatura recorrente (ex.: mudou o nº de assentos ou entrou/saiu
