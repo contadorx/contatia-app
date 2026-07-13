@@ -131,6 +131,14 @@ export async function setTeamRole(memberId: string, teamRole: string) {
   if (!["admin", "gestor", "sdr", "vendedor"].includes(teamRole)) return { error: "Nível inválido." };
   const { error } = await supabase.from("profiles").update({ team_role: teamRole }).eq("id", memberId);
   if (error) return { error: error.message };
+
+  // deixou de ser SDR? as liberações de agenda dele perdem sentido — limpa
+  // (hygiene que o antigo setRole fazia; agora vive aqui, no editor canônico)
+  if (teamRole !== "sdr") {
+    await supabase.from("calendar_permissions").delete().eq("sdr_id", memberId);
+  }
+
   revalidatePath("/dashboard/equipe");
+  revalidatePath("/dashboard/reunioes");
   return { ok: true };
 }

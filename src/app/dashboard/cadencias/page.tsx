@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
-import SequenceBuilder from "@/components/SequenceBuilder";
-import { TemplateGallery, SaveAsTemplateButton } from "@/components/TemplateGallery";
+import CadenceStart from "@/components/CadenceStart";
+import { SaveAsTemplateButton } from "@/components/TemplateGallery";
 import { CadenceReport } from "@/components/CadenceReport";
 import { listTemplates } from "@/app/dashboard/cadencias/actions";
 import { channelLabel, type Channel } from "@/lib/cadence";
@@ -26,9 +26,8 @@ export default async function Cadencias() {
         entram sozinhos na fila do &ldquo;Hoje&rdquo;, no ritmo que você definir.
       </p>
 
-      <div className="mt-6 flex flex-wrap gap-2">
-        <SequenceBuilder />
-        <TemplateGallery templates={(templates as any[]) || []} />
+      <div className="mt-6">
+        <CadenceStart templates={(templates as any[]) || []} />
       </div>
 
       <div className="mt-6 space-y-3">

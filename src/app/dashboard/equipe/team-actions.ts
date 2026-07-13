@@ -19,31 +19,6 @@ async function ctx() {
   };
 }
 
-/** Muda o papel de um membro (Admin/Vendedor/SDR). Só o admin pode. */
-export async function setRole(memberId: string, role: string) {
-  const { supabase, tenant_id, role: meuPapel, user_id } = await ctx();
-  if (!tenant_id) return { error: "Sem workspace." };
-  if (meuPapel !== "owner") return { error: "Apenas o admin pode alterar papéis." };
-  if (memberId === user_id) return { error: "Você não pode alterar o próprio papel." };
-  if (!["owner", "partner", "sdr"].includes(role)) return { error: "Papel inválido." };
-
-  const { error } = await supabase
-    .from("profiles")
-    .update({ role } as any)
-    .eq("id", memberId)
-    .eq("tenant_id", tenant_id);
-
-  if (error) return { error: error.message };
-
-  // deixou de ser SDR? as permissões de agenda dele perdem sentido
-  if (role !== "sdr") {
-    await supabase.from("calendar_permissions").delete().eq("sdr_id", memberId);
-  }
-
-  revalidatePath("/dashboard/equipe");
-  return { ok: true };
-}
-
 /**
  * Libera (ou revoga) o SDR para agendar na agenda de um vendedor.
  * Pode fazer: o ADMIN (qualquer agenda) ou o PRÓPRIO VENDEDOR (a agenda dele).

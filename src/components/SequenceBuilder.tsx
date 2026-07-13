@@ -13,8 +13,8 @@ const CHANNELS: { v: Channel; l: string }[] = [
 
 const emptyStep = (): StepInput => ({ channel: "email", delay_days: 0, subject: "", body: "" });
 
-export default function SequenceBuilder() {
-  const [open, setOpen] = useState(false);
+export default function SequenceBuilder({ autoOpen = false, autoAi = false, onDone }: { autoOpen?: boolean; autoAi?: boolean; onDone?: () => void } = {}) {
+  const [open, setOpen] = useState(autoOpen);
   const [name, setName] = useState("");
   const [audience, setAudience] = useState("");
   const [steps, setSteps] = useState<StepInput[]>([emptyStep()]);
@@ -22,7 +22,7 @@ export default function SequenceBuilder() {
   const [pending, start] = useTransition();
 
   // IA — briefing rico
-  const [aiOpen, setAiOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(autoAi);
   const [brief, setBrief] = useState({
     market: "", product: "", icp: "", tone: "", pain: "", proof: "", goal: "", cta: "", avoid: "", steps: 5,
     channels: ["email", "whatsapp", "linkedin"] as string[],
@@ -126,6 +126,7 @@ export default function SequenceBuilder() {
         setAudience("");
         setSteps([emptyStep()]);
         setOpen(false);
+        onDone?.();
       }
     });
   }
@@ -372,7 +373,7 @@ export default function SequenceBuilder() {
         <button className="btn-brand" onClick={save} disabled={pending}>
           {pending ? "Salvando..." : "Salvar sequência"}
         </button>
-        <button className="btn-ghost" onClick={() => setOpen(false)}>
+        <button className="btn-ghost" onClick={() => { setOpen(false); onDone?.(); }}>
           Cancelar
         </button>
       </div>

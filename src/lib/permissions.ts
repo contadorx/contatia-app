@@ -1,6 +1,9 @@
 // Fonte única de verdade dos papéis e do que cada um pode fazer.
-// Modelo: profiles.role = 'owner' | 'member'; profiles.team_role = 'admin' | 'gestor' | 'sdr' | 'vendedor'.
-// O owner é sempre o nível máximo. team_role refina o que um member pode.
+// Modelo: profiles.role (enum user_role) vale como TITULARIDADE — só 'owner' importa;
+// os demais valores (legado: 'partner'/'sdr') são tratados como "não-owner".
+// O papel OPERACIONAL vive em profiles.team_role = 'admin'|'gestor'|'sdr'|'vendedor'
+// (backfill do legado feito na migration 0063). O owner é sempre o nível máximo;
+// team_role refina o que um não-owner pode.
 
 export type Role = "owner" | "admin" | "gestor" | "sdr" | "vendedor";
 

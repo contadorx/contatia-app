@@ -12,8 +12,8 @@ type Template = {
   is_global: boolean;
 };
 
-export function TemplateGallery({ templates }: { templates: Template[] }) {
-  const [open, setOpen] = useState(false);
+export function TemplateGallery({ templates, autoOpen = false, onDone }: { templates: Template[]; autoOpen?: boolean; onDone?: () => void }) {
+  const [open, setOpen] = useState(autoOpen);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -37,7 +37,7 @@ export function TemplateGallery({ templates }: { templates: Template[] }) {
     <div className="card p-5">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold">Templates de cadência</p>
-        <button className="text-xs text-subtle hover:text-ink" onClick={() => setOpen(false)}>fechar</button>
+        <button className="text-xs text-subtle hover:text-ink" onClick={() => { setOpen(false); onDone?.(); }}>fechar</button>
       </div>
       <p className="mt-1 text-xs text-subtle">Clone um acervo pronto e ajuste — em vez de começar do zero.</p>
       {msg && <p className={`mt-2 text-sm ${msg.startsWith("✓") ? "text-signal" : "text-danger"}`}>{msg}</p>}
