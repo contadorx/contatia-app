@@ -8,31 +8,33 @@ export const dynamic = "force-dynamic";
 
 const FEATURES: Record<string, string[]> = {
   Essencial: [
-    "Cadência de e-mail e WhatsApp",
+    "Cadência de e-mail e WhatsApp (assistido)",
     "Pipeline de vendas completo",
-    "1 caixa de e-mail conectada",
+    "1 caixa de e-mail",
     "Agendamento e lembretes de reunião",
+    "Propostas com link rastreado",
   ],
-  Profissional: [
+  "Individual Pro": [
     "Tudo do Essencial",
     "Radar de CNPJs da Receita",
-    "Alerta de lead quente em tempo real",
     "WhatsApp com captura de resposta",
+    "Alerta de lead quente + lead scoring",
     "Relatório por passo + teste A/B",
   ],
-  Time: [
-    "Tudo do Profissional",
+  Profissional: [
+    "Tudo do Individual Pro",
+    "Vários usuários (cobrança por assento)",
+    "Papéis e níveis de equipe",
+    "Dashboard e metas por vendedor",
+    "Roteamento round-robin de leads",
     "Múltiplas caixas + rotação de envio",
-    "Dashboard por vendedor",
-    "Roteamento e round-robin de leads",
     "Integrações e webhooks",
-    "Suporte prioritário",
   ],
   Performance: [
-    "Tudo do Time",
-    "IA que monta a cadência multicanal",
-    "IA com o contexto e o rapport do seu negócio",
+    "Tudo do Profissional",
+    "IA que monta a cadência (contexto + rapport)",
     "Prioridade nos novos recursos de IA",
+    "Suporte prioritário",
   ],
 };
 
@@ -45,7 +47,7 @@ export default async function Planos() {
 
   const { data: plans } = await supabase
     .from("platform_plans")
-    .select("id, name, price_monthly, max_seats, sort")
+    .select("id, name, price_monthly, max_seats, sort, segment")
     .eq("is_active", true)
     .order("sort", { ascending: true });
 

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { subscribePlan, validateCoupon } from "@/app/dashboard/planos/actions";
 
-type Plan = { id: string; name: string; price_monthly: number; max_seats: number | null; sort: number };
+type Plan = { id: string; name: string; price_monthly: number; max_seats: number | null; sort: number; segment?: string };
 
 export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe }: {
   plans: Plan[];
@@ -23,6 +23,12 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
 
   const brl = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const popular = plans.find((p) => p.name === "Profissional")?.id;
+
+  // segmento: começa no do plano atual (se houver), senão Individual
+  const currentSeg = plans.find((p) => p.id === currentPlanId)?.segment;
+  const [seg, setSeg] = useState<string>(currentSeg || "individual");
+  const visiblePlans = plans.filter((p) => (p.segment || "equipe") === seg);
+  const isTeam = seg === "equipe";
 
   function checkCoupon() {
     setCouponMsg(null);
@@ -67,6 +73,27 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
     <div>
       {err && <p className="mb-4 rounded-lg bg-danger/10 p-3 text-sm text-danger">{err}</p>}
 
+      {/* toggle Individual x Equipes */}
+      <div className="mb-5 inline-flex rounded-xl border border-line bg-muted p-1">
+        {[
+          { v: "individual", l: "Individual" },
+          { v: "equipe", l: "Equipes" },
+        ].map((s) => (
+          <button
+            key={s.v}
+            onClick={() => setSeg(s.v)}
+            className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition ${seg === s.v ? "bg-surface text-ink shadow-sm" : "text-subtle hover:text-ink"}`}
+          >
+            {s.l}
+          </button>
+        ))}
+      </div>
+      <p className="mb-4 text-sm text-subtle">
+        {isTeam
+          ? "Para times comerciais: cobrança por assento, gestão de equipe e recursos de escala."
+          : "Para quem vende sozinho: um único usuário, sem gestão de equipe."}
+      </p>
+
       {/* cupom (opcional) */}
       <div className="mb-5 flex flex-wrap items-end gap-2">
         <div>
@@ -83,21 +110,21 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
         {couponMsg && <span className={`text-sm ${couponMsg.t === "ok" ? "text-signal" : "text-danger"}`}>{couponMsg.m}</span>}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {plans.map((p) => {
+      <div className="grid gap-4 md:grid-cols-2">
+        {visiblePlans.map((p) => {
           const isPopular = p.id === popular;
           const isCurrent = p.id === currentPlanId;
-          const total = Number(p.price_monthly) * seats;
+          const total = Number(p.price_monthly) * (isTeam ? seats : 1);
           return (
             <div key={p.id} className={`card flex flex-col p-6 ${isPopular ? "ring-2 ring-brand" : ""}`}>
               {isPopular && <span className="mb-3 self-start rounded-full bg-brand px-3 py-0.5 text-xs font-bold uppercase tracking-wide text-white">Mais popular</span>}
               <p className="font-display text-lg font-bold">{p.name}</p>
               <div className="mt-2 flex items-baseline gap-1">
                 <span className="font-display text-3xl font-bold">{brl(Number(p.price_monthly))}</span>
-                <span className="text-sm text-subtle">/usuário/mês</span>
+                <span className="text-sm text-subtle">{isTeam ? "/usuário/mês" : "/mês"}</span>
               </div>
-              <p className="mt-1 text-xs text-subtle">{p.max_seats ? `até ${p.max_seats} usuários` : "5+ usuários · preço decrescente"}</p>
-              <p className="mt-2 text-sm font-medium text-brand-dark">≈ {brl(total)}/mês para {seats} usuário(s)</p>
+              <p className="mt-1 text-xs text-subtle">{isTeam ? "cobrança por assento" : "1 usuário"}</p>
+              {isTeam && <p className="mt-2 text-sm font-medium text-brand-dark">≈ {brl(total)}/mês para {seats} usuário(s)</p>}
 
               <ul className="mt-4 flex-1 space-y-2">
                 {(features[p.name] || []).map((f, i) => (
