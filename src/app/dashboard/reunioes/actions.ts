@@ -218,16 +218,41 @@ export async function recordOutcome(input: {
 }) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
-  const status = input.outcome_status === "remarcar" ? "remarcada" : "realizada";
+  const status =
+    input.outcome_status === "remarcar" ? "remarcada" :
+    input.outcome_status === "no_show" ? "no_show" :
+    "realizada";
   const { error } = await supabase
     .from("meetings")
     .update({ status, outcome_status: input.outcome_status, outcome: input.outcome?.trim() || null })
     .eq("id", input.id);
   if (error) return { error: error.message };
 
-  // remarcar/sem interesse: a reunião naquele horário não vale mais → remove do Google Calendar
-  if (input.outcome_status === "remarcar" || input.outcome_status === "sem_interesse") {
+  // remarcar/sem interesse/faltou: a reunião naquele horário não vale mais → remove do Google Calendar
+  if (["remarcar", "sem_interesse", "no_show"].includes(input.outcome_status)) {
     await removeGoogleEvent(supabase, input.id);
+  }
+
+  // faltou → cadência de resgate (um toque de retomada), igual ao botão da agenda
+  if (input.outcome_status === "no_show" && input.contact_id) {
+    const { data: contact } = await supabase
+      .from("contacts")
+      .select("id, name, company, phone, email, assigned_to")
+      .eq("id", input.contact_id)
+      .single();
+    if (contact) {
+      await supabase.from("tasks").insert({
+        tenant_id,
+        contact_id: input.contact_id,
+        assigned_to: (contact.assigned_to as string) || null,
+        channel: "whatsapp",
+        title: "Resgate — não compareceu",
+        generated_content: renderTemplate(
+          "Olá {{primeiro_nome}}, senti sua falta na nossa reunião. Quer que eu remarque para um horário melhor?",
+          contact
+        ),
+      });
+    }
   }
 
   // registra na timeline do contato
@@ -235,7 +260,8 @@ export async function recordOutcome(input: {
     const label =
       input.outcome_status === "fechou" ? "Reunião: fechou negócio" :
       input.outcome_status === "avancou" ? "Reunião: avançou" :
-      input.outcome_status === "sem_interesse" ? "Reunião: sem interesse" : "Reunião: remarcar";
+      input.outcome_status === "sem_interesse" ? "Reunião: sem interesse" :
+      input.outcome_status === "no_show" ? "Reunião: não compareceu" : "Reunião: remarcar";
     await supabase.from("events").insert({
       tenant_id,
       contact_id: input.contact_id,

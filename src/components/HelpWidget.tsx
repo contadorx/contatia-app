@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useEffect } from "react";
 import { searchKb } from "@/app/dashboard/help-actions";
-import { openTicket } from "@/app/dashboard/suporte/actions";
+import { TicketComposer } from "@/components/SupportTools";
 
 type Article = { id: string; title: string; category: string; body: string };
 
@@ -33,7 +33,9 @@ export function HelpWidget() {
             {mode === "kb" ? (
               <KbSearch onOpenTicket={() => setMode("ticket")} />
             ) : (
-              <TicketForm onDone={() => setOpen(false)} onBack={() => setMode("kb")} />
+              <div className="mt-3">
+                <TicketComposer onDone={() => setOpen(false)} onBack={() => setMode("kb")} autoFocus />
+              </div>
             )}
           </div>
         </div>
@@ -82,27 +84,3 @@ function KbSearch({ onOpenTicket }: { onOpenTicket: () => void }) {
   );
 }
 
-function TicketForm({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
-  const [msg, setMsg] = useState<string | null>(null);
-  const [pending, start] = useTransition();
-
-  return (
-    <div className="mt-3">
-      <button className="text-xs text-brand-dark hover:underline" onClick={onBack}>← voltar para a ajuda</button>
-      <input className="input mt-3" placeholder="Assunto" value={subject} onChange={(e) => setSubject(e.target.value)} />
-      <textarea className="input mt-2 min-h-[110px]" placeholder="Descreva o que está acontecendo" value={body} onChange={(e) => setBody(e.target.value)} />
-      {msg && <p className={`mt-2 text-sm ${msg.startsWith("✓") ? "text-signal" : "text-danger"}`}>{msg}</p>}
-      <button className="btn-brand mt-3 w-full py-1.5 text-sm" disabled={pending} onClick={() => {
-        setMsg(null);
-        if (!subject.trim() || !body.trim()) { setMsg("Preencha assunto e descrição."); return; }
-        start(async () => {
-          const r = (await openTicket({ subject, body })) as any;
-          if (r?.error) setMsg(r.error);
-          else { setMsg("✓ Chamado aberto! Responderemos em breve."); setTimeout(onDone, 1200); }
-        });
-      }}>{pending ? "Enviando..." : "Enviar chamado"}</button>
-    </div>
-  );
-}

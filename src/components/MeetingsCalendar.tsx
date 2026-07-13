@@ -25,10 +25,20 @@ export function MeetingsCalendar({
   const [ativo, setAtivo] = useState<string>(
     vendedores.find((v) => v.id === meuId)?.id || vendedores[0]?.id || meuId
   );
+  const [pendingSlot, setPendingSlot] = useState<string | null>(null); // horário aguardando confirmação in-app
 
   const doAtivo = meetingsPorDono[ativo] || [];
   const podeAgendar = ativo === meuId || podeAgendarEm.includes(ativo);
   const nomeAtivo = vendedores.find((v) => v.id === ativo)?.name || "";
+
+  const fmtQuando = (iso: string) =>
+    new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
+
+  function confirmarAgendamento() {
+    if (!pendingSlot) return;
+    const q = new URLSearchParams({ datetime: pendingSlot, owner: ativo });
+    window.location.href = `/dashboard/reunioes/nova?${q.toString()}`;
+  }
 
   return (
     <div>
@@ -46,17 +56,27 @@ export function MeetingsCalendar({
         onTrocarVendedor={setAtivo}
         janela={janela}
         podeAgendar={podeAgendar}
-        onAgendar={(iso) => {
-          const quando = new Date(iso).toLocaleString("pt-BR", {
-            timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short",
-          });
-          // leva para o formulário de nova reunião com data/dono pré-preenchidos
-          const q = new URLSearchParams({ datetime: iso, owner: ativo });
-          if (confirm(`Marcar reunião em ${quando}${ativo !== meuId ? ` na agenda de ${nomeAtivo}` : ""}?`)) {
-            window.location.href = `/dashboard/reunioes/nova?${q.toString()}`;
-          }
-        }}
+        onAgendar={(iso) => setPendingSlot(iso)}
       />
+
+      {/* confirmação in-app (substitui o confirm() nativo do navegador) */}
+      {pendingSlot && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          onClick={() => setPendingSlot(null)}
+        >
+          <div className="card w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+            <p className="font-display text-base font-bold">Marcar reunião?</p>
+            <p className="mt-1 text-sm text-subtle">
+              {fmtQuando(pendingSlot)}{ativo !== meuId ? ` — na agenda de ${nomeAtivo}` : ""}.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button className="btn-brand" onClick={confirmarAgendamento}>Sim, marcar</button>
+              <button className="btn-ghost" onClick={() => setPendingSlot(null)}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

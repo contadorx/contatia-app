@@ -5,8 +5,9 @@ import { recordOutcome } from "@/app/dashboard/reunioes/actions";
 
 const OUTCOMES = [
   { v: "fechou", l: "Fechou 🎉", c: "bg-signal/10 text-signal" },
-  { v: "avancou", l: "Avançou", c: "bg-brand-soft text-brand-dark" },
+  { v: "avancou", l: "Compareceu e avançou", c: "bg-brand-soft text-brand-dark" },
   { v: "remarcar", l: "Remarcar", c: "bg-warn/10 text-warn" },
+  { v: "no_show", l: "Faltou", c: "bg-danger/10 text-danger" },
   { v: "sem_interesse", l: "Sem interesse", c: "bg-muted text-subtle" },
 ];
 
