@@ -108,6 +108,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
         {!c.email && (
           <EmailFinder
             contactId={c.id}
+            contactName={c.name}
             companyDomain={(c as any).company_domain || (c as any).accounts?.domain || null}
             discovery={(c as any).email_discovery || null}
           />

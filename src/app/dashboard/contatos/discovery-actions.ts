@@ -2,40 +2,103 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { dominioDe } from "@/lib/emailFinder";
+import { dominioDe, discoverEmail, workerConfigurado } from "@/lib/emailFinder";
 
 // ============================================================
-// Enfileira a descoberta do e-mail de um contato que não tem endereço.
-// Chamado pela extensão (captura do LinkedIn) e pela tela do contato.
-// O processamento acontece no cron (chama o worker no VPS) — assim a captura
-// é instantânea e a conversa SMTP, que é lenta, roda em segundo plano.
+// BUSCA DO E-MAIL DO DECISOR — AGORA NA HORA.
+//
+// ANTES: enfileirava e o cron processava... uma vez por dia, às 11h. A tela
+// dizia "em alguns minutos" e o resultado só vinha no dia seguinte. Péssimo.
+//
+// AGORA: a busca roda na hora e devolve o resultado direto. São poucos segundos
+// (o servidor testa os padrões de e-mail um a um).
 // ============================================================
 
-export async function enqueueEmailDiscovery(contactId: string, domainOrSite?: string) {
+export type ResultadoBusca = {
+  ok: boolean;
+  email?: string | null;
+  status: "valid" | "not_found" | "uncertain" | "blocked" | "invalid" | "error" | "sem_worker";
+  titulo: string;
+  detalhe: string;
+  tentativas?: { email: string; status: string }[];
+};
+
+const EXPLICACAO: Record<string, { titulo: string; detalhe: string }> = {
+  valid: {
+    titulo: "E-mail encontrado e confirmado",
+    detalhe: "O servidor de e-mail da empresa confirmou que esta caixa existe. O contato já pode entrar numa cadência de e-mail.",
+  },
+  not_found: {
+    titulo: "Nenhum e-mail encontrado",
+    detalhe: "Testamos os padrões usuais (joao.silva@, jsilva@, joao@…) e o servidor recusou todos. Este contato não tem e-mail neste domínio — use WhatsApp ou LinkedIn.",
+  },
+  uncertain: {
+    titulo: "Não dá para confiar neste domínio",
+    detalhe: "O servidor desta empresa aceita QUALQUER endereço (é o que se chama catch-all), então ele diria 'sim' para qualquer palpite. Não vamos arriscar um bounce — use WhatsApp ou peça o e-mail.",
+  },
+  blocked: {
+    titulo: "O provedor não permite verificar",
+    detalhe: "Esta empresa usa Google Workspace ou Microsoft 365, que bloqueiam a verificação. O e-mail pode até existir, mas não temos como confirmar — use WhatsApp ou peça o e-mail.",
+  },
+  invalid: {
+    titulo: "Domínio sem servidor de e-mail",
+    detalhe: "Este domínio não tem servidor de e-mail configurado. Confira se o endereço está certo.",
+  },
+  error: {
+    titulo: "Não consegui completar a busca",
+    detalhe: "O serviço de verificação não respondeu. Tente de novo em instantes.",
+  },
+  sem_worker: {
+    titulo: "Serviço de busca não configurado",
+    detalhe: "O servidor de verificação de e-mail ainda não foi ligado. Configure WORKER_URL e WORKER_TOKEN no ambiente.",
+  },
+};
+
+export async function buscarEmailAgora(contactId: string, siteOuDominio: string): Promise<ResultadoBusca> {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const { data: prof } = await supabase.from("profiles").select("tenant_id").eq("id", user?.id ?? "").maybeSingle();
   const tenant_id = (prof as any)?.tenant_id;
-  if (!tenant_id) return { error: "Sem workspace." };
+
+  if (!tenant_id) {
+    return { ok: false, status: "error", ...EXPLICACAO.error, detalhe: "Sem workspace." };
+  }
+
+  if (!workerConfigurado()) {
+    return { ok: false, status: "sem_worker", ...EXPLICACAO.sem_worker };
+  }
+
+  const dominio = dominioDe(siteOuDominio);
+  if (!dominio) {
+    return {
+      ok: false,
+      status: "invalid",
+      titulo: "Domínio inválido",
+      detalhe: "Informe algo como empresa.com.br (pode colar o site completo).",
+    };
+  }
 
   const { data: contact } = await supabase
     .from("contacts")
-    .select("id, name, email, company, company_domain, account_id")
+    .select("id, name, email, account_id")
     .eq("id", contactId)
     .maybeSingle();
 
-  if (!contact) return { error: "Contato não encontrado." };
-  if ((contact as any).email) return { error: "Este contato já tem e-mail." };
-
-  // domínio: o informado agora, o já salvo, ou nada
-  const dominio = dominioDe(domainOrSite) || (contact as any).company_domain;
-  if (!dominio) {
-    return { error: "Informe o site ou o domínio da empresa para procurar o e-mail." };
+  if (!contact) {
+    return { ok: false, status: "error", titulo: "Contato não encontrado", detalhe: "" };
+  }
+  if ((contact as any).email) {
+    return {
+      ok: false,
+      status: "error",
+      titulo: "Este contato já tem e-mail",
+      detalhe: "Apague o e-mail atual se quiser procurar outro.",
+    };
   }
 
+  // guarda o domínio (no contato e na empresa) mesmo que a busca falhe
   await supabase.from("contacts").update({ company_domain: dominio } as any).eq("id", contactId);
 
-  // o domínio é da EMPRESA: propaga para Empresas e para os outros contatos dela
   const accId = (contact as any).account_id;
   if (accId) {
     await supabase
@@ -43,26 +106,52 @@ export async function enqueueEmailDiscovery(contactId: string, domainOrSite?: st
       .update({ domain: dominio, website: `https://${dominio}` } as any)
       .eq("id", accId)
       .eq("tenant_id", tenant_id);
-
-    // os demais contatos da mesma empresa que ainda não têm domínio
-    await supabase
-      .from("contacts")
-      .update({ company_domain: dominio } as any)
-      .eq("account_id", accId)
-      .is("company_domain", null);
   }
 
-  const { error } = await supabase.from("email_discovery_queue").upsert({
+  // ---- A BUSCA, AQUI E AGORA ----
+  const r = await discoverEmail((contact as any).name, dominio);
+
+  const exp = EXPLICACAO[r.status] || EXPLICACAO.error;
+  const tentativas = (r.tentativas || []).map((t) => ({ email: t.email, status: t.status }));
+
+  if (r.status === "valid" && r.email) {
+    await supabase
+      .from("contacts")
+      .update({
+        email: r.email,
+        email_status: "ok",
+        email_discovery: "valid",
+        email_discovered_at: new Date().toISOString(),
+      } as any)
+      .eq("id", contactId);
+
+    await supabase.from("events").insert({
+      tenant_id,
+      contact_id: contactId,
+      type: "note",
+      detail: `E-mail descoberto e confirmado no servidor: ${r.email}`,
+    } as any);
+
+    revalidatePath(`/dashboard/contatos/${contactId}`);
+    return { ok: true, email: r.email, status: "valid", ...exp, tentativas };
+  }
+
+  // não achou: registra o motivo para não tentarmos de novo à toa
+  await supabase
+    .from("contacts")
+    .update({
+      email_discovery: r.status,
+      email_discovered_at: new Date().toISOString(),
+    } as any)
+    .eq("id", contactId);
+
+  await supabase.from("events").insert({
     tenant_id,
     contact_id: contactId,
-    name: (contact as any).name,
-    domain: dominio,
-    status: "pending",
-    attempts: 0,
-  } as any, { onConflict: "contact_id" });
-
-  if (error) return { error: error.message };
+    type: "note",
+    detail: `Busca de e-mail em ${dominio}: ${exp.titulo}.`,
+  } as any);
 
   revalidatePath(`/dashboard/contatos/${contactId}`);
-  return { ok: true, msg: "Procurando o e-mail. O resultado aparece em alguns minutos." };
+  return { ok: false, email: null, status: r.status as any, ...exp, tentativas };
 }

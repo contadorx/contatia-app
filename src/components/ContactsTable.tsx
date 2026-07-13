@@ -231,7 +231,22 @@ export default function ContactsTable({
                     )}
                   </td>
                   <td className="px-4 py-3 text-subtle">{c.company || "—"}</td>
-                  <td className="px-4 py-3 text-subtle">{c.email || c.phone || "—"}</td>
+                  <td className="px-4 py-3 text-subtle">
+                    {c.email ? (
+                      c.email
+                    ) : c.phone ? (
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        {c.phone}
+                        <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] font-semibold text-warn">
+                          sem e-mail
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-warn/10 px-2 py-0.5 text-[11px] font-semibold text-warn">
+                        sem e-mail — abrir para procurar
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     {c.origin ? <span className="rounded-full bg-brand-soft px-2 py-0.5 text-xs text-brand-dark">{c.origin}</span> : "—"}
                   </td>
