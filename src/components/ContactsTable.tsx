@@ -40,6 +40,7 @@ export default function ContactsTable({
   const [assignTo, setAssignTo] = useState("");
   const [tagId, setTagId] = useState("");
   const [newTag, setNewTag] = useState("");
+  const [showNewTag, setShowNewTag] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -76,18 +77,6 @@ export default function ContactsTable({
       }
     });
   }
-  function doAssign() {
-    setMsg(null);
-    start(async () => {
-      const res = (await bulkAssign([...sel], assignTo || null)) as { count?: number; error?: string };
-      if (res?.error) setMsg(res.error);
-      else {
-        setMsg(`✓ ${res.count} contatos atribuídos.`);
-        clear();
-        setAssignTo("");
-      }
-    });
-  }
   function doTag() {
     if (!tagId) return setMsg("Escolha a tag.");
     setMsg(null);
@@ -108,6 +97,7 @@ export default function ContactsTable({
       if (res?.error) setMsg(res.error);
       else {
         setNewTag("");
+        setShowNewTag(false);
         setMsg("✓ Tag criada.");
         router.refresh();
       }
@@ -167,30 +157,45 @@ export default function ContactsTable({
             </button>
           </div>
 
+          {tags.length > 0 && (
+            <div className="flex items-center gap-1">
+              <select className="input py-1.5 text-sm" value={tagId} onChange={(e) => setTagId(e.target.value)}>
+                <option value="">Aplicar tag…</option>
+                {tags.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              <button className="btn-ghost py-1.5 text-sm" onClick={doTag} disabled={pending || !tagId}>Aplicar</button>
+            </div>
+          )}
+
           <button className="ml-auto text-xs text-subtle hover:text-ink" onClick={clear}>
             limpar seleção
           </button>
         </div>
       )}
-
-      {/* aplicar tag em lote */}
-      {sel.size > 0 && tags.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-subtle">Tag:</span>
-          <select className="input py-1.5 text-sm" value={tagId} onChange={(e) => setTagId(e.target.value)}>
-            <option value="">Aplicar tag…</option>
-            {tags.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
-          <button className="btn-ghost py-1.5 text-sm" onClick={doTag} disabled={pending || !tagId}>Aplicar tag</button>
-        </div>
-      )}
       {msg && <p className="mb-3 text-sm text-signal">{msg}</p>}
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <input className="input max-w-[200px] py-1.5 text-sm" value={newTag} onChange={(e) => setNewTag(e.target.value)} placeholder="Nova tag (ex.: Quente, Decisor, Follow-up)" />
-        <button className="btn-ghost py-1.5 text-sm" onClick={doCreateTag} disabled={pending || !newTag.trim()}>Criar tag</button>
+      {/* Criar tag — compacto, fora da faixa fixa */}
+      <div className="mb-3">
+        {!showNewTag ? (
+          <button className="text-xs font-medium text-subtle hover:text-brand" onClick={() => setShowNewTag(true)}>
+            ＋ Nova tag
+          </button>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className="input max-w-[220px] py-1.5 text-sm"
+              value={newTag}
+              onChange={(e) => setNewTag(e.target.value)}
+              placeholder="Nome da tag (ex.: Quente, Decisor, Follow-up)"
+              autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter") doCreateTag(); }}
+            />
+            <button className="btn-brand py-1.5 text-sm" onClick={doCreateTag} disabled={pending || !newTag.trim()}>Criar</button>
+            <button className="text-xs text-subtle hover:text-ink" onClick={() => { setShowNewTag(false); setNewTag(""); }}>cancelar</button>
+          </div>
+        )}
       </div>
 
       <div className="card overflow-visible">
@@ -204,7 +209,7 @@ export default function ContactsTable({
               <th className="px-4 py-3 font-medium">Empresa</th>
               <th className="px-4 py-3 font-medium">Contato</th>
               <th className="px-4 py-3 font-medium">Origem</th>
-              <th className="px-4 py-3 font-medium">Score</th>
+              <th className="px-4 py-3 font-medium" title="Quanto o contato está engajado. Quente a partir de 25.">Score</th>
               <th className="px-4 py-3 font-medium">Responsável</th>
               <th className="px-4 py-3 font-medium text-right">Ação</th>
             </tr>
@@ -245,8 +250,11 @@ export default function ContactsTable({
                         </span>
                       </span>
                     ) : (
-                      <span className="rounded-full bg-warn/10 px-2 py-0.5 text-[11px] font-semibold text-warn">
-                        sem e-mail — abrir para procurar
+                      <span
+                        className="cursor-help rounded-full bg-warn/10 px-2 py-0.5 text-[11px] font-semibold text-warn"
+                        title="Abra o contato para procurar o e-mail."
+                      >
+                        sem e-mail
                       </span>
                     )}
                   </td>
@@ -268,6 +276,9 @@ export default function ContactsTable({
           </tbody>
         </table>
       </div>
+      <p className="mt-2 text-xs text-subtle">
+        <b>Score</b> mede o engajamento do contato (aberturas, cliques, respostas). <span className="font-semibold text-warn">Quente</span> a partir de 25.
+      </p>
     </div>
   );
 }
