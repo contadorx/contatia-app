@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { subscribePlan } from "@/app/dashboard/planos/actions";
+import { subscribePlan, validateCoupon } from "@/app/dashboard/planos/actions";
 
 type Plan = { id: string; name: string; price_monthly: number; max_seats: number | null; sort: number };
 
@@ -18,16 +18,29 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
   const [err, setErr] = useState<string | null>(null);
   const [needDoc, setNeedDoc] = useState<string | null>(null); // planId aguardando CPF/CNPJ
   const [doc, setDoc] = useState("");
+  const [coupon, setCoupon] = useState("");
+  const [couponMsg, setCouponMsg] = useState<{ t: "ok" | "err"; m: string } | null>(null);
 
   const brl = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const popular = plans.find((p) => p.name === "Profissional")?.id;
 
+  function checkCoupon() {
+    setCouponMsg(null);
+    if (!coupon.trim()) return;
+    start(async () => {
+      const r = (await validateCoupon(coupon)) as any;
+      if (r?.error) setCouponMsg({ t: "err", m: r.error });
+      else setCouponMsg({ t: "ok", m: `Cupom válido: -${r.percentOff}%${r.durationMonths ? ` pelos primeiros ${r.durationMonths} meses` : " permanente"}.` });
+    });
+  }
+
   function pick(planId: string, docNumber?: string) {
     setErr(null); setResult(null); setBusyId(planId);
     start(async () => {
-      const r = (await subscribePlan(planId, docNumber)) as any;
+      const r = (await subscribePlan(planId, docNumber, coupon.trim() || undefined)) as any;
       setBusyId(null);
       if (r?.error === "need_doc") { setNeedDoc(planId); return; }
+      if (r?.error === "coupon_invalid") { setCouponMsg({ t: "err", m: "Cupom inválido ou esgotado." }); return; }
       if (r?.error) setErr(r.error);
       else { setNeedDoc(null); setResult({ link: r.link, planName: r.planName, value: r.value }); }
     });
@@ -53,6 +66,23 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
   return (
     <div>
       {err && <p className="mb-4 rounded-lg bg-danger/10 p-3 text-sm text-danger">{err}</p>}
+
+      {/* cupom (opcional) */}
+      <div className="mb-5 flex flex-wrap items-end gap-2">
+        <div>
+          <label className="label">Cupom de desconto (opcional)</label>
+          <input
+            className="input mt-1 uppercase"
+            value={coupon}
+            onChange={(e) => { setCoupon(e.target.value.toUpperCase().replace(/\s/g, "")); setCouponMsg(null); }}
+            placeholder="CÓDIGO"
+            style={{ width: 200 }}
+          />
+        </div>
+        <button className="btn-ghost py-2 text-sm" disabled={pending || !coupon.trim()} onClick={checkCoupon}>Validar</button>
+        {couponMsg && <span className={`text-sm ${couponMsg.t === "ok" ? "text-signal" : "text-danger"}`}>{couponMsg.m}</span>}
+      </div>
+
       <div className="grid gap-4 md:grid-cols-3">
         {plans.map((p) => {
           const isPopular = p.id === popular;
