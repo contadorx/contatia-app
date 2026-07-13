@@ -69,7 +69,15 @@ function AccountRow({ acc }: { acc: Acc }) {
     start(async () => {
       const res = (await whatsappQR(acc.id)) as { base64?: string; error?: string };
       if (res?.error) setErr(res.error);
-      else if (res?.base64) setQr(res.base64.startsWith("data:") ? res.base64 : `data:image/png;base64,${res.base64}`);
+      else if (res?.base64) {
+        // pode vir: imagem base64, "data:image/..." pronto, ou uma URL de imagem
+        const v = res.base64;
+        setQr(
+          v.startsWith("data:") || v.startsWith("http")
+            ? v
+            : `data:image/png;base64,${v}`
+        );
+      }
     });
   }
   function checkStatus() {

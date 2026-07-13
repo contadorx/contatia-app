@@ -35,6 +35,20 @@ export async function saveWhatsApp(input: { evolution_url: string; api_key: stri
 
 export async function deleteWhatsApp(id: string) {
   const { supabase } = await ctx();
+
+  // apaga a instância no servidor Evolution ANTES de sumir com o registro —
+  // senão ela fica órfã lá e trava a próxima conexão com o mesmo nome
+  const { data: acc } = await supabase
+    .from("whatsapp_accounts")
+    .select("evolution_url, api_key, instance")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (acc) {
+    const { deleteInstance } = await import("@/lib/whatsapp");
+    await deleteInstance(acc as any).catch(() => {});
+  }
+
   const { error } = await supabase.from("whatsapp_accounts").delete().eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/dashboard/config");
