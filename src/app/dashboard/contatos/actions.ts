@@ -186,3 +186,127 @@ export async function updateContact(id: string, patch: {
   revalidatePath("/dashboard/contas");
   return { ok: true };
 }
+
+// Salva os dados de RAPPORT e o LinkedIn no jsonb `custom`, SEM apagar o que o
+// Radar já gravou lá (cnae, sócios, etc.) — faz merge, não overwrite.
+export async function saveContactExtra(id: string, input: { linkedin?: string; rapport?: Record<string, string> }) {
+  const { supabase } = await tenantId();
+  const { data: cur } = await supabase.from("contacts").select("custom").eq("id", id).maybeSingle();
+  const custom = { ...(((cur as any)?.custom as Record<string, unknown>) || {}) };
+  if (input.linkedin !== undefined) {
+    const lk = (input.linkedin || "").trim();
+    if (lk) custom.linkedin = lk;
+    else delete custom.linkedin;
+  }
+  if (input.rapport !== undefined) {
+    const clean: Record<string, string> = {};
+    for (const [k, v] of Object.entries(input.rapport)) {
+      const val = (v || "").trim();
+      if (val) clean[k] = val;
+    }
+    if (Object.keys(clean).length) custom.rapport = clean;
+    else delete custom.rapport;
+  }
+  const { error } = await supabase.from("contacts").update({ custom } as any).eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/contatos/${id}`);
+  return { ok: true };
+}
+
+// Enriquece o contato pelo CNPJ (dele ou da empresa) via BrasilAPI — traz CNAE,
+// porte, situação, município e sócios, e completa telefone/e-mail se faltarem.
+export async function enrichContact(id: string) {
+  const { supabase, tenant_id } = await tenantId();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const { data: c } = await supabase
+    .from("contacts")
+    .select("id, cnpj, email, phone, account_id, custom, accounts(cnpj)")
+    .eq("id", id)
+    .maybeSingle();
+  if (!c) return { error: "Contato não encontrado." };
+
+  const cnpj = ((c as any).cnpj || (c as any).accounts?.cnpj || "").toString();
+  if (!cnpj) return { error: "Este contato não tem CNPJ (nem a empresa). Preencha o CNPJ em Editar dados." };
+
+  const { enrichCnpj } = await import("@/lib/cnpj");
+  const r = await enrichCnpj(cnpj);
+  if (r.error || !r.data) return { error: r.error || "Não foi possível enriquecer." };
+  const d = r.data;
+
+  const custom = { ...(((c as any).custom as Record<string, unknown>) || {}) };
+  custom.cnae = d.cnae;
+  custom.cnae_descricao = d.cnae_descricao;
+  custom.situacao = d.situacao;
+  custom.porte = d.porte;
+  custom.uf = d.uf;
+  custom.municipio = d.municipio;
+  if (Array.isArray(d.socios) && d.socios.length) custom.socios = d.socios;
+  custom.enriched_at = new Date().toISOString();
+
+  const patch: Record<string, unknown> = { custom };
+  if (!(c as any).email && d.email) patch.email = d.email;
+  if (!(c as any).phone && d.telefone) patch.phone = d.telefone;
+  if (!(c as any).cnpj) patch.cnpj = cnpj;
+
+  const { error } = await supabase.from("contacts").update(patch as any).eq("id", id);
+  if (error) return { error: error.message };
+
+  // propaga para a empresa também
+  const accId = (c as any).account_id;
+  if (accId) {
+    await supabase
+      .from("accounts")
+      .update({ cnpj, cnae: d.cnae, uf: d.uf, municipio: d.municipio, porte: d.porte } as any)
+      .eq("id", accId)
+      .eq("tenant_id", tenant_id);
+  }
+
+  revalidatePath(`/dashboard/contatos/${id}`);
+  return { ok: true };
+}
+
+// Cria um novo contato a partir do nome de um SÓCIO (da Receita), vinculado à
+// mesma empresa — multiplica os decisores por conta.
+export async function addSocioContact(sourceContactId: string, socioName: string) {
+  const lim = await canCreate("contatos");
+  if (!lim.permitido) return { error: mensagemLimite("contatos", lim.usado, lim.limite, lim.sugerido) };
+
+  const { supabase, tenant_id, user_id } = await tenantId();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const name = (socioName || "").trim();
+  if (!name) return { error: "Nome do sócio vazio." };
+
+  const { data: src } = await supabase
+    .from("contacts")
+    .select("account_id, company, cnpj")
+    .eq("id", sourceContactId)
+    .maybeSingle();
+
+  // evita duplicar: já existe um contato com esse nome na mesma empresa?
+  if ((src as any)?.account_id) {
+    const { data: dup } = await supabase
+      .from("contacts")
+      .select("id")
+      .eq("tenant_id", tenant_id)
+      .eq("account_id", (src as any).account_id)
+      .ilike("name", name)
+      .maybeSingle();
+    if (dup) return { error: "Já existe um contato com esse nome nesta empresa." };
+  }
+
+  const { error } = await supabase.from("contacts").insert({
+    tenant_id,
+    assigned_to: user_id,
+    name,
+    company: (src as any)?.company || null,
+    account_id: (src as any)?.account_id || null,
+    cnpj: (src as any)?.cnpj || null,
+    origin: "Sócio (Receita)",
+    status: "novo",
+  });
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/contatos/${sourceContactId}`);
+  revalidatePath("/dashboard/contatos");
+  return { ok: true };
+}

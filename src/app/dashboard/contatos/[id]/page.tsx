@@ -8,10 +8,20 @@ import ContactReplyButton from "@/components/ContactReplyButton";
 import NoteComposer from "@/components/NoteComposer";
 import ContactCadences from "@/components/ContactCadences";
 import EditContactButton from "@/components/EditContactButton";
+import ContactExtras from "@/components/ContactExtras";
 import { EmailVerifyBadge, DecisorFinder } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
 
 export const dynamic = "force-dynamic";
+
+function Field({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div>
+      <p className="label">{label}</p>
+      <p className={value ? "" : "text-subtle"}>{value || "—"}</p>
+    </div>
+  );
+}
 
 const EVENT_LABEL: Record<string, string> = {
   note: "Nota",
@@ -40,7 +50,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
 
   const { data: contact } = await supabase
     .from("contacts")
-    .select("id, name, email, phone, company, company_domain, email_discovery, role_title, cnpj, origin, status, score, account_id, custom, accounts(name, domain, website)")
+    .select("id, name, email, phone, company, company_domain, email_discovery, role_title, cnpj, origin, status, score, account_id, custom, accounts(name, domain, website, cnpj, cnae, uf, municipio, porte)")
     .eq("id", params.id)
     .maybeSingle();
   if (!contact) notFound();
@@ -57,6 +67,23 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
   const c = contact as any;
   const score = c.score ?? 0;
   const hot = score >= HOT_THRESHOLD;
+  const custom = (c.custom as any) || {};
+  const acc = c.accounts || {};
+  const cnpj = c.cnpj || acc.cnpj || null;
+  // Receita: prefere o que o Radar enriqueceu no contato; cai para os campos da empresa
+  const receita = {
+    cnae: custom.cnae || acc.cnae || null,
+    cnae_descricao: custom.cnae_descricao || null,
+    situacao: custom.situacao || null,
+    porte: custom.porte || acc.porte || null,
+    uf: custom.uf || acc.uf || null,
+    municipio: custom.municipio || acc.municipio || null,
+  };
+  const socios: string[] = Array.isArray(custom.socios) ? custom.socios : [];
+  const enrichedAt = custom.enriched_at || null;
+  const linkedin = custom.linkedin || null;
+  const rapport = custom.rapport || {};
+  const hasReceita = !!(receita.cnae || receita.cnae_descricao || receita.situacao || receita.porte || socios.length);
   const enr = (enrollments as any[]) || [];
   const activeEnr = enr.find((e) => e.status === "active");
   const pendingTasks = (tasks as any[]) || [];
@@ -113,7 +140,36 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
             discovery={(c as any).email_discovery || null}
           />
         )}
+
+        {/* Dados do contato/empresa (o que já está no banco e antes ficava escondido) */}
+        <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 border-t border-line pt-4 text-sm sm:grid-cols-3">
+          <Field label="CNPJ" value={cnpj} />
+          <Field label="Domínio" value={c.company_domain || acc.domain} />
+          <Field label="Origem" value={c.origin} />
+          <Field label="Situação" value={c.status} />
+          <div>
+            <p className="label">LinkedIn</p>
+            {linkedin ? (
+              <a href={linkedin} target="_blank" rel="noreferrer" className="text-brand-dark hover:underline">ver perfil ↗</a>
+            ) : (
+              <p className="text-subtle">—</p>
+            )}
+          </div>
+        </div>
       </div>
+
+      {/* Empresa (Receita Federal) + Rapport */}
+      <ContactExtras
+        contactId={c.id}
+        accountId={c.account_id || null}
+        cnpj={cnpj}
+        hasReceita={hasReceita}
+        receita={receita}
+        socios={socios}
+        enrichedAt={enrichedAt}
+        linkedin={linkedin || ""}
+        rapport={rapport}
+      />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         {/* Próximos toques + reuniões */}

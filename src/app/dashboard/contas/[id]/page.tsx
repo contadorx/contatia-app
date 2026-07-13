@@ -10,16 +10,27 @@ export const dynamic = "force-dynamic";
 const brl = (v: number) =>
   (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
+function AField({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div>
+      <p className="label">{label}</p>
+      <p className={value ? "" : "text-subtle"}>{value || "—"}</p>
+    </div>
+  );
+}
+
 export default async function ContaDetalhe({ params }: { params: { id: string } }) {
   const supabase = createClient();
 
   const { data: account } = await supabase
     .from("accounts")
-    .select("id, name, cnpj, uf, domain, phone, website")
+    .select("id, name, cnpj, uf, domain, phone, website, cnae, municipio, porte")
     .eq("id", params.id)
     .maybeSingle();
 
   if (!account) notFound();
+  const a = account as any;
+  const hasDetails = !!(a.cnae || a.porte || a.municipio || a.phone || a.website);
 
   const [{ data: contacts }, { data: opps }, { data: freeContacts }, { data: accountTags }, { data: allTags }] = await Promise.all([
     supabase.from("contacts").select("id, name, email, phone, role_title").eq("account_id", params.id),
@@ -51,6 +62,23 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
         </div>
         <EditAccountButton account={account as any} />
       </div>
+
+      {hasDetails && (
+        <div className="card mt-4 grid grid-cols-2 gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-3">
+          <AField label="CNAE" value={a.cnae} />
+          <AField label="Porte" value={a.porte} />
+          <AField label="Município/UF" value={[a.municipio, a.uf].filter(Boolean).join(" / ")} />
+          <AField label="Telefone" value={a.phone} />
+          <div>
+            <p className="label">Site</p>
+            {a.website ? (
+              <a href={a.website} target="_blank" rel="noreferrer" className="text-brand-dark hover:underline">abrir ↗</a>
+            ) : (
+              <p className="text-subtle">—</p>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         {/* Contatos */}
