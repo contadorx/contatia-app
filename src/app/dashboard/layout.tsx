@@ -20,6 +20,26 @@ export default async function DashboardLayout({
     data: { user },
   } = await supabase.auth.getUser();
 
+  // SEM SESSÃO: não é problema de workspace — é login não reconhecido pelo servidor
+  // (expirado/limpo). Mostra a mensagem certa em vez do diagnóstico de "perfil/workspace"
+  // (que antes ainda consultava o perfil com id vazio e dava erro de uuid).
+  if (!user) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-ink px-4">
+        <div className="card w-full max-w-sm p-8 text-center">
+          <p className="font-display text-xl font-bold">Sua sessão não está ativa</p>
+          <p className="mt-2 text-sm text-subtle">
+            Seu login expirou ou não foi reconhecido neste dispositivo. Saia e entre novamente para continuar.
+          </p>
+          <div className="mt-5 flex items-center justify-center gap-4">
+            <a href="/login" className="btn-brand inline-block">Ir para o login</a>
+            <SignOut />
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   // Busca o profile. IMPORTANTE: capturamos o erro — se a query falhar (RLS, coluna
   // ausente, etc.), o app antes concluía "sem workspace" silenciosamente.
   let { data: profile, error: profileError } = await supabase
@@ -118,7 +138,7 @@ export default async function DashboardLayout({
           </div>
         </aside>
 
-        <main className="flex-1 p-6 md:p-10">
+        <main className="min-w-0 flex-1 p-6 md:p-10">
           {usos.length > 0 && <UsageLimits usos={usos} compacto />}
           {showSubBanner && !noTenant && (
             <a href="/dashboard/planos" className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand/30 bg-brand-soft px-4 py-3 text-sm hover:border-brand">
