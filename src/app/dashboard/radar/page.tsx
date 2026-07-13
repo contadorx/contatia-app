@@ -41,43 +41,58 @@ export default async function Radar({
   if (searchParams.tier) query = query.eq("tier", searchParams.tier);
   if (searchParams.q) query = query.or(`razao_social.ilike.%${searchParams.q}%,nome_fantasia.ilike.%${searchParams.q}%`);
 
-  const [{ data: leads, count }, { data: sequences }] = await Promise.all([
+  const [{ data: leads, count }, { data: sequences }, { count: totalBase }] = await Promise.all([
     query,
     supabase.from("sequences").select("id, name").eq("is_active", true),
+    supabase.from("radar_leads").select("id", { count: "exact", head: true }),
   ]);
 
   const rows = (leads as any[]) || [];
   const seqs = (sequences as { id: string; name: string }[]) || [];
+  const advActive = !!(searchParams.cnae || searchParams.bairro || searchParams.capital === "1" || searchParams.porte || searchParams.tier);
 
   return (
     <div>
       <h1 className="font-display text-2xl font-bold">Radar</h1>
-      <p className="mt-1 text-sm text-subtle">Garimpe empresas-alvo, enriqueça o CNPJ escolhido e jogue no pipeline.</p>
+      <p className="mt-1 text-sm text-subtle">Garimpe empresas-alvo e adicione as escolhidas aos seus leads.</p>
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <RadarImport />
-        <RadarSeedButton />
+        {(totalBase ?? 0) === 0 && <RadarSeedButton />}
       </div>
 
-      <form className="card mt-6 grid gap-3 p-4 sm:grid-cols-6">
-        <input name="q" defaultValue={searchParams.q} className="input sm:col-span-2" placeholder="Nome / razão social" />
-        <input name="cnae" defaultValue={searchParams.cnae} className="input" placeholder="CNAE" />
-        <input name="uf" defaultValue={searchParams.uf} className="input" placeholder="UF" maxLength={2} />
-        <input name="municipio" defaultValue={searchParams.municipio} className="input" placeholder="Município" />
-        <input name="bairro" defaultValue={searchParams.bairro} className="input" placeholder="Bairro" />
-        <label className="flex items-center gap-2 text-sm text-subtle">
-          <input type="checkbox" name="capital" value="1" defaultChecked={searchParams.capital === "1"} />
-          Só capitais
-        </label>
-        <div className="flex gap-2">
-          <select name="tier" defaultValue={searchParams.tier} className="input">
-            <option value="">Tier</option>
-            <option>T1</option>
-            <option>T2</option>
-            <option>T3</option>
-            <option>T4</option>
-          </select>
-          <button className="btn-brand shrink-0 px-4" type="submit">Filtrar</button>
+      <form className="card mt-6 p-4">
+        <div className="grid gap-3 sm:grid-cols-4">
+          <input name="q" defaultValue={searchParams.q} className="input sm:col-span-2" placeholder="Nome / razão social" />
+          <input name="uf" defaultValue={searchParams.uf} className="input" placeholder="UF" maxLength={2} />
+          <input name="municipio" defaultValue={searchParams.municipio} className="input" placeholder="Município" />
+        </div>
+
+        <details className="mt-3" open={advActive}>
+          <summary className="cursor-pointer select-none text-xs font-medium text-brand hover:underline">Mais filtros</summary>
+          <div className="mt-3 grid gap-3 sm:grid-cols-4">
+            <input name="cnae" defaultValue={searchParams.cnae} className="input" placeholder="Atividade (CNAE)" />
+            <input name="bairro" defaultValue={searchParams.bairro} className="input" placeholder="Bairro" />
+            <input name="porte" defaultValue={searchParams.porte} className="input" placeholder="Porte" />
+            <select name="tier" defaultValue={searchParams.tier} className="input">
+              <option value="">Prioridade (todas)</option>
+              <option value="T1">T1 — alta</option>
+              <option value="T2">T2 — média-alta</option>
+              <option value="T3">T3 — média</option>
+              <option value="T4">T4 — baixa</option>
+            </select>
+            <label className="flex items-center gap-2 text-sm text-subtle">
+              <input type="checkbox" name="capital" value="1" defaultChecked={searchParams.capital === "1"} />
+              Só capitais
+            </label>
+          </div>
+        </details>
+
+        <div className="mt-3 flex items-center gap-2">
+          <button className="btn-brand px-4" type="submit">Filtrar</button>
+          {(searchParams.q || advActive) && (
+            <a href="/dashboard/radar" className="text-xs text-subtle hover:text-ink">limpar</a>
+          )}
         </div>
       </form>
 
@@ -91,7 +106,7 @@ export default async function Radar({
               <th className="px-4 py-3 font-medium">CNAE</th>
               <th className="px-4 py-3 font-medium">UF</th>
               <th className="px-4 py-3 font-medium">Porte</th>
-              <th className="px-4 py-3 font-medium">Tier</th>
+              <th className="px-4 py-3 font-medium" title="Prioridade do lead: T1 (melhor encaixe) a T4 (menor).">Prioridade</th>
               <th className="px-4 py-3 font-medium text-right">Ação</th>
             </tr>
           </thead>
@@ -106,7 +121,7 @@ export default async function Radar({
                   <td className="px-4 py-3 text-subtle">{r.cnae || "—"}</td>
                   <td className="px-4 py-3 text-subtle">{r.uf || "—"}</td>
                   <td className="px-4 py-3 text-subtle">{r.porte || "—"}</td>
-                  <td className="px-4 py-3">{r.tier ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{r.tier}</span> : "—"}</td>
+                  <td className="px-4 py-3">{r.tier ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs" title="Prioridade do lead (T1 alta … T4 baixa)">{r.tier}</span> : "—"}</td>
                   <td className="px-4 py-3">
                     <RadarPushButton radarId={r.id} sequences={seqs} converted={!!r.converted_contact_id} />
                   </td>
@@ -115,7 +130,7 @@ export default async function Radar({
             ) : (
               <tr>
                 <td colSpan={6} className="px-4 py-10 text-center text-sm text-subtle">
-                  Nenhuma empresa. Importe sua base acima ou ajuste os filtros.
+                  Nenhuma empresa encontrada. Importe sua base acima ou ajuste os filtros.
                 </td>
               </tr>
             )}
@@ -124,7 +139,8 @@ export default async function Radar({
       </div>
 
       <p className="mt-4 text-xs text-subtle">
-        Os dados de contato (telefone, e-mail, sócios) são buscados só quando você escolhe a empresa — não antes.
+        <b>Prioridade</b> vai de T1 (melhor encaixe com o seu perfil de cliente) a T4 (menor). Os dados de contato
+        (telefone, e-mail, sócios) são buscados só quando você adiciona a empresa aos leads — não antes.
       </p>
     </div>
   );

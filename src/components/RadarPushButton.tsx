@@ -15,9 +15,10 @@ export default function RadarPushButton({
   const [seq, setSeq] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [done, setDone] = useState(converted);
+  const [picking, setPicking] = useState(false);
   const [pending, start] = useTransition();
 
-  if (done) return <span className="text-xs font-semibold text-signal">✓ no pipeline</span>;
+  if (done) return <span className="text-xs font-semibold text-signal">✓ nos leads</span>;
 
   function push() {
     setMsg(null);
@@ -26,6 +27,16 @@ export default function RadarPushButton({
       if (res?.error) setMsg(res.error);
       else setDone(true);
     });
+  }
+
+  if (!picking) {
+    return (
+      <div className="flex justify-end">
+        <button className="btn-brand py-1 text-xs" onClick={() => setPicking(true)}>
+          + Adicionar aos leads
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -39,8 +50,9 @@ export default function RadarPushButton({
         ))}
       </select>
       <button className="btn-brand py-1 text-xs" onClick={push} disabled={pending}>
-        {pending ? "..." : "Enriquecer + pipeline"}
+        {pending ? "..." : "Adicionar"}
       </button>
+      <button className="text-xs text-subtle hover:text-ink" onClick={() => setPicking(false)}>cancelar</button>
       {msg && <span className="text-xs text-danger">{msg}</span>}
     </div>
   );
