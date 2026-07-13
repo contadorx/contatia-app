@@ -190,7 +190,7 @@ export default async function Config() {
                 <WhatsAppConnect accounts={(waAccounts as any[]) || []} mode={waMode as any} acked={waAcked} platformReady={waPlatformReady} />
               </div>
             ) : (
-              <FeatureLock feature="whatsapp" planoSugerido="Profissional" titulo="WhatsApp na cadência" descricao="O canal que o brasileiro responde, dentro do fluxo: dispare o toque da fila, receba a resposta e deixe a cadência pausar sozinha." />
+              <FeatureLock feature="whatsapp" planoSugerido="Individual" titulo="WhatsApp na cadência" descricao="O canal que o brasileiro responde, dentro do fluxo: dispare o toque da fila, receba a resposta e deixe a cadência pausar sozinha." />
             )}
           </Section>
         </div>
@@ -207,7 +207,7 @@ export default async function Config() {
                 <AiSettingsForm currentModel={aiModel} hasKey={aiHasKey} />
               </div>
             ) : (
-              <FeatureLock feature="ia" planoSugerido="Performance" titulo="IA que monta a cadência" descricao="Descreva o que você vende e para quem — a IA escreve a sequência completa: assuntos, corpos e intervalos." />
+              <FeatureLock feature="ia" planoSugerido="Individual" titulo="IA que monta a cadência" descricao="Descreva o que você vende e para quem — a IA escreve a sequência completa: assuntos, corpos e intervalos." />
             )}
           </Section>
         </div>

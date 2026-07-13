@@ -138,9 +138,9 @@ export async function generateSequenceAI(brief: {
   steps?: number;
   channels?: string[];
 }) {
-  // a IA é exclusiva do plano de topo (Performance)
+  // a IA está inclusa nos planos pagos (Individual e Equipes)
   if (!(await hasAi())) {
-    return { error: "A geração de cadência com IA está disponível no plano Performance. Veja em Planos." };
+    return { error: "A geração de cadência com IA está inclusa nos planos pagos. Veja em Planos." };
   }
 
   if (!brief.market?.trim() || !brief.product?.trim()) {

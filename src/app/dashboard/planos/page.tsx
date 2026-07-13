@@ -7,34 +7,24 @@ import CancelSubscription from "@/components/CancelSubscription";
 export const dynamic = "force-dynamic";
 
 const FEATURES: Record<string, string[]> = {
-  Essencial: [
-    "Cadência de e-mail e WhatsApp (assistido)",
+  Individual: [
+    "Cadência multicanal (e-mail + WhatsApp)",
     "Pipeline de vendas completo",
-    "1 caixa de e-mail",
-    "Agendamento e lembretes de reunião",
-    "Propostas com link rastreado",
-  ],
-  "Individual Pro": [
-    "Tudo do Essencial",
     "Radar de CNPJs da Receita",
     "WhatsApp com captura de resposta",
-    "Alerta de lead quente + lead scoring",
-    "Relatório por passo + teste A/B",
+    "IA que monta a cadência (contexto + rapport)",
+    "Propostas com link rastreado",
+    "Agendamento e lembretes de reunião",
+    "Lead scoring + alerta de lead quente",
   ],
-  Profissional: [
-    "Tudo do Individual Pro",
-    "Vários usuários (cobrança por assento)",
+  Equipes: [
+    "Tudo do Individual, para cada vendedor",
     "Papéis e níveis de equipe",
     "Dashboard e metas por vendedor",
     "Roteamento round-robin de leads",
     "Múltiplas caixas + rotação de envio",
     "Integrações e webhooks",
-  ],
-  Performance: [
-    "Tudo do Profissional",
-    "IA que monta a cadência (contexto + rapport)",
-    "Prioridade nos novos recursos de IA",
-    "Suporte prioritário",
+    "IA incluída para todo o time",
   ],
 };
 
@@ -47,7 +37,7 @@ export default async function Planos() {
 
   const { data: plans } = await supabase
     .from("platform_plans")
-    .select("id, name, price_monthly, max_seats, sort, segment")
+    .select("id, name, price_monthly, max_seats, min_seats, sort, segment")
     .eq("is_active", true)
     .order("sort", { ascending: true });
 

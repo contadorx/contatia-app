@@ -26,7 +26,7 @@ export async function syncTenantSeats(tenantId: string): Promise<{ changed?: boo
 
   const { data: t } = await admin
     .from("tenants")
-    .select("id, asaas_subscription_id, subscription_status, mrr, platform_plans(price_monthly)")
+    .select("id, asaas_subscription_id, subscription_status, mrr, platform_plans(price_monthly, min_seats)")
     .eq("id", tenantId)
     .maybeSingle();
   if (!t) return {};
@@ -37,9 +37,10 @@ export async function syncTenantSeats(tenantId: string): Promise<{ changed?: boo
 
   const price = Number((t as any).platform_plans?.price_monthly || 0);
   if (!price) return {};
+  const minSeats = Math.max(1, Number((t as any).platform_plans?.min_seats) || 1);
 
   const { count } = await admin.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId);
-  const seats = Math.max(1, count ?? 1);
+  const seats = Math.max(minSeats, count ?? 1);
 
   // cupom (se as colunas existirem)
   let factor = 1;

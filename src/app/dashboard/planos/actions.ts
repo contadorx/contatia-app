@@ -29,7 +29,7 @@ export async function subscribePlan(planId: string, docNumber?: string, couponCo
 
   const { data: plan } = await supabase
     .from("platform_plans")
-    .select("id, name, price_monthly, max_seats")
+    .select("id, name, price_monthly, max_seats, min_seats, segment")
     .eq("id", planId)
     .maybeSingle();
   if (!plan) return { error: "Plano não encontrado." };
@@ -52,7 +52,17 @@ export async function subscribePlan(planId: string, docNumber?: string, couponCo
   }
 
   const seats = await seatCount(supabase, tenant_id);
-  const full = Number((plan as any).price_monthly) * seats;
+  const minSeats = Math.max(1, Number((plan as any).min_seats) || 1);
+  const maxSeats = (plan as any).max_seats as number | null;
+
+  // plano Individual não comporta time
+  if (maxSeats && seats > maxSeats) {
+    return { error: `Este plano é para até ${maxSeats} usuário(s), mas seu workspace tem ${seats}. Escolha um plano de Equipes.` };
+  }
+
+  // Equipes cobra por um mínimo de assentos (mesmo com menos gente hoje)
+  const billedSeats = Math.max(seats, minSeats);
+  const full = Number((plan as any).price_monthly) * billedSeats;
 
   // cupom (opcional): validado com o admin client, pois platform_coupons é superadmin-only
   let coupon: any = null;
@@ -94,7 +104,7 @@ export async function subscribePlan(planId: string, docNumber?: string, couponCo
   const sub = await createAsaasSubscription({
     customerId: cust.id,
     value,
-    description: `Contatia ${(plan as any).name} — ${seats} usuário(s)`,
+    description: `Contatia ${(plan as any).name} — ${billedSeats} usuário(s)`,
   });
   if (sub.error) return { error: sub.error };
 

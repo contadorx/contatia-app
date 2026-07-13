@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { subscribePlan, validateCoupon } from "@/app/dashboard/planos/actions";
 
-type Plan = { id: string; name: string; price_monthly: number; max_seats: number | null; sort: number; segment?: string };
+type Plan = { id: string; name: string; price_monthly: number; max_seats: number | null; min_seats?: number; sort: number; segment?: string };
 
 export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe }: {
   plans: Plan[];
@@ -29,6 +29,7 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
   const [seg, setSeg] = useState<string>(currentSeg || "individual");
   const visiblePlans = plans.filter((p) => (p.segment || "equipe") === seg);
   const isTeam = seg === "equipe";
+  const gridCols = visiblePlans.length >= 3 ? "md:grid-cols-3" : visiblePlans.length === 2 ? "md:grid-cols-2" : "max-w-md";
 
   function checkCoupon() {
     setCouponMsg(null);
@@ -110,11 +111,13 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
         {couponMsg && <span className={`text-sm ${couponMsg.t === "ok" ? "text-signal" : "text-danger"}`}>{couponMsg.m}</span>}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className={`grid gap-4 ${gridCols}`}>
         {visiblePlans.map((p) => {
           const isPopular = p.id === popular;
           const isCurrent = p.id === currentPlanId;
-          const total = Number(p.price_monthly) * (isTeam ? seats : 1);
+          const min = Math.max(1, Number(p.min_seats) || 1);
+          const billed = isTeam ? Math.max(seats, min) : 1;
+          const total = Number(p.price_monthly) * billed;
           return (
             <div key={p.id} className={`card flex flex-col p-6 ${isPopular ? "ring-2 ring-brand" : ""}`}>
               {isPopular && <span className="mb-3 self-start rounded-full bg-brand px-3 py-0.5 text-xs font-bold uppercase tracking-wide text-white">Mais popular</span>}
@@ -123,8 +126,8 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
                 <span className="font-display text-3xl font-bold">{brl(Number(p.price_monthly))}</span>
                 <span className="text-sm text-subtle">{isTeam ? "/usuário/mês" : "/mês"}</span>
               </div>
-              <p className="mt-1 text-xs text-subtle">{isTeam ? "cobrança por assento" : "1 usuário"}</p>
-              {isTeam && <p className="mt-2 text-sm font-medium text-brand-dark">≈ {brl(total)}/mês para {seats} usuário(s)</p>}
+              <p className="mt-1 text-xs text-subtle">{isTeam ? `cobrança por assento · mínimo ${min} usuários` : "1 usuário"}</p>
+              {isTeam && <p className="mt-2 text-sm font-medium text-brand-dark">≈ {brl(total)}/mês para {Math.max(seats, min)} usuário(s){seats < min ? " (mínimo)" : ""}</p>}
 
               <ul className="mt-4 flex-1 space-y-2">
                 {(features[p.name] || []).map((f, i) => (
