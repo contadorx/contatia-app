@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
-import { saveWhatsApp, deleteWhatsApp, whatsappQR, whatsappStatus } from "@/app/dashboard/config/whatsapp-actions";
+import { saveWhatsApp, deleteWhatsApp, whatsappQR, whatsappStatus, whatsappSetWebhook } from "@/app/dashboard/config/whatsapp-actions";
 
 type Acc = { id: string; evolution_url: string; instance: string; is_active: boolean; inbound_token: string };
 
@@ -93,6 +93,8 @@ function AccountRow({ acc }: { acc: Acc }) {
   }
 
   const webhook = `${origin}/api/whatsapp/webhook/${acc.inbound_token}`;
+  const [busyWh, setBusyWh] = useState(false);
+  const [msgWh, setMsgWh] = useState<string | null>(null);
 
   return (
     <div className="mb-3 rounded-xl border border-line p-4">
@@ -116,9 +118,33 @@ function AccountRow({ acc }: { acc: Acc }) {
           <img src={qr} alt="QR WhatsApp" className="h-48 w-48 rounded-lg border border-line" />
         </div>
       )}
-      <div className="mt-3">
-        <p className="label">Webhook de entrada (cole no Evolution → eventos MESSAGES_UPSERT)</p>
-        <input className="input mt-1 text-xs" value={webhook} readOnly onFocus={(e) => e.target.select()} />
+      <div className="mt-4 rounded-xl border border-line bg-muted p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">Respostas dos leads</p>
+            <p className="mt-0.5 text-xs text-subtle">
+              Quando o lead responde no WhatsApp, a cadência dele <b>pausa sozinha</b> — desde
+              que o webhook esteja configurado. Ele é ligado automaticamente ao conectar.
+            </p>
+          </div>
+          <button
+            className="btn-ghost shrink-0 text-xs"
+            disabled={busyWh}
+            onClick={async () => {
+              setBusyWh(true);
+              const r = (await whatsappSetWebhook(acc.id)) as any;
+              setBusyWh(false);
+              setMsgWh(r?.error || r?.msg || "Webhook configurado.");
+            }}
+          >
+            {busyWh ? "Configurando…" : "Reconfigurar webhook"}
+          </button>
+        </div>
+        {msgWh && <p className="mt-2 text-xs font-medium text-brand-dark">{msgWh}</p>}
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs text-subtle">ver a URL do webhook</summary>
+          <input className="input mt-1 text-xs" value={webhook} readOnly onFocus={(e) => e.target.select()} />
+        </details>
       </div>
     </div>
   );

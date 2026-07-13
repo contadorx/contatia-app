@@ -160,3 +160,54 @@ export async function deleteInstance(acc: WaAccount): Promise<{ ok?: boolean; er
     return { error: e?.message || "Falha ao remover a instância." };
   }
 }
+
+// ============================================================
+// Configura o webhook na Evolution AUTOMATICAMENTE.
+//
+// Sem isto, o usuário teria que copiar a URL e colar na Evolution na mão —
+// e se esquecer, a cadência NUNCA pausa quando o lead responde (você seguiria
+// mandando follow-up para quem já respondeu).
+//
+// Escutamos MESSAGES_UPSERT (mensagem recebida) e CONNECTION_UPDATE (status).
+// ============================================================
+export async function setWebhook(acc: WaAccount, webhookUrl: string): Promise<{ ok?: boolean; error?: string }> {
+  const url = base(acc.evolution_url);
+  const headers = { apikey: acc.api_key, "Content-Type": "application/json" };
+
+  // a Evolution mudou o formato do corpo entre versões — tentamos os dois
+  const formatos = [
+    {
+      webhook: {
+        enabled: true,
+        url: webhookUrl,
+        webhookByEvents: false,
+        webhookBase64: false,
+        events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE"],
+      },
+    },
+    {
+      enabled: true,
+      url: webhookUrl,
+      webhook_by_events: false,
+      events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE"],
+    },
+  ];
+
+  let ultimoErro = "";
+  for (const body of formatos) {
+    try {
+      const res = await fetch(`${url}/webhook/set/${acc.instance}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      if (res.ok) return { ok: true };
+      const d = await res.json().catch(() => ({}));
+      ultimoErro = String((d as any)?.message || (d as any)?.response?.message || res.status);
+    } catch (e: any) {
+      ultimoErro = e?.message || "falha de rede";
+    }
+  }
+
+  return { error: `Não consegui configurar o webhook: ${ultimoErro}` };
+}

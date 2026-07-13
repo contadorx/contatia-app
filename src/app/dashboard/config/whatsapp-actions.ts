@@ -59,12 +59,51 @@ export async function whatsappQR(id: string) {
   const { supabase } = await ctx();
   const { data: acc } = await supabase
     .from("whatsapp_accounts")
-    .select("evolution_url, api_key, instance")
+    .select("evolution_url, api_key, instance, inbound_token")
     .eq("id", id)
     .maybeSingle();
   if (!acc) return { error: "Conta não encontrada." };
-  const { getQR } = await import("@/lib/whatsapp");
-  return await getQR(acc as any);
+
+  const { getQR, setWebhook } = await import("@/lib/whatsapp");
+  const qr = await getQR(acc as any);
+
+  // Configura o webhook AUTOMATICAMENTE: é o que faz a cadência pausar quando
+  // o lead responde. Antes o usuário tinha que copiar a URL e colar na Evolution
+  // na mão — e se esquecesse, seguiria mandando follow-up para quem já respondeu.
+  try {
+    const origem =
+      process.env.NEXT_PUBLIC_APP_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+    if (origem && (acc as any).inbound_token) {
+      const url = `${origem}/api/whatsapp/webhook/${(acc as any).inbound_token}`;
+      await setWebhook(acc as any, url);
+    }
+  } catch { /* o QR é o principal; o webhook a gente confere depois */ }
+
+  return qr;
+}
+
+/** Reconfigura o webhook (botão manual, caso algo tenha saído do lugar). */
+export async function whatsappSetWebhook(id: string) {
+  const { supabase } = await ctx();
+  const { data: acc } = await supabase
+    .from("whatsapp_accounts")
+    .select("evolution_url, api_key, instance, inbound_token")
+    .eq("id", id)
+    .maybeSingle();
+  if (!acc) return { error: "Conta não encontrada." };
+
+  const origem =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+  if (!origem) return { error: "Configure NEXT_PUBLIC_APP_URL no ambiente." };
+
+  const { setWebhook } = await import("@/lib/whatsapp");
+  const url = `${origem}/api/whatsapp/webhook/${(acc as any).inbound_token}`;
+  const r = await setWebhook(acc as any, url);
+
+  if (r.error) return { error: r.error };
+  return { ok: true, msg: "Webhook configurado. As respostas dos leads vão chegar aqui." };
 }
 
 export async function whatsappStatus(id: string) {
