@@ -63,7 +63,7 @@ export default async function Propostas() {
                   </p>
                   {d.url && (
                     <a href={d.url} target="_blank" rel="noreferrer" className="text-xs text-brand-dark hover:underline">
-                      {d.url}
+                      Abrir link ↗
                     </a>
                   )}
                   {d.storage_path && !d.url && (
@@ -76,9 +76,8 @@ export default async function Propostas() {
                   </div>
                   {d.storage_path && (() => {
                     const { days, date } = expiryInfo(d.created_at);
-                    if (days <= 0) return <p className="mt-1 text-xs font-semibold text-danger">⚠ Arquivo expirado — pode ter sido excluído</p>;
-                    if (days <= 30) return <p className="mt-1 text-xs font-semibold text-warn">⚠ Expira em {days} dia{days > 1 ? "s" : ""} ({date}) — baixe se precisar guardar</p>;
-                    return <p className="mt-1 text-[11px] text-subtle">Guardado até {date}</p>;
+                    if (days <= 0) return <p className="mt-1 text-xs font-semibold text-danger">Arquivo expirado — não fica mais disponível para download</p>;
+                    return <p className="mt-1 text-[11px] text-subtle">Disponível até {date}{days <= 30 ? " — baixe se precisar guardar" : ""}</p>;
                   })()}
                 </div>
               </div>

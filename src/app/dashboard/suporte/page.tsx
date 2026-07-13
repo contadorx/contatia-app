@@ -55,7 +55,11 @@ export default async function Suporte() {
             {t.status !== "closed" && <ReplyBox ticketId={t.id} />}
           </div>
         ))}
-        {!list.length && <div className="card p-8 text-center text-sm text-subtle">Nenhum chamado ainda. Use &ldquo;Abrir chamado&rdquo; acima.</div>}
+        {!list.length && (
+          <div className="card p-8 text-center text-sm text-subtle">
+            Nenhum chamado ainda. Muitas dúvidas têm resposta rápida na Ajuda (botão no canto inferior direito) — se precisar de gente, abra um chamado acima.
+          </div>
+        )}
       </div>
     </div>
   );
