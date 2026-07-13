@@ -16,6 +16,7 @@ import { buscarEmailAgora, type ResultadoBusca } from "@/app/dashboard/contatos/
 
 const ICONE: Record<string, string> = {
   valid: "✓",
+  published: "✉",
   not_found: "✕",
   uncertain: "?",
   blocked: "🔒",
@@ -26,6 +27,7 @@ const ICONE: Record<string, string> = {
 
 const COR: Record<string, string> = {
   valid: "border-signal/30 bg-signal/10 text-signal",
+  published: "border-brand/30 bg-brand-soft text-brand-dark",
   not_found: "border-warn/30 bg-warn/10 text-warn",
   uncertain: "border-warn/30 bg-warn/10 text-warn",
   blocked: "border-warn/30 bg-warn/10 text-warn",
@@ -80,6 +82,9 @@ export function EmailFinder({
   // já buscamos antes e não achamos? mostra o histórico
   const jaTentou = discovery && discovery !== "pending" && !res;
 
+  // nome de um termo só = padrões de decisor ficam fracos (colapsam num único palpite)
+  const semSobrenome = (contactName || "").trim().split(/\s+/).filter(Boolean).length < 2;
+
   return (
     <div className="card mt-4 p-5">
       <div className="flex items-start gap-3">
@@ -89,8 +94,13 @@ export function EmailFinder({
           <p className="mt-1 text-sm text-subtle">
             O LinkedIn não mostra e-mail. Diga o <b>site da empresa</b> e eu testo os padrões
             (joao.silva@, jsilva@, joao@…), <b>confirmando com o servidor dela</b> se a caixa
-            existe de verdade. Só gravo se ele confirmar — nunca chuto.
+            existe. Se não confirmar, procuro o e-mail que a empresa <b>publicou no site</b>.
           </p>
+          {semSobrenome && (
+            <p className="mt-2 rounded-lg bg-warn/10 p-2 text-xs text-warn">
+              Este contato tem só um nome. Adicione o <b>sobrenome</b> em “Editar dados” para testar todos os padrões (nome.sobrenome@, nsobrenome@…). Só com o primeiro nome, testamos um único palpite.
+            </p>
+          )}
         </div>
       </div>
 
@@ -150,7 +160,7 @@ export function EmailFinder({
                     onClick={() => setVerDetalhes(!verDetalhes)}
                     className="text-xs font-semibold underline opacity-75 hover:opacity-100"
                   >
-                    {verDetalhes ? "ocultar" : `ver os ${res.tentativas.length} endereços testados`}
+                    {verDetalhes ? "ocultar" : `ver ${res.tentativas.length} endereço${res.tentativas.length === 1 ? "" : "s"} testado${res.tentativas.length === 1 ? "" : "s"}`}
                   </button>
                   {verDetalhes && (
                     <ul className="mt-2 space-y-0.5 font-mono text-xs opacity-75">

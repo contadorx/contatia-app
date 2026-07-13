@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { dominioDe, discoverEmail, workerConfigurado } from "@/lib/emailFinder";
+import { findPublishedEmail } from "@/lib/webEmail";
 
 // ============================================================
 // BUSCA DO E-MAIL DO DECISOR — AGORA NA HORA.
@@ -17,7 +18,7 @@ import { dominioDe, discoverEmail, workerConfigurado } from "@/lib/emailFinder";
 export type ResultadoBusca = {
   ok: boolean;
   email?: string | null;
-  status: "valid" | "not_found" | "uncertain" | "blocked" | "invalid" | "error" | "sem_worker";
+  status: "valid" | "published" | "not_found" | "uncertain" | "blocked" | "invalid" | "error" | "sem_worker";
   titulo: string;
   detalhe: string;
   tentativas?: { email: string; status: string }[];
@@ -27,6 +28,10 @@ const EXPLICACAO: Record<string, { titulo: string; detalhe: string }> = {
   valid: {
     titulo: "E-mail encontrado e confirmado",
     detalhe: "O servidor de e-mail da empresa confirmou que esta caixa existe. O contato já pode entrar numa cadência de e-mail.",
+  },
+  published: {
+    titulo: "E-mail da empresa (publicado no site)",
+    detalhe: "Não confirmamos o e-mail pessoal do decisor, mas a empresa publicou este endereço no próprio site — é um canal válido e seguro (ela o divulgou para ser contatada).",
   },
   not_found: {
     titulo: "Nenhum e-mail encontrado",
@@ -62,10 +67,6 @@ export async function buscarEmailAgora(contactId: string, siteOuDominio: string)
 
   if (!tenant_id) {
     return { ok: false, status: "error", ...EXPLICACAO.error, detalhe: "Sem workspace." };
-  }
-
-  if (!workerConfigurado()) {
-    return { ok: false, status: "sem_worker", ...EXPLICACAO.sem_worker };
   }
 
   const dominio = dominioDe(siteOuDominio);
@@ -108,50 +109,62 @@ export async function buscarEmailAgora(contactId: string, siteOuDominio: string)
       .eq("tenant_id", tenant_id);
   }
 
-  // ---- A BUSCA, AQUI E AGORA ----
-  const r = await discoverEmail((contact as any).name, dominio);
+  // ---- 1) DECISOR: padrões nome@domínio confirmados no servidor (worker SMTP) ----
+  let tentativas: { email: string; status: string }[] = [];
+  let workerStatus: string | null = null;
+  if (workerConfigurado()) {
+    const r = await discoverEmail((contact as any).name, dominio);
+    tentativas = (r.tentativas || []).map((t) => ({ email: t.email, status: t.status }));
+    workerStatus = r.status;
 
-  const exp = EXPLICACAO[r.status] || EXPLICACAO.error;
-  const tentativas = (r.tentativas || []).map((t) => ({ email: t.email, status: t.status }));
-
-  if (r.status === "valid" && r.email) {
-    await supabase
-      .from("contacts")
-      .update({
-        email: r.email,
-        email_status: "ok",
-        email_discovery: "valid",
-        email_discovered_at: new Date().toISOString(),
-      } as any)
-      .eq("id", contactId);
-
-    await supabase.from("events").insert({
-      tenant_id,
-      contact_id: contactId,
-      type: "note",
-      detail: `E-mail descoberto e confirmado no servidor: ${r.email}`,
-    } as any);
-
-    revalidatePath(`/dashboard/contatos/${contactId}`);
-    return { ok: true, email: r.email, status: "valid", ...exp, tentativas };
+    if (r.status === "valid" && r.email) {
+      await supabase
+        .from("contacts")
+        .update({ email: r.email, email_status: "ok", email_discovery: "valid", email_discovered_at: new Date().toISOString() } as any)
+        .eq("id", contactId);
+      await supabase.from("events").insert({
+        tenant_id, contact_id: contactId, type: "note",
+        meta: { text: `E-mail do decisor confirmado no servidor: ${r.email}` },
+      } as any);
+      revalidatePath(`/dashboard/contatos/${contactId}`);
+      return { ok: true, email: r.email, status: "valid", ...EXPLICACAO.valid, tentativas };
+    }
   }
 
-  // não achou: registra o motivo para não tentarmos de novo à toa
+  // ---- 2) CAMADA 0: e-mail publicado no site (funciona SEM worker, sem porta 25) ----
+  const pub = await findPublishedEmail(dominio);
+  if (pub) {
+    await supabase
+      .from("contacts")
+      .update({ email: pub.email, email_status: "ok", email_discovery: "published", email_discovered_at: new Date().toISOString() } as any)
+      .eq("id", contactId);
+    await supabase.from("events").insert({
+      tenant_id, contact_id: contactId, type: "note",
+      meta: { text: `E-mail publicado no site da empresa: ${pub.email} (${pub.source})` },
+    } as any);
+    revalidatePath(`/dashboard/contatos/${contactId}`);
+    return { ok: true, email: pub.email, status: "published", ...EXPLICACAO.published, tentativas };
+  }
+
+  // ---- 3) Nada confirmado ----
+  if (!workerConfigurado()) {
+    return {
+      ok: false, email: null, status: "not_found", tentativas: [],
+      titulo: "Nenhum e-mail encontrado no site",
+      detalhe: "Não há e-mail publicado no site desta empresa. Para testar os padrões do decisor (nome@empresa) com confirmação no servidor, ligue o worker de verificação (WORKER_URL / WORKER_TOKEN).",
+    };
+  }
+
+  const status = (workerStatus as any) || "not_found";
+  const exp = EXPLICACAO[status] || EXPLICACAO.not_found;
   await supabase
     .from("contacts")
-    .update({
-      email_discovery: r.status,
-      email_discovered_at: new Date().toISOString(),
-    } as any)
+    .update({ email_discovery: status, email_discovered_at: new Date().toISOString() } as any)
     .eq("id", contactId);
-
   await supabase.from("events").insert({
-    tenant_id,
-    contact_id: contactId,
-    type: "note",
-    detail: `Busca de e-mail em ${dominio}: ${exp.titulo}.`,
+    tenant_id, contact_id: contactId, type: "note",
+    meta: { text: `Busca de e-mail em ${dominio}: ${exp.titulo}.` },
   } as any);
-
   revalidatePath(`/dashboard/contatos/${contactId}`);
-  return { ok: false, email: null, status: r.status as any, ...exp, tentativas };
+  return { ok: false, email: null, status, ...exp, tentativas };
 }
