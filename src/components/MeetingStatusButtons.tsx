@@ -16,7 +16,7 @@ export default function MeetingStatusButtons({
   const set = (s: string) => start(async () => void (await setMeetingStatus(id, s, contactId ?? undefined)));
 
   if (status === "realizada") return <span className="text-xs font-semibold text-signal">✓ realizada</span>;
-  if (status === "no_show") return <span className="text-xs font-semibold text-danger">no-show</span>;
+  if (status === "no_show") return <span className="text-xs font-semibold text-danger">faltou</span>;
 
   return (
     <div className="flex items-center gap-2">
@@ -27,10 +27,10 @@ export default function MeetingStatusButtons({
       )}
       {status === "confirmada" && <span className="text-xs font-semibold text-brand-dark">confirmada</span>}
       <button className="rounded-lg border border-signal/40 px-2 py-1 text-xs text-signal hover:bg-signal/10" disabled={pending} onClick={() => set("realizada")}>
-        Realizada
+        Aconteceu
       </button>
       <button className="rounded-lg border border-danger/40 px-2 py-1 text-xs text-danger hover:bg-danger/10" disabled={pending} onClick={() => set("no_show")}>
-        No-show
+        Faltou
       </button>
     </div>
   );

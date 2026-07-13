@@ -116,7 +116,7 @@ export default function MeetingForm({ contacts }: { contacts: Contact[] }) {
           Cancelar
         </button>
       </div>
-      <p className="mt-3 text-xs text-subtle">Os lembretes viram toques na sua fila do &ldquo;Hoje&rdquo; nas datas certas, pedindo confirmação (reduz no-show).</p>
+      <p className="mt-3 text-xs text-subtle">Os lembretes viram tarefas na sua fila do &ldquo;Hoje&rdquo; nas datas certas, pedindo confirmação (reduz faltas).</p>
     </div>
   );
 }

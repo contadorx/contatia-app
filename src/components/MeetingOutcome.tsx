@@ -19,7 +19,7 @@ export default function MeetingOutcome({ id, contactId }: { id: string; contactI
   if (!open)
     return (
       <button className="btn-ghost py-1.5 text-xs" onClick={() => setOpen(true)}>
-        Registrar resultado
+        Como foi?
       </button>
     );
 
