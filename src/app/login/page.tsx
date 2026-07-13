@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { setupWorkspace } from "@/app/dashboard/setup-actions";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -31,13 +32,23 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: { data: { full_name: fullName.trim(), company: company.trim() } },
       });
-      if (error) setMsg(error.message);
-      else setMsg("Conta criada. Confirme o e-mail se a verificação estiver ativa, depois entre.");
+      if (error) {
+        setMsg(error.message);
+      } else if (data.session) {
+        // cadastro com sessão (confirmação de e-mail desligada): cria o workspace e entra
+        await setupWorkspace(company.trim());
+        const next = new URLSearchParams(window.location.search).get("next");
+        router.push(next || "/dashboard");
+      } else {
+        // confirmação de e-mail ligada: cria o workspace quando ela entrar (a tela do
+        // dashboard oferece criar caso não exista)
+        setMsg("Conta criada! Confirme o e-mail e depois entre — aí configuramos seu workspace.");
+      }
     }
     setLoading(false);
   }

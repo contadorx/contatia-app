@@ -7,6 +7,7 @@ import DashboardNav from "@/components/DashboardNav";
 import { MobileNav } from "@/components/MobileNav";
 import { stopImpersonation } from "@/app/dashboard/superadmin/impersonate-actions";
 import { HelpWidget } from "@/components/HelpWidget";
+import CreateWorkspace from "@/components/CreateWorkspace";
 
 export const dynamic = "force-dynamic";
 
@@ -146,7 +147,11 @@ export default async function DashboardLayout({
               <span className="font-semibold text-brand">Ver planos →</span>
             </a>
           )}
-        {noTenant ? (
+        {noTenant && profile && !profileError ? (
+          // Perfil existe mas sem workspace = cadastro self-service sem onboarding.
+          // Em vez do diagnóstico técnico, oferece criar o workspace na hora.
+          <CreateWorkspace defaultName={((user as any)?.user_metadata?.company as string) || profile?.full_name || ""} />
+        ) : noTenant ? (
           <div className="card mx-auto max-w-2xl p-8">
             <p className="font-display text-lg font-bold">Não consegui carregar seu workspace</p>
             <p className="mt-2 text-sm text-subtle">
