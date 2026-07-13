@@ -1,5 +1,6 @@
 import { ImpersonateButton } from "@/components/ImpersonateButton";
 import { SubscriptionButton } from "@/components/SubscriptionButton";
+import DeleteWorkspaceButton from "@/components/DeleteWorkspaceButton";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
 
@@ -263,9 +264,10 @@ export default async function Superadmin() {
                 <td className="px-4 py-3 font-semibold text-brand-dark">{brl(r.mrr)}</td>
                 <td className="px-4 py-3 text-xs text-subtle">{new Date(r.created_at).toLocaleDateString("pt-BR")}</td>
                 <td className="px-4 py-3">
-                  <div className="flex gap-1.5">
+                  <div className="flex flex-wrap gap-1.5">
                     <ImpersonateButton tenantId={r.id} name={r.name} />
                     <SubscriptionButton tenantId={r.id} name={r.name} plans={(planos as any[]) || []} />
+                    <DeleteWorkspaceButton tenantId={r.id} name={r.name} />
                   </div>
                 </td>
               </tr>
