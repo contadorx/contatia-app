@@ -3,9 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import TeamTools from "@/components/TeamTools";
 import InviteTools from "@/components/InviteTools";
-import TeamRoleSelect from "@/components/TeamRoleSelect";
 import PermissionMatrix from "@/components/PermissionMatrix";
-import { isManager as isMgr } from "@/lib/permissions";
+import { isManager as isMgr, effectiveRole, ROLE_LABEL, type Role } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -40,8 +39,7 @@ export default async function Equipe() {
     return {
       id: m.id,
       name: m.full_name || m.email,
-      role: m.role,
-      team_role: m.team_role,
+      eff: effectiveRole(m.role, m.team_role) as Role,
       active: m.is_active,
       contacts: myContacts.length,
       hot,
@@ -63,78 +61,99 @@ export default async function Equipe() {
     name: p.full_name || p.email || "sem nome",
     email: p.email || "",
     role: p.role || "partner",
+    team_role: p.team_role ?? null,
   }));
 
   return (
     <div>
       <h1 className="font-display text-2xl font-bold">Equipe</h1>
-      <p className="mt-1 text-sm text-subtle">Distribuição da carteira e placar por vendedor. {unassignedCount ?? 0} contatos sem dono.</p>
+      <p className="mt-1 text-sm text-subtle">
+        Placar por vendedor e distribuição da carteira. {unassignedCount ?? 0} contato(s) sem dono.
+      </p>
 
-      <div className="mt-6">
-        <InviteTools pending={(invites as any[]) || []} />
-      </div>
-
-      <div className="mt-6">
-        <TeamManager
-          membros={membrosList}
-          permissoes={(permsData as any[]) || []}
-          meuId={user?.id || ""}
-          souAdmin={(meProfile as any)?.role === "owner"}
-          seats={seats}
-        />
-      </div>
-
-      <div className="mt-6">
-        <TeamTools />
-      </div>
-
+      {/* PLACAR — o que se olha no dia a dia */}
       <div className="card mt-6 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="border-b border-line text-left text-subtle">
-            <tr>
-              <th className="px-4 py-3 font-medium">Vendedor</th>
-              <th className="px-4 py-3 font-medium">Nível</th>
-              <th className="px-4 py-3 font-medium">Contatos</th>
-              <th className="px-4 py-3 font-medium">Quentes</th>
-              <th className="px-4 py-3 font-medium">Pipeline aberto</th>
-              <th className="px-4 py-3 font-medium">Ganho (mês)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-b border-line last:border-0">
-                <td className="px-4 py-3 font-medium">
-                  {r.name}
-                  {r.role === "owner" && <span className="ml-1 rounded-full bg-muted px-2 py-0.5 text-xs text-subtle">owner</span>}
-                  {!r.active && <span className="ml-1 text-xs text-subtle">(inativo)</span>}
-                </td>
-                <td className="px-4 py-3">
-                  <TeamRoleSelect memberId={r.id} current={r.team_role} canManage={canManage} />
-                </td>
-                <td className="px-4 py-3 text-subtle">{r.contacts}</td>
-                <td className="px-4 py-3">
-                  <span className={r.hot > 0 ? "font-semibold text-warn" : "text-subtle"}>{r.hot}</span>
-                </td>
-                <td className="px-4 py-3 text-subtle">{brl(r.openMrr)}</td>
-                <td className="px-4 py-3 font-semibold text-signal">{brl(r.wonMrr)}</td>
+        <div className="border-b border-line px-4 py-3">
+          <h2 className="font-display text-lg font-bold">Placar da equipe</h2>
+          <p className="text-xs text-subtle">Carteira, quentes e receita por pessoa. Placar leve, sem microgestão.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="border-b border-line text-left text-subtle">
+              <tr>
+                <th className="px-4 py-3 font-medium">Vendedor</th>
+                <th className="px-4 py-3 font-medium">Papel</th>
+                <th className="px-4 py-3 font-medium">Contatos</th>
+                <th className="px-4 py-3 font-medium">Quentes</th>
+                <th className="px-4 py-3 font-medium">Negócios em aberto</th>
+                <th className="px-4 py-3 font-medium">Receita fechada (mês)</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Matriz de permissões — o que cada papel faz */}
-      <div className="card mt-6 p-5">
-        <h2 className="font-display text-lg font-bold">O que cada papel faz</h2>
-        <p className="mt-1 text-sm text-subtle">Ao mudar o nível de alguém na tabela acima, estas permissões passam a valer para a pessoa.</p>
-        <div className="mt-4">
-          <PermissionMatrix />
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-b border-line last:border-0">
+                  <td className="px-4 py-3 font-medium">
+                    {r.name}
+                    {!r.active && <span className="ml-1 text-xs text-subtle">(inativo)</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-subtle">{ROLE_LABEL[r.eff] || r.eff}</span>
+                  </td>
+                  <td className="px-4 py-3 text-subtle">{r.contacts}</td>
+                  <td className="px-4 py-3">
+                    <span className={r.hot > 0 ? "font-semibold text-warn" : "text-subtle"}>{r.hot}</span>
+                  </td>
+                  <td className="px-4 py-3 text-subtle">{brl(r.openMrr)}</td>
+                  <td className="px-4 py-3 font-semibold text-signal">{brl(r.wonMrr)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <p className="mt-4 text-xs text-subtle">
-        A rotina de equipe (extrato semanal, plantão, campanha do mês) usa estes números — placar leve, sem microgestão.
-      </p>
+      {/* ORGANIZAR A CARTEIRA */}
+      <div className="mt-6">
+        <h2 className="font-display text-lg font-bold">Organizar a carteira</h2>
+        <p className="mt-1 text-sm text-subtle">Divida os contatos sem dono e limpe duplicados de uma vez.</p>
+        <div className="mt-3">
+          <TeamTools />
+        </div>
+      </div>
+
+      {/* GERENCIAR PESSOAS E PAPÉIS — colapsável */}
+      <details className="card mt-6 p-5" open={canManage}>
+        <summary className="cursor-pointer select-none font-display text-lg font-bold">
+          Gerenciar pessoas e papéis
+        </summary>
+        <p className="mt-1 text-sm text-subtle">Convide pessoas, defina o papel de cada uma e libere agendas para os SDRs.</p>
+
+        <div className="mt-4">
+          <InviteTools pending={(invites as any[]) || []} />
+        </div>
+
+        <div className="mt-6">
+          <TeamManager
+            membros={membrosList}
+            permissoes={(permsData as any[]) || []}
+            meuId={user?.id || ""}
+            souAdmin={(meProfile as any)?.role === "owner"}
+            canManage={canManage}
+            seats={seats}
+          />
+        </div>
+      </details>
+
+      {/* MATRIZ DE PERMISSÕES — referência, colapsável */}
+      <details className="card mt-6 p-5">
+        <summary className="cursor-pointer select-none font-display text-lg font-bold">
+          O que cada papel faz
+        </summary>
+        <p className="mt-1 text-sm text-subtle">A referência de permissões de cada papel. Mudou o papel de alguém acima? Estas regras passam a valer para a pessoa.</p>
+        <div className="mt-4">
+          <PermissionMatrix />
+        </div>
+      </details>
     </div>
   );
 }

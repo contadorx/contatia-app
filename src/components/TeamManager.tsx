@@ -1,43 +1,55 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { setRole, toggleCalendarPermission } from "@/app/dashboard/equipe/team-actions";
+import { setTeamRole } from "@/app/dashboard/equipe/actions";
+import { toggleCalendarPermission } from "@/app/dashboard/equipe/team-actions";
+import { effectiveRole, ROLE_LABEL, type Role } from "@/lib/permissions";
 
 // ============================================================
 // Equipe: papéis e permissões de agenda.
-//   Admin (owner)   → tudo; enxerga todas as agendas
-//   Vendedor (partner) → própria carteira e própria agenda
-//   SDR (sdr)       → prospecta e AGENDA para os vendedores que o liberarem
+//   Dono            → tudo; cobrança e equipe (nível máximo, não editável aqui)
+//   Admin           → workspace e equipe (sem cobrança)
+//   Gestor          → lidera a operação: metas, métricas e pipeline de todos
+//   Vendedor        → própria carteira e própria agenda
+//   SDR             → prospecta e AGENDA para quem o liberar
+// Fonte única do papel operacional: profiles.team_role (ver lib/permissions.ts).
 // O teto de usuários vem do plano; ao encher, sugerimos o plano certo.
 // ============================================================
 
-type Membro = { id: string; name: string; email: string; role: string };
+type Membro = { id: string; name: string; email: string; role: string; team_role: string | null };
 type Perm = { sdr_id: string; seller_id: string; can_book: boolean };
 
+// Papéis atribuíveis (o Dono não se atribui — vem da titularidade da conta).
 const PAPEIS = [
-  { v: "owner", t: "Admin", d: "Acesso total, cobrança e equipe" },
-  { v: "partner", t: "Vendedor", d: "Própria carteira e própria agenda" },
-  { v: "sdr", t: "SDR", d: "Prospecta e agenda para os vendedores" },
+  { v: "admin", t: "Admin" },
+  { v: "gestor", t: "Gestor" },
+  { v: "vendedor", t: "Vendedor" },
+  { v: "sdr", t: "SDR" },
 ];
+
+// SDR "efetivo": pelo papel novo (team_role) ou pelo legado (role) — sem regressão.
+const isSdr = (m: Membro) => effectiveRole(m.role, m.team_role) === "sdr" || m.role === "sdr";
 
 export function TeamManager({
   membros,
   permissoes,
   meuId,
   souAdmin,
+  canManage,
   seats,
 }: {
   membros: Membro[];
   permissoes: Perm[];
   meuId: string;
   souAdmin: boolean;
+  canManage: boolean;
   seats: { usuarios: number; teto: number | null; plano: string; sugerido: string; podeAdicionar: boolean } | null;
 }) {
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
 
-  const sdrs = membros.filter((m) => m.role === "sdr");
-  const vendedores = membros.filter((m) => m.role === "partner" || m.role === "owner");
+  const sdrs = membros.filter(isSdr);
+  const vendedores = membros.filter((m) => !isSdr(m)); // quem tem agenda própria para agendar
 
   const temPermissao = (sdr: string, vend: string) =>
     permissoes.some((p) => p.sdr_id === sdr && p.seller_id === vend && p.can_book);
@@ -45,7 +57,7 @@ export function TeamManager({
   function mudarPapel(id: string, papel: string) {
     setMsg(null);
     start(async () => {
-      const r = (await setRole(id, papel)) as any;
+      const r = (await setTeamRole(id, papel)) as any;
       if (r?.error) setMsg(r.error);
       else window.location.reload();
     });
@@ -93,8 +105,9 @@ export function TeamManager({
       <div>
         <p className="font-display font-semibold">Papéis</p>
         <p className="mt-1 text-sm text-subtle">
-          O <b>Admin</b> controla tudo. O <b>Vendedor</b> trabalha a própria carteira.
-          O <b>SDR</b> prospecta e marca reuniões nas agendas que lhe forem liberadas.
+          Cada pessoa tem <b>um papel</b>, que define o que ela enxerga e faz. O <b>Dono</b> tem controle total;
+          <b> Admin</b> e <b>Gestor</b> lideram a operação; <b>Vendedor</b> trabalha a própria carteira; o <b>SDR</b> prospecta
+          e marca reuniões nas agendas que lhe forem liberadas.
         </p>
 
         <div className="mt-3 overflow-hidden rounded-xl border border-line">
@@ -106,30 +119,34 @@ export function TeamManager({
               </tr>
             </thead>
             <tbody>
-              {membros.map((m) => (
-                <tr key={m.id} className="border-t border-line">
-                  <td className="px-4 py-3">
-                    <p className="font-medium">{m.name}{m.id === meuId && <span className="text-subtle"> (você)</span>}</p>
-                    <p className="text-xs text-subtle">{m.email}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    {souAdmin && m.id !== meuId ? (
-                      <select
-                        className="input max-w-[180px] py-1.5 text-sm"
-                        value={m.role}
-                        disabled={pending}
-                        onChange={(e) => mudarPapel(m.id, e.target.value)}
-                      >
-                        {PAPEIS.map((p) => <option key={p.v} value={p.v}>{p.t}</option>)}
-                      </select>
-                    ) : (
-                      <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">
-                        {PAPEIS.find((p) => p.v === m.role)?.t || m.role}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {membros.map((m) => {
+                const eff = effectiveRole(m.role, m.team_role);
+                const podeEditar = canManage && m.id !== meuId && eff !== "owner";
+                return (
+                  <tr key={m.id} className="border-t border-line">
+                    <td className="px-4 py-3">
+                      <p className="font-medium">{m.name}{m.id === meuId && <span className="text-subtle"> (você)</span>}</p>
+                      <p className="text-xs text-subtle">{m.email}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      {podeEditar ? (
+                        <select
+                          className="input max-w-[180px] py-1.5 text-sm"
+                          value={PAPEIS.some((p) => p.v === eff) ? eff : "vendedor"}
+                          disabled={pending}
+                          onChange={(e) => mudarPapel(m.id, e.target.value)}
+                        >
+                          {PAPEIS.map((p) => <option key={p.v} value={p.v}>{p.t}</option>)}
+                        </select>
+                      ) : (
+                        <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">
+                          {ROLE_LABEL[eff as Role] || eff}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
