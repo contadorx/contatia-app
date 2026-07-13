@@ -25,6 +25,17 @@ function extractText(data: any): string {
   );
 }
 
+// Identifica o TIPO de mídia (o binário é buscado sob demanda, não aqui).
+function detectMedia(data: any): { type: string | null; mime: string | null } {
+  const m = data?.message || {};
+  if (m.imageMessage) return { type: "image", mime: m.imageMessage.mimetype || "image/jpeg" };
+  if (m.audioMessage) return { type: "audio", mime: m.audioMessage.mimetype || "audio/ogg" };
+  if (m.videoMessage) return { type: "video", mime: m.videoMessage.mimetype || "video/mp4" };
+  if (m.documentMessage) return { type: "document", mime: m.documentMessage.mimetype || "application/octet-stream" };
+  if (m.stickerMessage) return { type: "sticker", mime: m.stickerMessage.mimetype || "image/webp" };
+  return { type: null, mime: null };
+}
+
 export async function POST(req: Request, { params }: { params: { token: string } }) {
   const admin = createAdminClient();
   if (!admin) return NextResponse.json({ error: "não configurado" }, { status: 500 });
@@ -78,8 +89,18 @@ export async function POST(req: Request, { params }: { params: { token: string }
   }
 
   const text = extractText(data);
+  const media = detectMedia(data);
   const waId = data?.key?.id || null;
   const last10 = fromPhone.slice(-10);
+
+  // número bloqueado (LGPD/pessoal) → ignora silenciosamente
+  const { data: blocked } = await admin
+    .from("whatsapp_blocklist")
+    .select("phone")
+    .eq("tenant_id", tenant_id);
+  if (((blocked as any[]) || []).some((b) => digits(b.phone).slice(-10) === last10)) {
+    return NextResponse.json({ ok: true, blocked: true });
+  }
 
   // acha o contato pelo telefone (mesmo tenant)
   const { data: contacts } = await admin
@@ -108,6 +129,8 @@ export async function POST(req: Request, { params }: { params: { token: string }
     phone: fromPhone,
     direction: "in",
     text,
+    media_type: media.type,
+    media_mime: media.mime,
     wa_message_id: waId,
     raw: data || {},
   });

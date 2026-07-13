@@ -3,7 +3,14 @@
 import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { replyWhatsApp, markThreadRead } from "@/app/dashboard/respostas/actions";
+import {
+  replyWhatsApp,
+  markThreadRead,
+  createContactFromThread,
+  blockThread,
+  deleteThread,
+  fetchMedia,
+} from "@/app/dashboard/respostas/actions";
 import { waLink } from "@/lib/cadence";
 
 export type Thread = {
@@ -11,7 +18,7 @@ export type Thread = {
   contactId: string | null;
   name: string;
   phone: string;
-  messages: { id: string; direction: string; text: string; created_at: string; read: boolean }[];
+  messages: { id: string; direction: string; text: string; mediaType: string | null; created_at: string; read: boolean }[];
   unread: number;
   lastAt: string;
 };
@@ -23,20 +30,23 @@ function snippet(t: Thread) {
   const last = t.messages[t.messages.length - 1];
   if (!last) return "";
   const p = last.direction === "out" ? "Você: " : "";
-  return p + (last.text || "").slice(0, 60);
+  const label = last.mediaType ? `[${MEDIA_LABEL[last.mediaType] || "mídia"}] ` : "";
+  return p + label + (last.text || "").slice(0, 50);
 }
+const MEDIA_LABEL: Record<string, string> = { image: "imagem", audio: "áudio", video: "vídeo", document: "documento", sticker: "figurinha" };
 
 export default function RespostasInbox({ threads, canReply }: { threads: Thread[]; canReply: boolean }) {
   const router = useRouter();
   const [sel, setSel] = useState<string | null>(threads[0]?.key ?? null);
   const [text, setText] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<"block" | "delete" | null>(null);
   const [pending, start] = useTransition();
 
   const active = threads.find((t) => t.key === sel) || null;
 
-  // ao abrir uma conversa com não-lidas, marca como lida
   useEffect(() => {
+    setConfirm(null);
     if (active && active.unread > 0) {
       markThreadRead({ contactId: active.contactId, phone: active.phone }).then(() => router.refresh());
     }
@@ -51,17 +61,17 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
     );
   }
 
-  function send() {
-    if (!active || !text.trim()) return;
+  function act(fn: () => Promise<any>, after?: () => void) {
     setErr(null);
     start(async () => {
-      const res = (await replyWhatsApp({ contactId: active.contactId, phone: active.phone, text })) as { ok?: boolean; error?: string };
+      const res = await fn();
       if (res?.error) setErr(res.error);
-      else {
-        setText("");
-        router.refresh();
-      }
+      else { after?.(); router.refresh(); }
     });
+  }
+  function send() {
+    if (!active || !text.trim()) return;
+    act(() => replyWhatsApp({ contactId: active.contactId, phone: active.phone, text }), () => setText(""));
   }
 
   return (
@@ -89,29 +99,70 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
       {/* conversa */}
       {active ? (
         <div className="card flex min-h-[420px] flex-col p-0">
-          <div className="flex items-center justify-between border-b border-line p-4">
-            <div>
-              <p className="font-display font-bold">{active.name}</p>
+          {/* cabeçalho com gestão */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line p-4">
+            <div className="min-w-0">
+              <p className="truncate font-display font-bold">{active.name}</p>
               <p className="text-xs text-subtle">{active.phone || "—"}</p>
             </div>
-            <div className="flex items-center gap-3 text-sm">
-              {active.contactId && (
-                <Link href={`/dashboard/contatos/${active.contactId}`} className="text-brand-dark hover:underline">
-                  Ver contato →
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {active.contactId ? (
+                <Link href={`/dashboard/contatos/${active.contactId}`} className="rounded-lg border border-line px-2 py-1 text-brand-dark hover:bg-muted">
+                  Ver contato
                 </Link>
+              ) : (
+                <button
+                  className="rounded-lg border border-brand/40 px-2 py-1 font-semibold text-brand-dark hover:bg-brand-soft"
+                  disabled={pending}
+                  onClick={() => act(() => createContactFromThread({ phone: active.phone, name: active.name === active.phone ? "" : active.name }))}
+                >
+                  + Cadastrar contato
+                </button>
               )}
+              <button className="rounded-lg border border-line px-2 py-1 text-subtle hover:text-warn" disabled={pending} onClick={() => setConfirm(confirm === "block" ? null : "block")}>
+                Bloquear
+              </button>
+              <button className="rounded-lg border border-line px-2 py-1 text-subtle hover:text-danger" disabled={pending} onClick={() => setConfirm(confirm === "delete" ? null : "delete")}>
+                Excluir
+              </button>
             </div>
           </div>
+
+          {/* confirmação de bloquear/excluir */}
+          {confirm && (
+            <div className={`border-b border-line p-3 text-sm ${confirm === "delete" ? "bg-danger/5" : "bg-warn/5"}`}>
+              <p className={confirm === "delete" ? "text-danger" : "text-warn"}>
+                {confirm === "block"
+                  ? "Bloquear este número? Ele para de aparecer aqui, novas mensagens são ignoradas e o contato (se houver) vira opt-out."
+                  : "Excluir esta conversa? As mensagens deste número são apagadas da caixa."}
+              </p>
+              <div className="mt-2 flex gap-2">
+                {confirm === "block" ? (
+                  <button className="rounded-lg bg-warn px-3 py-1 text-xs font-bold text-white" disabled={pending}
+                    onClick={() => act(() => blockThread({ phone: active.phone, contactId: active.contactId }), () => setSel(null))}>
+                    Bloquear
+                  </button>
+                ) : (
+                  <button className="rounded-lg bg-danger px-3 py-1 text-xs font-bold text-white" disabled={pending}
+                    onClick={() => act(() => deleteThread({ phone: active.phone, contactId: active.contactId }), () => setSel(null))}>
+                    Excluir
+                  </button>
+                )}
+                <button className="btn-ghost py-1 text-xs" onClick={() => setConfirm(null)}>Cancelar</button>
+              </div>
+            </div>
+          )}
 
           <div className="flex-1 space-y-2 overflow-y-auto p-4">
             {active.messages.map((m) => (
               <div key={m.id} className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}>
-                <div
-                  className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${
-                    m.direction === "out" ? "bg-brand text-white" : "bg-muted text-ink"
-                  }`}
-                >
-                  <p className="whitespace-pre-wrap">{m.text || <span className="opacity-60">(mídia/sem texto)</span>}</p>
+                <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${m.direction === "out" ? "bg-brand text-white" : "bg-muted text-ink"}`}>
+                  {m.mediaType && <MediaBlock messageId={m.id} type={m.mediaType} out={m.direction === "out"} />}
+                  {m.text ? (
+                    <p className="whitespace-pre-wrap">{m.text}</p>
+                  ) : (
+                    !m.mediaType && <span className="opacity-60">(sem texto)</span>
+                  )}
                   <p className={`mt-1 text-[10px] ${m.direction === "out" ? "text-white/70" : "text-subtle"}`}>{fmt(m.created_at)}</p>
                 </div>
               </div>
@@ -138,13 +189,9 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
               </>
             ) : (
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-subtle">
-                  Você está no modo assistido — responda pelo seu próprio WhatsApp.
-                </p>
+                <p className="text-xs text-subtle">Você está no modo assistido — responda pelo seu próprio WhatsApp.</p>
                 {waLink(active.phone, "") && (
-                  <a className="btn-brand py-1.5 text-sm" href={waLink(active.phone, "")} target="_blank" rel="noreferrer">
-                    Abrir WhatsApp
-                  </a>
+                  <a className="btn-brand py-1.5 text-sm" href={waLink(active.phone, "")} target="_blank" rel="noreferrer">Abrir WhatsApp</a>
                 )}
               </div>
             )}
@@ -152,10 +199,44 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
           </div>
         </div>
       ) : (
-        <div className="card flex min-h-[420px] items-center justify-center text-sm text-subtle">
-          Selecione uma conversa.
-        </div>
+        <div className="card flex min-h-[420px] items-center justify-center text-sm text-subtle">Selecione uma conversa.</div>
       )}
+    </div>
+  );
+}
+
+// Mídia buscada sob demanda (não fica armazenada no app).
+function MediaBlock({ messageId, type, out }: { messageId: string; type: string; out: boolean }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  function load() {
+    setErr(null);
+    start(async () => {
+      const res = (await fetchMedia(messageId)) as { dataUrl?: string; error?: string };
+      if (res?.error) setErr(res.error);
+      else if (res?.dataUrl) setUrl(res.dataUrl);
+    });
+  }
+
+  if (url) {
+    if (type === "image" || type === "sticker") return <img src={url} alt="mídia" className="mb-1 max-h-64 rounded-lg" />;
+    if (type === "audio") return <audio controls src={url} className="mb-1 w-56" />;
+    if (type === "video") return <video controls src={url} className="mb-1 max-h-64 rounded-lg" />;
+    return <a href={url} download className={`mb-1 block underline ${out ? "text-white" : "text-brand-dark"}`}>Baixar documento</a>;
+  }
+
+  return (
+    <div className="mb-1">
+      <button
+        className={`rounded-lg border px-2 py-1 text-xs ${out ? "border-white/40 text-white" : "border-line text-subtle hover:text-ink"}`}
+        disabled={pending}
+        onClick={load}
+      >
+        {pending ? "Buscando…" : `Ver ${MEDIA_LABEL[type] || "mídia"}`}
+      </button>
+      {err && <p className="mt-1 text-[11px] text-danger">{err}</p>}
     </div>
   );
 }

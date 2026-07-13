@@ -9,7 +9,81 @@ async function ctx() {
     data: { user },
   } = await supabase.auth.getUser();
   const { data } = await supabase.from("profiles").select("tenant_id").eq("id", user?.id ?? "").maybeSingle();
-  return { supabase, tenant_id: (data?.tenant_id as string) || null };
+  return { supabase, tenant_id: (data?.tenant_id as string) || null, user_id: user?.id };
+}
+
+// Cadastra um contato a partir de uma conversa (número desconhecido) e vincula as mensagens.
+export async function createContactFromThread(input: { phone: string; name?: string }) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const phone = (input.phone || "").trim();
+  if (!phone) return { error: "Conversa sem telefone." };
+  const name = (input.name || "").trim() || phone;
+
+  const { data: created, error } = await supabase
+    .from("contacts")
+    .insert({ tenant_id, assigned_to: user_id, name, phone, origin: "WhatsApp", status: "novo" })
+    .select("id")
+    .single();
+  if (error) return { error: error.message };
+
+  // vincula as mensagens desse número ao novo contato
+  await supabase.from("whatsapp_messages").update({ contact_id: (created as any).id }).eq("tenant_id", tenant_id).eq("phone", phone).is("contact_id", null);
+
+  revalidatePath("/dashboard/respostas");
+  return { ok: true, contactId: (created as any).id };
+}
+
+// Bloqueia o número: o webhook passa a ignorar, e o contato (se houver) vira opt-out (LGPD).
+export async function blockThread(input: { phone: string; contactId?: string | null }) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const phone = (input.phone || "").trim();
+  if (!phone) return { error: "Conversa sem telefone." };
+
+  await supabase.from("whatsapp_blocklist").upsert({ tenant_id, phone }, { onConflict: "tenant_id,phone", ignoreDuplicates: true });
+  if (input.contactId) {
+    await supabase.from("contacts").update({ opted_out: true }).eq("id", input.contactId);
+  }
+  revalidatePath("/dashboard/respostas");
+  return { ok: true };
+}
+
+// Remove a conversa da caixa (apaga as mensagens desse número/contato).
+export async function deleteThread(input: { phone: string; contactId?: string | null }) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  let q = supabase.from("whatsapp_messages").delete().eq("tenant_id", tenant_id);
+  if (input.contactId) q = q.eq("contact_id", input.contactId);
+  else q = q.eq("phone", (input.phone || "").trim()).is("contact_id", null);
+  const { error } = await q;
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/respostas");
+  return { ok: true };
+}
+
+// Busca a mídia de uma mensagem sob demanda (não armazena nada).
+export async function fetchMedia(messageId: string): Promise<{ dataUrl?: string; error?: string }> {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { data: msg } = await supabase
+    .from("whatsapp_messages")
+    .select("id, raw, media_mime, account_id")
+    .eq("id", messageId)
+    .maybeSingle();
+  if (!msg) return { error: "Mensagem não encontrada." };
+  const { data: acc } = await supabase
+    .from("whatsapp_accounts")
+    .select("evolution_url, api_key, instance")
+    .eq("id", (msg as any).account_id)
+    .maybeSingle();
+  if (!acc) return { error: "Instância não encontrada (a mídia vem do servidor do WhatsApp)." };
+
+  const { getMediaBase64 } = await import("@/lib/whatsapp");
+  const r = await getMediaBase64(acc as any, (msg as any).raw);
+  if (r.error || !r.base64) return { error: r.error || "Mídia indisponível (pode ter expirado no WhatsApp)." };
+  const mime = r.mimetype || (msg as any).media_mime || "application/octet-stream";
+  return { dataUrl: `data:${mime};base64,${r.base64}` };
 }
 
 // Responde uma conversa pelo WhatsApp (envio automático — só no modo Evolution).

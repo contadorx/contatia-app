@@ -11,7 +11,7 @@ export default async function Respostas() {
 
   const { data: msgs } = await supabase
     .from("whatsapp_messages")
-    .select("id, contact_id, phone, direction, text, read_at, created_at, contacts(name)")
+    .select("id, contact_id, phone, direction, text, media_type, read_at, created_at, contacts(name)")
     .order("created_at", { ascending: false })
     .limit(1000);
 
@@ -32,7 +32,7 @@ export default async function Respostas() {
       };
       map.set(key, th);
     }
-    th.messages.push({ id: m.id, direction: m.direction, text: m.text || "", created_at: m.created_at, read: !!m.read_at });
+    th.messages.push({ id: m.id, direction: m.direction, text: m.text || "", mediaType: m.media_type || null, created_at: m.created_at, read: !!m.read_at });
     if (!th.phone && m.phone) th.phone = m.phone;
     if (m.direction === "in" && !m.read_at) th.unread++;
     th.lastAt = m.created_at;

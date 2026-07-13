@@ -161,6 +161,27 @@ export async function getStatus(acc: WaAccount): Promise<{ state?: string; error
   }
 }
 
+// Busca o binário de uma mídia recebida (imagem/áudio/vídeo/doc) SOB DEMANDA no
+// Evolution, a partir da mensagem crua guardada. Nada é armazenado no app.
+export async function getMediaBase64(acc: WaAccount, message: any): Promise<{ base64?: string; mimetype?: string; error?: string }> {
+  const url = base(acc.evolution_url);
+  try {
+    const res = await fetch(`${url}/chat/getBase64FromMediaMessage/${acc.instance}`, {
+      method: "POST",
+      headers: { apikey: acc.api_key, "Content-Type": "application/json" },
+      body: JSON.stringify({ message, convertToMp4: false }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      return { error: `Evolution ${res.status}: ${t.slice(0, 120)}` };
+    }
+    const d = await res.json().catch(() => ({}));
+    return { base64: d?.base64 || d?.media || d?.buffer, mimetype: d?.mimetype };
+  } catch (e: any) {
+    return { error: e?.message || "Falha ao buscar a mídia." };
+  }
+}
+
 export { normalizePhone };
 
 // ============================================================
