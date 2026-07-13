@@ -170,8 +170,10 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
                   <div key={e.id} className="relative">
                     <div className={`absolute -left-[18px] top-1 h-[9px] w-[9px] rounded-full ${EVENT_COLOR[e.type] || "bg-subtle"}`} />
                     <p className="text-sm font-medium">{EVENT_LABEL[e.type] || e.type}</p>
-                    {e.type === "note" && e.meta?.text && (
-                      <p className="mt-0.5 whitespace-pre-wrap text-sm text-ink/80">{e.meta.text}</p>
+                    {(e.type === "note" || e.type === "replied") && e.meta?.text && (
+                      <p className="mt-0.5 whitespace-pre-wrap text-sm text-ink/80">
+                        {e.type === "replied" ? `"${e.meta.text}"` : e.meta.text}
+                      </p>
                     )}
                     <p className="text-xs text-subtle">{fmt(e.created_at)}</p>
                   </div>

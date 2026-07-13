@@ -8,6 +8,7 @@ const groups: { title?: string; items: { href: string; label: string; primary?: 
     items: [
       { href: "/dashboard", label: "Hoje", primary: true },
       { href: "/dashboard/pipeline", label: "Pipeline", primary: true },
+      { href: "/dashboard/respostas", label: "Respostas", primary: true },
     ],
   },
   {
@@ -42,7 +43,7 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-export default function DashboardNav({ isSuperadmin = false }: { isSuperadmin?: boolean }) {
+export default function DashboardNav({ isSuperadmin = false, unreadReplies = 0 }: { isSuperadmin?: boolean; unreadReplies?: number }) {
   const pathname = usePathname();
 
   const allGroups = isSuperadmin
@@ -62,11 +63,16 @@ export default function DashboardNav({ isSuperadmin = false }: { isSuperadmin?: 
                   key={n.href}
                   href={n.href}
                   className={[
-                    "block rounded-xl px-3 py-2 text-sm transition",
+                    "flex items-center justify-between rounded-xl px-3 py-2 text-sm transition",
                     active ? "bg-brand text-white" : n.primary ? "font-semibold text-ink hover:bg-muted" : "font-medium text-ink hover:bg-muted",
                   ].join(" ")}
                 >
-                  {n.label}
+                  <span>{n.label}</span>
+                  {n.href === "/dashboard/respostas" && unreadReplies > 0 && (
+                    <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-white text-brand" : "bg-signal text-white"}`}>
+                      {unreadReplies > 99 ? "99+" : unreadReplies}
+                    </span>
+                  )}
                 </Link>
               );
             })}

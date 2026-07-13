@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import DashboardNav from "@/components/DashboardNav";
 import SignOut from "@/components/SignOut";
 
-export function MobileNav({ isSuperadmin = false, userLabel, roleLabel }: { isSuperadmin?: boolean; userLabel?: string; roleLabel?: string }) {
+export function MobileNav({ isSuperadmin = false, userLabel, roleLabel, unreadReplies = 0 }: { isSuperadmin?: boolean; userLabel?: string; roleLabel?: string; unreadReplies?: number }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
@@ -45,7 +45,7 @@ export function MobileNav({ isSuperadmin = false, userLabel, roleLabel }: { isSu
               <button onClick={() => setOpen(false)} aria-label="Fechar menu" className="flex h-9 w-9 items-center justify-center rounded-lg text-subtle hover:text-ink">✕</button>
             </div>
 
-            <DashboardNav isSuperadmin={isSuperadmin} />
+            <DashboardNav isSuperadmin={isSuperadmin} unreadReplies={unreadReplies} />
 
             <div className="mt-auto border-t border-line pt-4">
               <Link href="/dashboard/config" className="mb-3 flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-ink hover:bg-muted">

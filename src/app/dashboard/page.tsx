@@ -13,6 +13,19 @@ export default async function Today() {
   const { data: tenantRow } = await supabase.from("tenants").select("whatsapp_mode").maybeSingle();
   const waMode = ((tenantRow as any)?.whatsapp_mode as string) || "assistido";
 
+  // no modo automático, avisa se o número desconectou (envios falhariam em silêncio)
+  let waDisconnected = false;
+  if (waMode === "evolution") {
+    const { data: waAcc } = await supabase
+      .from("whatsapp_accounts")
+      .select("status")
+      .eq("is_active", true)
+      .not("status", "is", null)
+      .neq("status", "open")
+      .limit(1);
+    waDisconnected = ((waAcc as any[]) || []).length > 0;
+  }
+
   const [{ data: rawTasks }, contactsCount, hotCount] = await Promise.all([
     supabase
       .from("tasks")
@@ -104,6 +117,13 @@ export default async function Today() {
     <div>
       <h1 className="font-display text-2xl font-bold">O que precisa de você hoje</h1>
       <p className="mt-1 text-sm text-subtle">Sua fila de cadência — quem está mais quente vem primeiro.</p>
+
+      {waDisconnected && (
+        <a href="/dashboard/config" className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm">
+          <span className="font-medium text-warn">⚠ Seu WhatsApp desconectou. Os envios automáticos estão pausados até reconectar.</span>
+          <span className="font-semibold text-warn">Reconectar →</span>
+        </a>
+      )}
 
       <div className="mt-6">
         <OnboardingChecklist />

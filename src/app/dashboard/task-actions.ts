@@ -275,6 +275,15 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
   await supabase.from("tasks").update({ status: "done", completed_at: new Date().toISOString() }).eq("id", taskId);
   await scoreEvent(supabase, { tenant_id, contact_id: (task as any).contact_id, type: "task_done" });
   await supabase.from("events").insert({ tenant_id, type: "whatsapp_sent", contact_id: (task as any).contact_id, meta: {} });
+  // guarda a mensagem enviada na conversa (para a caixa de Respostas mostrar os dois lados)
+  await supabase.from("whatsapp_messages").insert({
+    tenant_id,
+    account_id: (acc as any).id,
+    contact_id: (task as any).contact_id,
+    phone,
+    direction: "out",
+    text: task.generated_content || "",
+  });
   revalidatePath("/dashboard");
   return { ok: true };
 }

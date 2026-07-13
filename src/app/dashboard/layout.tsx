@@ -63,6 +63,17 @@ export default async function DashboardLayout({
 
   // uso × limites (avisa a partir de 80%, bloqueia no limite)
   const usos = profile?.tenant_id && !isSuperadmin ? await getUsage() : [];
+
+  // respostas de WhatsApp não lidas → badge no menu
+  let unreadReplies = 0;
+  if (profile?.tenant_id) {
+    const { count } = await supabase
+      .from("whatsapp_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("direction", "in")
+      .is("read_at", null);
+    unreadReplies = count ?? 0;
+  }
   const bannerText: Record<string, string> = {
     past_due: "Seu pagamento está em atraso. Regularize para não perder o acesso.",
     pending: "Falta o pagamento para ativar sua assinatura.",
@@ -84,6 +95,7 @@ export default async function DashboardLayout({
         isSuperadmin={isSuperadmin}
         userLabel={profile?.full_name || user?.email || undefined}
         roleLabel={profile?.role === "owner" ? "Owner" : "Parceiro"}
+        unreadReplies={unreadReplies}
       />
       <div className="flex flex-1">
         <aside className="hidden w-56 flex-col border-r border-line bg-surface p-5 md:flex">
@@ -91,7 +103,7 @@ export default async function DashboardLayout({
             Contat<span className="text-brand">ia</span>
           </p>
 
-          <DashboardNav isSuperadmin={isSuperadmin} />
+          <DashboardNav isSuperadmin={isSuperadmin} unreadReplies={unreadReplies} />
 
           <div className="mt-auto border-t border-line pt-4">
             <Link
