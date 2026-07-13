@@ -33,6 +33,16 @@ export default function SequenceBuilder() {
   const [premium, setPremium] = useState(false);
   const [useRapport, setUseRapport] = useState(false);
   const [opus, setOpus] = useState<{ used: number; quota: number } | null>(null);
+  const [showMoreCtx, setShowMoreCtx] = useState(false);
+  const [showAdvIa, setShowAdvIa] = useState(false);
+  const [abOpen, setAbOpen] = useState<Set<number>>(new Set());
+
+  const isAbOpen = (i: number) => abOpen.has(i) || !!steps[i]?.subject_b?.trim();
+  function openAb(i: number) { setAbOpen((s) => new Set(s).add(i)); }
+  function removeAb(i: number) {
+    update(i, { subject_b: "" });
+    setAbOpen((s) => { const n = new Set(s); n.delete(i); return n; });
+  }
 
   function bf(k: string, v: string | number | string[]) {
     setBrief((s) => ({ ...s, [k]: v }));
@@ -145,25 +155,31 @@ export default function SequenceBuilder() {
               <input className="input" value={brief.product} onChange={(e) => bf("product", e.target.value)} placeholder="Seu produto/serviço" />
               <input className="input" value={brief.icp} onChange={(e) => bf("icp", e.target.value)} placeholder="Cliente ideal (cargo, porte)" />
             </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="label">Dor que você resolve</label>
-                <textarea className="input mt-1 min-h-[110px] leading-relaxed" value={brief.pain} onChange={(e) => bf("pain", e.target.value)} placeholder="O problema concreto do cliente e por que dói. Quanto mais específico, melhor a cadência." />
-              </div>
-              <div>
-                <label className="label">Prova / diferencial</label>
-                <textarea className="input mt-1 min-h-[110px] leading-relaxed" value={brief.proof} onChange={(e) => bf("proof", e.target.value)} placeholder="Resultado, número ou case real que sustenta sua promessa (sem exagerar)." />
-              </div>
+            <div className="mt-3">
+              <label className="label">Dor que você resolve</label>
+              <textarea className="input mt-1 min-h-[90px] leading-relaxed" value={brief.pain} onChange={(e) => bf("pain", e.target.value)} placeholder="O problema concreto do cliente e por que dói. Quanto mais específico, melhor a cadência." />
             </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <input className="input" value={brief.tone} onChange={(e) => bf("tone", e.target.value)} placeholder="Tom de voz (ex.: consultivo, direto)" />
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <input className="input" value={brief.goal} onChange={(e) => bf("goal", e.target.value)} placeholder="Objetivo (ex.: agendar diagnóstico)" />
               <input className="input" value={brief.cta} onChange={(e) => bf("cta", e.target.value)} placeholder="CTA preferido (ex.: 15 min esta semana)" />
             </div>
-            <div className="mt-3">
-              <label className="label">Nunca dizer / evitar</label>
-              <textarea className="input mt-1 min-h-[80px] leading-relaxed" value={brief.avoid} onChange={(e) => bf("avoid", e.target.value)} placeholder="Promessas proibidas, termos a evitar, restrições de compliance." />
-            </div>
+
+            <button type="button" className="mt-3 text-xs font-medium text-brand hover:underline" onClick={() => setShowMoreCtx((s) => !s)}>
+              {showMoreCtx ? "− Menos contexto" : "+ Mais contexto (prova, tom, o que evitar)"}
+            </button>
+            {showMoreCtx && (
+              <div className="mt-2 space-y-3">
+                <div>
+                  <label className="label">Prova / diferencial</label>
+                  <textarea className="input mt-1 min-h-[80px] leading-relaxed" value={brief.proof} onChange={(e) => bf("proof", e.target.value)} placeholder="Resultado, número ou case real que sustenta sua promessa (sem exagerar)." />
+                </div>
+                <input className="input" value={brief.tone} onChange={(e) => bf("tone", e.target.value)} placeholder="Tom de voz (ex.: consultivo, direto)" />
+                <div>
+                  <label className="label">Nunca dizer / evitar</label>
+                  <textarea className="input mt-1 min-h-[70px] leading-relaxed" value={brief.avoid} onChange={(e) => bf("avoid", e.target.value)} placeholder="Promessas proibidas, termos a evitar, restrições de compliance." />
+                </div>
+              </div>
+            )}
 
             <div className="mt-3 flex flex-wrap items-center gap-4">
               <label className="flex items-center gap-2 text-xs text-subtle">
@@ -180,33 +196,41 @@ export default function SequenceBuilder() {
               </div>
             </div>
 
-            {/* Considerar rapport na cadência */}
-            <label className="mt-3 flex items-start gap-2 rounded-xl border border-line bg-muted/40 p-3 text-sm">
-              <input type="checkbox" className="mt-0.5" checked={useRapport} onChange={(e) => setUseRapport(e.target.checked)} />
-              <span>
-                <b>Considerar dados de rapport</b> — a IA costura ganchos de {`{{interesses}}`} e {`{{contexto}}`} no texto
-                (trocados por contato, sem custo extra). <span className="text-subtle">Use quando seus contatos têm esses campos preenchidos.</span>
-              </span>
-            </label>
-
-            {/* Qualidade máxima (pacote Opus) */}
-            <label className="mt-3 flex items-start gap-2 rounded-xl border border-brand/30 bg-brand-soft/40 p-3 text-sm">
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={premium}
-                onChange={(e) => setPremium(e.target.checked)}
-                disabled={opusLeft === 0}
-              />
-              <span>
-                <b>Qualidade máxima (Opus)</b> — o modelo topo, para a cadência que você quer impecável.
-                {opus ? (
-                  <span className={`ml-1 ${opusLeft === 0 ? "text-danger" : "text-subtle"}`}>
-                    {opusLeft === 0 ? "Pacote do mês esgotado." : `${opusLeft} de ${opus.quota} no pacote deste mês.`}
+            {/* Opções avançadas — rapport + qualidade máxima */}
+            <button type="button" className="mt-3 text-xs font-medium text-brand hover:underline" onClick={() => setShowAdvIa((s) => !s)}>
+              {showAdvIa ? "− Opções avançadas" : "+ Opções avançadas (rapport, qualidade máxima)"}
+            </button>
+            {showAdvIa && (
+              <div className="mt-2 space-y-3">
+                {/* Considerar rapport na cadência */}
+                <label className="flex items-start gap-2 rounded-xl border border-line bg-muted/40 p-3 text-sm">
+                  <input type="checkbox" className="mt-0.5" checked={useRapport} onChange={(e) => setUseRapport(e.target.checked)} />
+                  <span>
+                    <b>Considerar dados de rapport</b> — a IA costura ganchos de {`{{interesses}}`} e {`{{contexto}}`} no texto
+                    (trocados por contato, sem custo extra). <span className="text-subtle">Use quando seus contatos têm esses campos preenchidos.</span>
                   </span>
-                ) : null}
-              </span>
-            </label>
+                </label>
+
+                {/* Qualidade máxima (pacote Opus) */}
+                <label className="flex items-start gap-2 rounded-xl border border-brand/30 bg-brand-soft/40 p-3 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={premium}
+                    onChange={(e) => setPremium(e.target.checked)}
+                    disabled={opusLeft === 0}
+                  />
+                  <span>
+                    <b>Qualidade máxima</b> — o modelo topo, para a cadência que você quer impecável.
+                    {opus ? (
+                      <span className={`ml-1 ${opusLeft === 0 ? "text-danger" : "text-subtle"}`}>
+                        {opusLeft === 0 ? "Pacote do mês esgotado." : `${opusLeft} de ${opus.quota} no pacote deste mês.`}
+                      </span>
+                    ) : null}
+                  </span>
+                </label>
+              </div>
+            )}
 
             {aiMsg && <p className={`mt-2 text-sm ${aiMsg.startsWith("✓") ? "text-signal" : "text-danger"}`}>{aiMsg}</p>}
             <div className="mt-3 flex flex-wrap gap-2">
@@ -275,29 +299,53 @@ export default function SequenceBuilder() {
                   className="input mt-3"
                   value={s.subject}
                   onChange={(e) => update(i, { subject: e.target.value })}
-                  placeholder="Assunto do e-mail (variante A)"
+                  placeholder="Assunto do e-mail"
                 />
-                <input
-                  className="input mt-2"
-                  value={s.subject_b || ""}
-                  onChange={(e) => update(i, { subject_b: e.target.value })}
-                  placeholder="Assunto alternativo (variante B) — opcional, para teste A/B"
-                />
-                {s.subject_b?.trim() ? (
-                  <p className="mt-1 text-[11px] text-subtle">Teste A/B ativo: cada contato recebe A ou B (sorteio 50/50). O relatório mostra qual converte mais.</p>
-                ) : null}
+                {isAbOpen(i) ? (
+                  <>
+                    <input
+                      className="input mt-2"
+                      value={s.subject_b || ""}
+                      onChange={(e) => update(i, { subject_b: e.target.value })}
+                      placeholder="Assunto alternativo (variante B)"
+                    />
+                    <p className="mt-1 text-[11px] text-subtle">
+                      Teste A/B: cada contato recebe A ou B (sorteio 50/50). O relatório mostra qual converte mais.{" "}
+                      <button type="button" className="text-brand hover:underline" onClick={() => removeAb(i)}>remover teste</button>
+                    </p>
+                  </>
+                ) : (
+                  <button type="button" className="mt-2 text-xs font-medium text-brand hover:underline" onClick={() => openAb(i)}>
+                    + Testar outro assunto (A/B)
+                  </button>
+                )}
               </>
             )}
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className="text-xs text-subtle">Inserir:</span>
-              {["primeiro_nome", "empresa", "cargo", "cidade", "cnae", "interesses", "contexto"].map((v) => (
-                <button key={v} type="button" className="rounded-lg border border-line px-2 py-0.5 text-xs hover:bg-muted" onClick={() => insertVar(i, v)}>
-                  {`{{${v}}}`}
+              <span className="text-xs text-subtle">Inserir dado do contato:</span>
+              {[
+                { v: "primeiro_nome", l: "Primeiro nome" },
+                { v: "empresa", l: "Empresa" },
+                { v: "cargo", l: "Cargo" },
+                { v: "cidade", l: "Cidade" },
+                { v: "cnae", l: "Atividade" },
+              ].map((c) => (
+                <button key={c.v} type="button" className="rounded-lg border border-line px-2 py-0.5 text-xs hover:bg-muted" onClick={() => insertVar(i, c.v)} title={`Insere o campo ${c.l}, trocado pelo dado de cada contato ao enviar`}>
+                  {c.l}
+                </button>
+              ))}
+              <span className="text-subtle">·</span>
+              {[
+                { v: "interesses", l: "Interesses" },
+                { v: "contexto", l: "Contexto" },
+              ].map((c) => (
+                <button key={c.v} type="button" className="rounded-lg border border-brand/30 bg-brand-soft/40 px-2 py-0.5 text-xs text-brand-dark hover:bg-brand-soft" onClick={() => insertVar(i, c.v)} title="Rapport — personaliza por contato, sem custo de IA">
+                  {c.l}
                 </button>
               ))}
             </div>
             <p className="mt-1 text-[11px] text-subtle">
-              As de <b>rapport</b> ({`{{interesses}}, {{contexto}}`}) personalizam por contato sem custo de IA — use numa frase que também leia bem se estiver vazia.
+              Cada campo vira o dado do contato ao enviar. Os de <b>rapport</b> (Interesses, Contexto) personalizam sem custo de IA — use numa frase que também leia bem se estiver vazia.
             </p>
             <textarea
               ref={(el) => { bodyRefs.current[i] = el; }}
