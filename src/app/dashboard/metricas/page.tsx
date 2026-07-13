@@ -100,21 +100,15 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
   }
   const revProductTop = Object.entries(revByProduct).sort((a, b) => b[1] - a[1]).slice(0, 6);
 
-  // conversão por estágio: quantos ainda estão vs. já passaram (aprox. pelo funil aberto)
-  const funnelConv = stageList
-    .filter((s) => !s.is_won && !s.is_lost)
-    .map((s, i, arr) => {
-      const here = openOpps.filter((o) => o.stage_id === s.id).length;
-      const next = i < arr.length - 1 ? openOpps.filter((o) => o.stage_id === arr[i + 1].id).length : 0;
-      const conv = here > 0 ? Math.round((next / here) * 100) : null;
-      return { name: s.name, here, conv };
-    });
-
+  // FUNIL FUNDIDO: cada estágio mostra contagem + valor + % que avança para o próximo
   const funnel = stageList
     .filter((s) => !s.is_won && !s.is_lost)
-    .map((s) => {
+    .map((s, i, arr) => {
       const inStage = openOpps.filter((o) => o.stage_id === s.id);
-      return { name: s.name, count: inStage.length, value: inStage.reduce((a, o) => a + Number(o.value_mrr || 0), 0) };
+      const here = inStage.length;
+      const next = i < arr.length - 1 ? openOpps.filter((o) => o.stage_id === arr[i + 1].id).length : null;
+      const conv = next !== null && here > 0 ? Math.round((next / here) * 100) : null;
+      return { name: s.name, count: here, value: inStage.reduce((a, o) => a + Number(o.value_mrr || 0), 0), conv };
     });
   const maxCount = Math.max(1, ...funnel.map((f) => f.count));
 
@@ -128,14 +122,11 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
   const noShowBase = realizadas + noShows;
   const noShowRate = noShowBase > 0 ? Math.round((noShows / noShowBase) * 100) : null;
 
-  const hotCount = openOpps.length; // placeholder simples quando filtrado
+  // KPIs de RESULTADO (só os 3 que importam no topo)
   const cards = [
-    { label: "Pipeline aberto", value: brl(openValue), sub: `${openOpps.length} negócios` },
-    { label: "Ganho (MRR)", value: brl(wonValue), sub: `${won.length} fechados` },
+    { label: "Negócios em aberto", value: brl(openValue), sub: `${openOpps.length} negócios` },
+    { label: "Receita fechada", value: brl(wonValue), sub: `${won.length} fechados no recorte` },
     { label: "Taxa de ganho", value: winRate === null ? "—" : `${winRate}%`, sub: `${won.length}/${closed} fechados` },
-    { label: "Ticket médio", value: avgTicket === null ? "—" : brl(avgTicket), sub: "por negócio ganho" },
-    { label: "Tempo de fechamento", value: avgCycle === null ? "—" : `${avgCycle} dias`, sub: "criação → ganho" },
-    { label: "Respostas (período)", value: String(replies), sub: `${dias} dias` },
   ];
 
   const memberList = (members as any[]) || [];
@@ -177,25 +168,31 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
         />
       </div>
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-4">
+      {/* RESULTADO — os 3 KPIs de topo */}
+      <div className="mt-6 grid gap-4 sm:grid-cols-3">
         {cards.map((c) => (
           <div key={c.label} className="card p-5">
             <span className="label">{c.label}</span>
-            <p className="mt-2 font-display text-2xl font-bold">{c.value}</p>
+            <p className="mt-2 font-display text-3xl font-bold">{c.value}</p>
             <p className="mt-1 text-xs text-subtle">{c.sub}</p>
           </div>
         ))}
       </div>
 
+      {/* FUNIL (com conversão embutida) + ATIVIDADE */}
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <div className="card p-5">
-          <h2 className="font-display text-lg font-bold">Funil (negócios abertos)</h2>
+          <h2 className="font-display text-lg font-bold">Funil de negócios em aberto</h2>
+          <p className="text-xs text-subtle">Quantos negócios e quanto valor em cada etapa — e quantos % avançam para a próxima.</p>
           <div className="mt-4 space-y-3">
             {funnel.map((f) => (
               <div key={f.name}>
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-medium">{f.name}</span>
-                  <span className="text-subtle">{f.count} · {brl(f.value)}/mês</span>
+                  <span className="text-subtle">
+                    {f.count} · {brl(f.value)}/mês
+                    {f.conv !== null && <span className="ml-2 font-semibold text-brand-dark">→ {f.conv}% avança</span>}
+                  </span>
                 </div>
                 <div className="mt-1 h-2 rounded-full bg-muted">
                   <div className="h-2 rounded-full bg-brand" style={{ width: `${(f.count / maxCount) * 100}%` }} />
@@ -209,69 +206,59 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
         <div className="card p-5">
           <h2 className="font-display text-lg font-bold">Atividade ({dias} dias)</h2>
           <div className="mt-4 grid grid-cols-2 gap-4">
-            <Metric label="Toques executados" value={touchesDone} />
+            <Metric label="Atividades feitas" value={touchesDone} />
             <Metric label="E-mails enviados" value={emailsSent} />
-            <Metric label="Respostas" value={replies} />
+            <Metric label="Respostas recebidas" value={replies} />
             <Metric label="Reuniões realizadas" value={realizadas} />
           </div>
           <div className="mt-4 rounded-xl bg-muted p-4">
             <div className="flex items-center justify-between text-sm">
-              <span className="font-medium">Taxa de no-show</span>
+              <span className="font-medium">Taxa de faltas nas reuniões</span>
               <span className={`font-bold ${noShowRate !== null && noShowRate > 30 ? "text-danger" : "text-ink"}`}>
                 {noShowRate === null ? "—" : `${noShowRate}%`}
               </span>
             </div>
-            <p className="mt-1 text-xs text-subtle">{noShows} no-shows em {noShowBase} reuniões concluídas</p>
+            <p className="mt-1 text-xs text-subtle">{noShows} falta(s) em {noShowBase} reuniões concluídas</p>
           </div>
         </div>
       </div>
 
-      {/* Conversão por estágio + Motivos de perda */}
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+      {/* DETALHES (secundário) */}
+      <p className="mt-8 mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Detalhes</p>
+      <div className="grid gap-4 lg:grid-cols-2">
         <div className="card p-5">
-          <h2 className="font-display text-lg font-bold">Conversão por estágio</h2>
-          <p className="text-xs text-subtle">% que avança para o próximo estágio (negócios abertos).</p>
-          <div className="mt-3 space-y-2">
-            {funnelConv.map((f) => (
-              <div key={f.name} className="flex items-center justify-between text-sm">
-                <span>{f.name} <span className="text-subtle">({f.here})</span></span>
-                <span className="font-semibold text-brand-dark">{f.conv === null ? "—" : `${f.conv}%`}</span>
-              </div>
-            ))}
-            {!funnelConv.length && <p className="text-sm text-subtle">Sem estágios abertos.</p>}
+          <div className="grid grid-cols-2 gap-4">
+            <Metric label="Valor médio por negócio" value={avgTicket === null ? "—" : brl(avgTicket)} />
+            <Metric label="Tempo médio de fechamento" value={avgCycle === null ? "—" : `${avgCycle} dias`} />
+          </div>
+          <div className="mt-5 border-t border-line pt-4">
+            <p className="text-sm font-semibold">Motivos de perda</p>
+            <p className="text-xs text-subtle">{lost.length} negócio(s) perdido(s) no recorte.</p>
+            <div className="mt-2 space-y-2">
+              {lossTop.map(([reason, count]) => (
+                <div key={reason} className="flex items-center justify-between text-sm">
+                  <span>{reason}</span>
+                  <span className="rounded-full bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">{count}</span>
+                </div>
+              ))}
+              {!lossTop.length && <p className="text-sm text-subtle">Nenhuma perda registrada.</p>}
+            </div>
           </div>
         </div>
 
         <div className="card p-5">
-          <h2 className="font-display text-lg font-bold">Motivos de perda</h2>
-          <p className="text-xs text-subtle">{lost.length} negócio(s) perdido(s) no recorte.</p>
+          <p className="text-sm font-semibold">Receita por produto</p>
+          <p className="text-xs text-subtle">Receita recorrente fechada por produto/serviço.</p>
           <div className="mt-3 space-y-2">
-            {lossTop.map(([reason, count]) => (
-              <div key={reason} className="flex items-center justify-between text-sm">
-                <span>{reason}</span>
-                <span className="rounded-full bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">{count}</span>
-              </div>
-            ))}
-            {!lossTop.length && <p className="text-sm text-subtle">Nenhuma perda registrada.</p>}
-          </div>
-        </div>
-      </div>
-
-      {/* Receita por produto */}
-      {revProductTop.length > 0 && (
-        <div className="card mt-4 p-5">
-          <h2 className="font-display text-lg font-bold">Receita por produto</h2>
-          <p className="text-xs text-subtle">MRR ganho por produto/serviço vinculado às oportunidades.</p>
-          <div className="mt-3 space-y-2">
-            {revProductTop.map(([name, val]) => (
+            {revProductTop.length ? revProductTop.map(([name, val]) => (
               <div key={name} className="flex items-center justify-between text-sm">
                 <span>{name}</span>
                 <span className="font-semibold text-signal">{brl(val)}</span>
               </div>
-            ))}
+            )) : <p className="text-sm text-subtle">Vincule produtos às oportunidades para ver a receita por produto.</p>}
           </div>
         </div>
-      )}
+      </div>
 
       {isManager && !vendedor && memberList.length > 1 && (
         <p className="mt-6 text-xs text-subtle">Dica: selecione um vendedor acima para ver o funil, a atividade e as reuniões individuais dele.</p>
@@ -280,7 +267,7 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
   );
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
+function Metric({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
       <p className="font-display text-2xl font-bold">{value}</p>

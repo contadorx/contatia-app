@@ -58,11 +58,11 @@ export default function GoalPanel({
       {edit && (
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <div>
-            <label className="label">Meta de MRR fechado (R$)</label>
+            <label className="label">Meta de receita recorrente fechada (R$/mês)</label>
             <input type="number" className="input mt-1" value={mrr} onChange={(e) => setMrr(e.target.value)} placeholder="5000" />
           </div>
           <div>
-            <label className="label">Meta de toques</label>
+            <label className="label">Meta de atividades</label>
             <input type="number" className="input mt-1" value={touch} onChange={(e) => setTouch(e.target.value)} placeholder="300" />
           </div>
           <div className="flex items-end">
@@ -83,7 +83,7 @@ export default function GoalPanel({
         </div>
         <div>
           <div className="flex items-baseline justify-between">
-            <span className="text-sm font-medium">Toques no mês</span>
+            <span className="text-sm font-medium">Atividades no mês</span>
             <span className="text-sm text-subtle">{touchesDone} / {touchTarget || 0}</span>
           </div>
           <div className="mt-1"><Bar done={touchesDone} target={touchTarget} hue="#12B76A" /></div>
