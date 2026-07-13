@@ -73,7 +73,7 @@ export async function enrollContact(contactId: string, sequenceId: string) {
 
   const { data: contact } = await supabase
     .from("contacts")
-    .select("id, name, email, company, phone, assigned_to")
+    .select("id, name, email, company, phone, role_title, cnpj, custom, assigned_to")
     .eq("id", contactId)
     .single();
   if (!contact) return { error: "Contato não encontrado." };
@@ -108,7 +108,7 @@ export async function enrollContact(contactId: string, sequenceId: string) {
       contact_id: contactId,
       assigned_to: assigned,
       channel: s.channel,
-      title: chosenSubject || channelLabel[s.channel as Channel],
+      title: renderTemplate(chosenSubject, contact) || channelLabel[s.channel as Channel],
       generated_content: renderTemplate(s.body_template, contact),
       due_date: addDaysISO(today, offset),
       status: "pending",
@@ -146,13 +146,47 @@ export async function generateSequenceAI(brief: {
   if (!brief.market?.trim() || !brief.product?.trim()) {
     return { error: "Descreva ao menos o mercado e o produto." };
   }
-  const supabase = createClient();
-  const { data: tenant } = await supabase.from("tenants").select("ai_model, ai_api_key").maybeSingle();
+
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const { data: tenant } = await supabase
+    .from("tenants")
+    .select("ai_model, ai_api_key, platform_plans(ai_quota, segment)")
+    .eq("id", tenant_id)
+    .maybeSingle();
+
+  // ---- TRAVA DE USO JUSTO (protege a margem contra abuso) ----
+  // cota mensal: base do plano (100), x assentos nas Equipes; trial/sem plano = 50.
+  const plan = (tenant as any)?.platform_plans;
+  let quota = plan?.ai_quota ? Number(plan.ai_quota) : 50;
+  if (plan?.segment === "equipe") {
+    const { count: seats } = await supabase.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenant_id);
+    quota = quota * Math.max(1, seats ?? 1);
+  }
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+  const { count: used } = await supabase
+    .from("events")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenant_id)
+    .eq("type", "ai_generation")
+    .gte("created_at", monthStart);
+  if ((used ?? 0) >= quota) {
+    return { error: `Você atingiu o limite de ${quota} gerações de IA neste mês. O limite renova no dia 1º. Precisa de mais volume? Fale com a gente.` };
+  }
+
   const { generateSequence } = await import("@/lib/anthropic");
-  return await generateSequence(brief, {
+  const result = await generateSequence(brief, {
     apiKey: (tenant as any)?.ai_api_key || undefined,
     model: (tenant as any)?.ai_model || undefined,
   });
+
+  // conta a geração só quando deu certo (não penaliza erro de API)
+  if ((result as any)?.steps) {
+    await supabase.from("events").insert({ tenant_id, type: "ai_generation", meta: {} } as any);
+  }
+  return result;
 }
 
 // Carrega o contexto salvo do negócio (para pré-preencher o painel de IA).

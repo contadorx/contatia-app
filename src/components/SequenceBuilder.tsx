@@ -255,12 +255,15 @@ export default function SequenceBuilder() {
             )}
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span className="text-xs text-subtle">Inserir:</span>
-              {["primeiro_nome", "empresa"].map((v) => (
+              {["primeiro_nome", "empresa", "cargo", "cidade", "cnae", "interesses", "contexto"].map((v) => (
                 <button key={v} type="button" className="rounded-lg border border-line px-2 py-0.5 text-xs hover:bg-muted" onClick={() => insertVar(i, v)}>
                   {`{{${v}}}`}
                 </button>
               ))}
             </div>
+            <p className="mt-1 text-[11px] text-subtle">
+              As de <b>rapport</b> ({`{{interesses}}, {{contexto}}`}) personalizam por contato sem custo de IA — use numa frase que também leia bem se estiver vazia.
+            </p>
             <textarea
               ref={(el) => { bodyRefs.current[i] = el; }}
               className="input mt-1 min-h-[150px] leading-relaxed"
