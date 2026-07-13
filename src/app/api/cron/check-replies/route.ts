@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
-import { fetchRecentSenders } from "@/lib/imap";
+import { fetchRecentMessages } from "@/lib/imap";
 import { POINTS } from "@/lib/scoring";
 
 export const dynamic = "force-dynamic";
@@ -33,16 +33,19 @@ export async function GET(req: Request) {
       ? new Date(acc.last_reply_check_at)
       : new Date(Date.now() - 24 * 3600 * 1000);
 
-    let senders: string[] = [];
+    let msgs: { from: string; subject: string }[] = [];
     try {
-      senders = await fetchRecentSenders(acc, since);
+      msgs = await fetchRecentMessages(acc, since);
     } catch (e: any) {
       errors.push(`${acc.id}: ${e?.message || "imap erro"}`);
       continue; // não atualiza o cursor se falhou, tenta de novo depois
     }
 
-    if (senders.length) {
-      const set = new Set(senders);
+    if (msgs.length) {
+      const set = new Set(msgs.map((m) => m.from));
+      // assunto por remetente (o primeiro que aparece) — para o contexto na timeline
+      const subjectByEmail: Record<string, string> = {};
+      for (const m of msgs) if (m.from && !subjectByEmail[m.from]) subjectByEmail[m.from] = m.subject;
       const { data: enrs } = await admin
         .from("enrollments")
         .select("id, contact_id, contacts(email)")
@@ -58,7 +61,7 @@ export async function GET(req: Request) {
           tenant_id: acc.tenant_id,
           contact_id: e.contact_id,
           type: "replied",
-          meta: { via: "imap" },
+          meta: { via: "imap", text: subjectByEmail[email] ? `Assunto: "${subjectByEmail[email]}"` : "" },
         });
         const { data: c } = await admin.from("contacts").select("score").eq("id", e.contact_id).single();
         await admin
@@ -196,6 +199,16 @@ export async function GET(req: Request) {
     /* régua não deve quebrar o cron */
   }
 
+  // reconcilia o valor das assinaturas com o nº de assentos (per-seat) + reversão de cupom
+  let seatsSynced = 0;
+  try {
+    const { reconcileAllSeats } = await import("@/lib/billing");
+    const rr = await reconcileAllSeats();
+    seatsSynced = rr.synced;
+  } catch (e: any) {
+    errors.push(`seats: ${e?.message || "erro"}`);
+  }
+
   // régua de ciclo de vida do assinante (boas-vindas, onboarding, reengajamento)
   let lifecycle = 0;
   try {
@@ -225,5 +238,5 @@ export async function GET(req: Request) {
     errors.push(`discovery: ${e?.message || "erro"}`);
   }
 
-  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, autoRan, purged, reminders, lifecycle, crm, discovery, errors });
+  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, autoRan, purged, reminders, seatsSynced, lifecycle, crm, discovery, errors });
 }

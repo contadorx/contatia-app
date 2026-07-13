@@ -2,6 +2,7 @@ import { UsageLimits } from "@/components/UsageLimits";
 import { getUsage } from "@/lib/plan";
 import { createClient } from "@/lib/supabase/server";
 import { PlanPicker } from "@/components/PlanPicker";
+import CancelSubscription from "@/components/CancelSubscription";
 
 export const dynamic = "force-dynamic";
 
@@ -109,7 +110,10 @@ export default async function Planos() {
         />
       </div>
 
-      <p className="mt-6 text-xs text-subtle">O valor é calculado por usuário ativo ({Math.max(1, seats ?? 1)} hoje) × o preço do plano. A cobrança é mensal via Asaas — você escolhe boleto, Pix ou cartão. Cancele quando quiser.</p>
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-subtle">O valor é calculado por usuário ativo ({Math.max(1, seats ?? 1)} hoje) × o preço do plano. A cobrança é mensal via Asaas — você escolhe boleto, Pix ou cartão. Ao adicionar ou remover usuários, o valor se ajusta automaticamente.</p>
+        {isOwner && currentPlanId && ["active", "past_due", "pending"].includes(status || "") && <CancelSubscription />}
+      </div>
 
       {/* Central de faturas */}
       <div className="mt-10 border-t border-line pt-8">

@@ -47,7 +47,7 @@ export default function DashboardNav({ isSuperadmin = false, unreadReplies = 0 }
   const pathname = usePathname();
 
   const allGroups = isSuperadmin
-    ? [...groups, { title: "Plataforma", items: [{ href: "/dashboard/superadmin", label: "Superadmin" }, { href: "/dashboard/superadmin/kb", label: "Base de conhecimento" }] }]
+    ? [...groups, { title: "Plataforma", items: [{ href: "/dashboard/superadmin", label: "Superadmin" }, { href: "/dashboard/superadmin/cupons", label: "Cupons" }, { href: "/dashboard/superadmin/kb", label: "Base de conhecimento" }] }]
     : groups;
 
   return (

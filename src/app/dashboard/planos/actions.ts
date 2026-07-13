@@ -16,7 +16,13 @@ async function seatCount(supabase: any, tenant_id: string): Promise<number> {
   return Math.max(1, count ?? 1);
 }
 
-export async function subscribePlan(planId: string, docNumber?: string) {
+function addMonthsISO(n: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+export async function subscribePlan(planId: string, docNumber?: string, couponCode?: string) {
   const { supabase, tenant_id, role } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (role !== "owner") return { error: "Apenas o dono do workspace pode assinar." };
@@ -46,7 +52,25 @@ export async function subscribePlan(planId: string, docNumber?: string) {
   }
 
   const seats = await seatCount(supabase, tenant_id);
-  const value = Number((plan as any).price_monthly) * seats;
+  const full = Number((plan as any).price_monthly) * seats;
+
+  // cupom (opcional): validado com o admin client, pois platform_coupons é superadmin-only
+  let coupon: any = null;
+  if (couponCode && couponCode.trim()) {
+    const { createAdminClient } = await import("@/lib/supabaseAdmin");
+    const admin = createAdminClient();
+    if (!admin) return { error: "Cupons indisponíveis no momento." };
+    const code = couponCode.trim().toUpperCase();
+    const { data: c } = await admin.from("platform_coupons").select("*").eq("code", code).maybeSingle();
+    if (!c) return { error: "coupon_invalid" };
+    const expired = (c as any).expires_at && new Date((c as any).expires_at) < new Date();
+    const esgotado = (c as any).max_redemptions != null && (c as any).redeemed_count >= (c as any).max_redemptions;
+    if (!(c as any).is_active || expired || esgotado) return { error: "coupon_invalid" };
+    coupon = c;
+  }
+
+  const factor = coupon ? Math.max(0, 1 - Number(coupon.percent_off) / 100) : 1;
+  const value = Math.round(full * factor * 100) / 100;
 
   const { ensureAsaasCustomer, createAsaasSubscription, cancelAsaasSubscription } = await import("@/lib/asaas");
 
@@ -75,14 +99,65 @@ export async function subscribePlan(planId: string, docNumber?: string) {
   if (sub.error) return { error: sub.error };
 
   // vincula o plano ao tenant (status aguardando 1º pagamento; o webhook confirma)
+  const revertsOn = coupon && Number(coupon.duration_months) > 0 ? addMonthsISO(Number(coupon.duration_months)) : null;
   await supabase.from("tenants").update({
     plan_id: (plan as any).id,
     asaas_customer_id: cust.id,
     asaas_subscription_id: sub.id || null,
     subscription_status: "pending",
     mrr: value,
+    coupon_code: coupon?.code || null,
+    coupon_percent_off: coupon?.percent_off || null,
+    coupon_reverts_on: revertsOn,
+  }).eq("id", tenant_id);
+
+  // resgata o cupom (conta a redenção)
+  if (coupon) {
+    try {
+      const { createAdminClient } = await import("@/lib/supabaseAdmin");
+      const admin = createAdminClient();
+      if (admin) await admin.from("platform_coupons").update({ redeemed_count: Number(coupon.redeemed_count) + 1 }).eq("id", coupon.id);
+    } catch { /* não bloqueia a assinatura */ }
+  }
+
+  revalidatePath("/dashboard/planos");
+  return { ok: true, link: sub.link, value, full, seats, planName: (plan as any).name, discountPct: coupon?.percent_off || 0 };
+}
+
+// Valida um cupom sem assinar (para a tela mostrar o desconto antes de confirmar).
+export async function validateCoupon(code: string) {
+  if (!code || !code.trim()) return { error: "Informe o código." };
+  const { createAdminClient } = await import("@/lib/supabaseAdmin");
+  const admin = createAdminClient();
+  if (!admin) return { error: "Cupons indisponíveis." };
+  const { data: c } = await admin.from("platform_coupons").select("code, percent_off, duration_months, is_active, expires_at, max_redemptions, redeemed_count").eq("code", code.trim().toUpperCase()).maybeSingle();
+  if (!c) return { error: "Cupom não encontrado." };
+  const expired = (c as any).expires_at && new Date((c as any).expires_at) < new Date();
+  const esgotado = (c as any).max_redemptions != null && (c as any).redeemed_count >= (c as any).max_redemptions;
+  if (!(c as any).is_active || expired || esgotado) return { error: "Cupom inválido ou esgotado." };
+  return { ok: true, percentOff: (c as any).percent_off, durationMonths: (c as any).duration_months || 0 };
+}
+
+// Cancela a assinatura do próprio cliente (self-service, owner).
+export async function cancelSubscription() {
+  const { supabase, tenant_id, role } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  if (role !== "owner") return { error: "Apenas o dono do workspace pode cancelar." };
+
+  const { data: t } = await supabase.from("tenants").select("asaas_subscription_id").eq("id", tenant_id).maybeSingle();
+  const subId = (t as any)?.asaas_subscription_id as string | null;
+  if (subId) {
+    const { cancelAsaasSubscription } = await import("@/lib/asaas");
+    const r = await cancelAsaasSubscription(subId);
+    if (r.error) return { error: r.error };
+  }
+
+  await supabase.from("tenants").update({
+    subscription_status: "canceled",
+    asaas_subscription_id: null,
+    mrr: 0,
   }).eq("id", tenant_id);
 
   revalidatePath("/dashboard/planos");
-  return { ok: true, link: sub.link, value, seats, planName: (plan as any).name };
+  return { ok: true };
 }
