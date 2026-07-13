@@ -134,7 +134,7 @@ export default function SequenceBuilder() {
             <p className="mt-0.5 text-xs text-subtle">Quanto mais contexto, melhor a cadência. Puxamos o que já está salvo no seu negócio.</p>
 
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <input className="input" value={brief.market} onChange={(e) => bf("market", e.target.value)} placeholder="Mercado-alvo (ex.: contadores SP)" />
+              <input className="input" value={brief.market} onChange={(e) => bf("market", e.target.value)} placeholder="Mercado-alvo (ex.: clínicas particulares em SP)" />
               <input className="input" value={brief.product} onChange={(e) => bf("product", e.target.value)} placeholder="Seu produto/serviço" />
               <input className="input" value={brief.icp} onChange={(e) => bf("icp", e.target.value)} placeholder="Cliente ideal (cargo, porte)" />
             </div>
@@ -193,11 +193,11 @@ export default function SequenceBuilder() {
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className="label">Nome da sequência *</label>
-          <input className="input mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="Prospecção — Reforma" />
+          <input className="input mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Prospecção — Q3" />
         </div>
         <div>
           <label className="label">Público-alvo</label>
-          <input className="input mt-1" value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="Contadores T1" />
+          <input className="input mt-1" value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="Ex.: Diretores de operações" />
         </div>
       </div>
 

@@ -186,7 +186,7 @@ export default function ContactsTable({
       {msg && <p className="mb-3 text-sm text-signal">{msg}</p>}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <input className="input max-w-[200px] py-1.5 text-sm" value={newTag} onChange={(e) => setNewTag(e.target.value)} placeholder="Nova tag (ex.: T1, Quente, Reforma)" />
+        <input className="input max-w-[200px] py-1.5 text-sm" value={newTag} onChange={(e) => setNewTag(e.target.value)} placeholder="Nova tag (ex.: Quente, Decisor, Follow-up)" />
         <button className="btn-ghost py-1.5 text-sm" onClick={doCreateTag} disabled={pending || !newTag.trim()}>Criar tag</button>
       </div>
 

@@ -85,7 +85,7 @@ export default function LoginPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="voce@escritorio.com.br"
+              placeholder="voce@suaempresa.com.br"
             />
           </div>
           <div>

@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Contatia",
-  description: "Cadência de vendas + pipeline para o seu escritório.",
+  title: "Contatia — produtize suas vendas",
+  description:
+    "A máquina de prospecção do seu time: cadência multicanal, fila diária e pipeline. Você produtiza o processo comercial — do primeiro toque ao negócio fechado.",
 };
 
 export default function RootLayout({
