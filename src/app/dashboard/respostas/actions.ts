@@ -129,11 +129,38 @@ export async function replyWhatsApp(input: { contactId?: string | null; phone: s
   return { ok: true };
 }
 
-// Marca uma conversa como lida.
-export async function markThreadRead(input: { contactId?: string | null; phone: string }) {
+// Marca uma conversa como lida (WhatsApp ou e-mail).
+export async function markThreadRead(input: { contactId?: string | null; phone?: string; email?: string; channel?: "whatsapp" | "email" }) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
-  await marcarLidas(supabase, tenant_id, input.contactId || null, input.phone);
+  if (input.channel === "email") {
+    let q = supabase.from("email_messages").update({ read_at: new Date().toISOString() }).eq("tenant_id", tenant_id).eq("direction", "in").is("read_at", null);
+    if (input.contactId) q = q.eq("contact_id", input.contactId);
+    else q = q.eq("email", (input.email || "").toLowerCase());
+    await q;
+  } else {
+    await marcarLidas(supabase, tenant_id, input.contactId || null, input.phone || "");
+  }
+  revalidatePath("/dashboard/respostas");
+  return { ok: true };
+}
+
+// Responde uma conversa por E-MAIL (reaproveita o envio avulso: rotação/assinatura/cap).
+export async function replyEmail(input: { contactId: string; subject: string; body: string }) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const subject = (input.subject || "").trim() || "Re:";
+  const body = (input.body || "").trim();
+  if (!body) return { error: "Escreva a resposta." };
+  if (!input.contactId) return { error: "Vincule o contato para responder por e-mail." };
+
+  const { sendQuickEmail } = await import("@/app/dashboard/contatos/quick-send-actions");
+  const r = (await sendQuickEmail(input.contactId, subject, body)) as any;
+  if (r?.error) return { error: r.error };
+
+  const { data: c } = await supabase.from("contacts").select("email").eq("id", input.contactId).maybeSingle();
+  await supabase.from("email_messages").insert({ tenant_id, contact_id: input.contactId, email: (c as any)?.email || null, direction: "out", subject, text: body });
+  await supabase.from("email_messages").update({ read_at: new Date().toISOString() }).eq("tenant_id", tenant_id).eq("contact_id", input.contactId).eq("direction", "in").is("read_at", null);
   revalidatePath("/dashboard/respostas");
   return { ok: true };
 }
