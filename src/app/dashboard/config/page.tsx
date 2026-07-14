@@ -1,6 +1,4 @@
 import type { ReactNode } from "react";
-import { hasFeature, hasAi } from "@/lib/plan";
-import { FeatureLock } from "@/components/UsageLimits";
 import { CrmIntegrations } from "@/components/CrmIntegrations";
 import { createClient } from "@/lib/supabase/server";
 import SmtpForm from "@/components/SmtpForm";
@@ -87,9 +85,6 @@ export default async function Config() {
   const waMode = ((tenant as any)?.whatsapp_mode as string) || "assistido";
   const waAcked = !!(tenant as any)?.whatsapp_risk_ack_at;
   const waPlatformReady = !!process.env.EVOLUTION_URL && !!process.env.EVOLUTION_API_KEY;
-
-  const temWhats = await hasFeature("whatsapp");
-  const temIA = await hasAi();
 
   const activeBoxes = rows.filter((a) => a.is_active);
   const capOf = (a: any) => {
@@ -223,13 +218,10 @@ export default async function Config() {
             <div className="mt-2 mb-8">
               <SubHead>WhatsApp</SubHead>
               <Section title="Canal do WhatsApp" desc="Escolha COMO usar o WhatsApp na cadência — o nível é seu, por trade-off de risco: do link sem risco à API automática.">
-                {temWhats ? (
-                  <div className="card p-5">
-                    <WhatsAppConnect accounts={(waAccounts as any[]) || []} mode={waMode as any} acked={waAcked} platformReady={waPlatformReady} />
-                  </div>
-                ) : (
-                  <FeatureLock feature="whatsapp" planoSugerido="Individual" titulo="WhatsApp na cadência" descricao="O canal que o brasileiro responde, dentro do fluxo: dispare o toque da fila, receba a resposta e deixe a cadência pausar sozinha." />
-                )}
+                {/* WhatsApp incluído em TODOS os planos — sem gate. */}
+                <div className="card p-5">
+                  <WhatsAppConnect accounts={(waAccounts as any[]) || []} mode={waMode as any} acked={waAcked} platformReady={waPlatformReady} />
+                </div>
               </Section>
             </div>
           </div>
@@ -241,16 +233,13 @@ export default async function Config() {
             </Section>
 
             <Section title="IA de cadência" desc="A IA que monta a cadência já vem incluída e gerenciada pela Contatia — nada para configurar aqui.">
-              {temIA ? (
-                <div className="card p-5">
-                  <p className="text-sm text-subtle">
-                    A geração de cadência com IA já vem <b>pronta e gerenciada pela Contatia</b> — você não precisa
-                    informar modelo nem chave. Use direto na tela de <b>Cadências</b> (Começar → Com IA).
-                  </p>
-                </div>
-              ) : (
-                <FeatureLock feature="ia" planoSugerido="Individual" titulo="IA que monta a cadência" descricao="Descreva o que você vende e para quem — a IA escreve a sequência completa: assuntos, corpos e intervalos." />
-              )}
+              {/* IA incluída em TODOS os planos — sem gate. */}
+              <div className="card p-5">
+                <p className="text-sm text-subtle">
+                  A geração de cadência com IA já vem <b>pronta e gerenciada pela Contatia</b> — você não precisa
+                  informar modelo nem chave. Use direto na tela de <b>Cadências</b> (Começar → Com IA).
+                </p>
+              </div>
             </Section>
           </div>
 

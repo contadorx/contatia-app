@@ -1,6 +1,6 @@
 "use server";
 
-import { canCreate, mensagemLimite, hasFeature, hasAi } from "@/lib/plan";
+import { canCreate, mensagemLimite } from "@/lib/plan";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -264,11 +264,7 @@ export async function generateSequenceAI(
   },
   opts?: { premium?: boolean; rapport?: boolean },
 ) {
-  // a IA está inclusa nos planos pagos (Individual e Equipes)
-  if (!(await hasAi())) {
-    return { error: "A geração de cadência com IA está inclusa nos planos pagos. Veja em Planos." };
-  }
-
+  // IA inclusa em TODOS os planos — sem gate de feature.
   if (!brief.market?.trim() || !brief.product?.trim()) {
     return { error: "Descreva ao menos o mercado e o produto." };
   }
