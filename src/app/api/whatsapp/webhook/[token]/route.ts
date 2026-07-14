@@ -102,17 +102,28 @@ export async function POST(req: Request, { params }: { params: { token: string }
     return NextResponse.json({ ok: true, blocked: true });
   }
 
-  // acha o contato pelo telefone (mesmo tenant)
-  const { data: contacts } = await admin
-    .from("contacts")
-    .select("id, phone, score")
-    .eq("tenant_id", tenant_id);
-  const contact = ((contacts as any[]) || []).find(
-    (c) => digits(c.phone || "").slice(-10) === last10 && last10.length >= 8
-  );
+  // M9: acha o contato consultando direto no banco pela coluna normalizada phone_digits
+  // (índice), em vez de carregar a tabela inteira. Se houver mais de um com os mesmos 10
+  // dígitos, prefere o de match EXATO (dígitos completos) e, na dúvida, não pausa nada.
+  let contact: { id: string; phone: string | null; score: number | null } | null = null;
+  if (last10.length >= 8) {
+    const { data: matches } = await admin
+      .from("contacts")
+      .select("id, phone, score")
+      .eq("tenant_id", tenant_id)
+      .eq("phone_digits", last10)
+      .limit(5);
+    const list = (matches as any[]) || [];
+    if (list.length === 1) contact = list[0];
+    else if (list.length > 1) {
+      const fromDigits = digits(fromPhone);
+      contact = list.find((c) => digits(c.phone || "") === fromDigits) || null; // só se inequívoco
+    }
+  }
 
-  // GUARDA A MENSAGEM (mesmo de número desconhecido — nada se perde)
-  // dedupe pelo id da mensagem
+  // GUARDA A MENSAGEM (mesmo de número desconhecido — nada se perde).
+  // B9: upsert idempotente por (tenant_id, wa_message_id) — entregas duplicadas da
+  // Evolution não geram linha nem pontuação a mais.
   if (waId) {
     const { data: exists } = await admin
       .from("whatsapp_messages")
@@ -122,7 +133,7 @@ export async function POST(req: Request, { params }: { params: { token: string }
       .maybeSingle();
     if (exists) return NextResponse.json({ ok: true, duplicate: true });
   }
-  await admin.from("whatsapp_messages").insert({
+  const { error: insErr } = await admin.from("whatsapp_messages").upsert({
     tenant_id,
     account_id,
     contact_id: contact?.id || null,
@@ -133,7 +144,9 @@ export async function POST(req: Request, { params }: { params: { token: string }
     media_mime: media.mime,
     wa_message_id: waId,
     raw: data || {},
-  });
+  }, waId ? { onConflict: "tenant_id,wa_message_id", ignoreDuplicates: true } : undefined);
+  // corrida: o índice único barrou uma duplicata concorrente → não segue para pontuar
+  if (insErr) return NextResponse.json({ ok: true, duplicate: true });
 
   // se é um contato conhecido em cadência ativa → pausa a sequência e pontua
   let marked = 0;

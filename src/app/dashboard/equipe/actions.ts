@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabaseAdmin";
 
 async function ctx() {
   const supabase = createClient();
@@ -10,10 +11,21 @@ async function ctx() {
   } = await supabase.auth.getUser();
   const { data } = await supabase
     .from("profiles")
-    .select("tenant_id, role")
+    .select("tenant_id, role, team_role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
-  return { supabase, tenant_id: (data?.tenant_id as string) || null, role: data?.role as string, user_id: user?.id };
+  return {
+    supabase,
+    tenant_id: (data?.tenant_id as string) || null,
+    role: data?.role as string,
+    team_role: (data as any)?.team_role as string | undefined,
+    user_id: user?.id,
+  };
+}
+
+// Quem pode convidar/remover convites: dono OU admin de equipe (capability "team").
+function podeConvidar(role?: string, team_role?: string) {
+  return role === "owner" || team_role === "admin";
 }
 
 export async function assignContact(contactId: string, userId: string | null) {
@@ -87,9 +99,9 @@ export async function dedupeByEmail() {
 
 // Gera um convite (owner). Retorna o token; o client monta o link.
 export async function createInvite(email: string, teamRole?: string) {
-  const { supabase, tenant_id, role, user_id } = await ctx();
+  const { supabase, tenant_id, role, team_role, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
-  if (role !== "owner") return { error: "Só o admin convida." };
+  if (!podeConvidar(role, team_role)) return { error: "Apenas dono ou admin podem convidar." };
   if (!email.trim() || !email.includes("@")) return { error: "E-mail inválido." };
   const papel = ["admin", "gestor", "sdr", "vendedor"].includes(teamRole || "") ? (teamRole as string) : "vendedor";
 
@@ -115,8 +127,8 @@ export async function createInvite(email: string, teamRole?: string) {
 }
 
 export async function revokeInvite(id: string) {
-  const { supabase, role } = await ctx();
-  if (role !== "owner") return { error: "Só o owner remove convites." };
+  const { supabase, role, team_role } = await ctx();
+  if (!podeConvidar(role, team_role)) return { error: "Apenas dono ou admin removem convites." };
   const { error } = await supabase.from("tenant_invites").delete().eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/dashboard/equipe");
@@ -124,19 +136,33 @@ export async function revokeInvite(id: string) {
 }
 
 // Define o nível de equipe de um membro. Só owner/admin/gestor podem alterar.
+// team_role é coluna PROTEGIDA (migration 0068) — o cliente do navegador não a grava;
+// por isso a escrita passa pelo admin client (service_role), com checagem explícita de
+// permissão do chamador E de que o alvo pertence ao MESMO workspace.
 export async function setTeamRole(memberId: string, teamRole: string) {
-  const { supabase, role, user_id } = await ctx();
+  const { supabase, tenant_id, role, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
   const { data: me } = await supabase.from("profiles").select("team_role").eq("id", user_id ?? "").maybeSingle();
   const canManage = role === "owner" || ["admin", "gestor"].includes((me as any)?.team_role);
   if (!canManage) return { error: "Só gestores/admin podem alterar níveis de equipe." };
   if (!["admin", "gestor", "sdr", "vendedor"].includes(teamRole)) return { error: "Nível inválido." };
-  const { error } = await supabase.from("profiles").update({ team_role: teamRole }).eq("id", memberId);
+
+  const admin = createAdminClient();
+  if (!admin) return { error: "Configuração indisponível (service role). Fale com o suporte." };
+
+  // o alvo precisa ser do MESMO tenant (o admin ignora RLS, então validamos na mão)
+  const { data: target } = await admin.from("profiles").select("tenant_id").eq("id", memberId).maybeSingle();
+  if (!target || (target as any).tenant_id !== tenant_id) {
+    return { error: "Membro não encontrado no seu workspace." };
+  }
+
+  const { error } = await admin.from("profiles").update({ team_role: teamRole }).eq("id", memberId);
   if (error) return { error: error.message };
 
   // deixou de ser SDR? as liberações de agenda dele perdem sentido — limpa
   // (hygiene que o antigo setRole fazia; agora vive aqui, no editor canônico)
   if (teamRole !== "sdr") {
-    await supabase.from("calendar_permissions").delete().eq("sdr_id", memberId);
+    await admin.from("calendar_permissions").delete().eq("sdr_id", memberId);
   }
 
   revalidatePath("/dashboard/equipe");

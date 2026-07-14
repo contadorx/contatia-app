@@ -147,7 +147,15 @@ export default async function DashboardLayout({
               <span className="font-semibold text-brand">Ver planos →</span>
             </a>
           )}
-        {noTenant && profile && !profileError ? (
+        {noTenant && isSuperadmin ? (
+          // B1: superadmin sem workspace NÃO deve cair no auto-provisionamento (viraria
+          // dono de um tenant à toa). Manda para o painel de superadmin.
+          <div className="card mx-auto max-w-xl p-8 text-center">
+            <p className="font-display text-lg font-bold">Modo superadmin</p>
+            <p className="mt-2 text-sm text-subtle">Sua conta é de administração da plataforma e não está vinculada a um workspace. Use o painel de superadmin ou entre em suporte a um workspace.</p>
+            <a href="/dashboard/superadmin" className="btn-brand mt-4 inline-flex">Abrir painel de superadmin</a>
+          </div>
+        ) : noTenant && profile && !profileError ? (
           // Perfil existe mas sem workspace = cadastro self-service sem onboarding.
           // Em vez do diagnóstico técnico, oferece criar o workspace na hora.
           <CreateWorkspace defaultName={((user as any)?.user_metadata?.company as string) || profile?.full_name || ""} />

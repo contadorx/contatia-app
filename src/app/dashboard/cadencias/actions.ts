@@ -5,6 +5,7 @@ import { canCreate, mensagemLimite, hasFeature, hasAi } from "@/lib/plan";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { renderTemplate, addDaysISO, channelLabel, type Channel } from "@/lib/cadence";
+import { isManager } from "@/lib/permissions";
 
 async function ctx() {
   const supabase = createClient();
@@ -17,6 +18,17 @@ async function ctx() {
     .eq("id", user?.id ?? "")
     .maybeSingle();
   return { supabase, tenant_id: (data?.tenant_id as string) || null, user_id: user?.id };
+}
+
+// A1: os server actions da cadência (load/update/report/template) precisam repetir a
+// regra de visibilidade que a LISTAGEM aplica — senão um vendedor lê/edita a cadência de
+// um colega chamando o action direto com o id. Gestor/dono acessam tudo do tenant;
+// vendedor/SDR só o que criaram.
+async function canUseSequence(supabase: any, user_id: string | undefined, sequenceId: string): Promise<boolean> {
+  const { data: me } = await supabase.from("profiles").select("role, team_role").eq("id", user_id ?? "").maybeSingle();
+  if (isManager((me as any)?.role, (me as any)?.team_role)) return true;
+  const { data: seq } = await supabase.from("sequences").select("created_by").eq("id", sequenceId).maybeSingle();
+  return !!seq && (seq as any).created_by === user_id;
 }
 
 export type StepInput = {
@@ -77,7 +89,8 @@ export async function createSequence(input: {
 
 // Carrega uma cadência salva (com todos os passos) para edição.
 export async function loadSequence(id: string) {
-  const { supabase } = await ctx();
+  const { supabase, user_id } = await ctx();
+  if (!(await canUseSequence(supabase, user_id, id))) return { error: "Cadência não encontrada." };
   const { data: seq } = await supabase.from("sequences").select("id, name, audience, product_id, email_account_id").eq("id", id).maybeSingle();
   if (!seq) return { error: "Cadência não encontrada." };
   const { data: steps } = await supabase
@@ -105,8 +118,9 @@ export async function loadSequence(id: string) {
 // As inscrições JÁ FEITAS não mudam — as tarefas delas foram geradas na inscrição
 // (snapshot). A edição vale para as PRÓXIMAS inscrições.
 export async function updateSequence(id: string, input: { name: string; audience: string; steps: StepInput[]; product_id?: string | null; email_account_id?: string | null }) {
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace atribuído." };
+  if (!(await canUseSequence(supabase, user_id, id))) return { error: "Você não pode editar esta cadência." };
   if (!input.name.trim()) return { error: "Dê um nome à sequência." };
   if (!input.steps.length) return { error: "Adicione ao menos um passo." };
 
@@ -122,12 +136,9 @@ export async function updateSequence(id: string, input: { name: string; audience
     .eq("tenant_id", tenant_id);
   if (e1) return { error: e1.message };
 
-  const { error: eDel } = await supabase.from("sequence_steps").delete().eq("sequence_id", id).eq("tenant_id", tenant_id);
-  if (eDel) return { error: eDel.message };
-
-  const steps = input.steps.map((s, i) => ({
-    sequence_id: id,
-    tenant_id,
+  // M2: delete + insert dos passos numa ÚNICA transação (RPC) — se algo falhar, os
+  // passos antigos NÃO se perdem (antes o delete commitava antes do insert).
+  const stepsJson = input.steps.map((s, i) => ({
     position: i,
     channel: s.channel,
     delay_days: Number(s.delay_days) || 0,
@@ -135,7 +146,11 @@ export async function updateSequence(id: string, input: { name: string; audience
     subject_b: s.channel === "email" && s.subject_b?.trim() ? s.subject_b.trim() : null,
     body_template: s.body || null,
   }));
-  const { error: e2 } = await supabase.from("sequence_steps").insert(steps);
+  const { error: e2 } = await supabase.rpc("replace_sequence_steps", {
+    p_seq: id,
+    p_tenant: tenant_id,
+    p_steps: stepsJson,
+  });
   if (e2) return { error: e2.message };
 
   revalidatePath("/dashboard/cadencias");
@@ -153,6 +168,20 @@ export async function enrollContact(contactId: string, sequenceId: string) {
     .eq("id", contactId)
     .single();
   if (!contact) return { error: "Contato não encontrado." };
+
+  // M1: não inscreve de novo quem já está ATIVO/PAUSADO nesta cadência (senão gera um
+  // 2º jogo de tarefas → o lead recebe cada e-mail duas vezes). O índice único 0070 é o
+  // backstop; aqui damos a mensagem amigável e evitamos o trabalho.
+  const { data: jaInscrito } = await supabase
+    .from("enrollments")
+    .select("id")
+    .eq("tenant_id", tenant_id)
+    .eq("contact_id", contactId)
+    .eq("sequence_id", sequenceId)
+    .in("status", ["active", "paused"])
+    .limit(1)
+    .maybeSingle();
+  if (jaInscrito) return { error: "Este contato já está ativo nesta cadência.", already: true };
 
   const { data: steps } = await supabase
     .from("sequence_steps")
@@ -380,6 +409,7 @@ export async function createFromTemplate(templateId: string) {
 export async function saveAsTemplate(sequenceId: string, description?: string) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
+  if (!(await canUseSequence(supabase, user_id, sequenceId))) return { error: "Cadência não encontrada." };
   const { data: seq } = await supabase.from("sequences").select("name, audience").eq("id", sequenceId).maybeSingle();
   if (!seq) return { error: "Cadência não encontrada." };
   const { data: steps } = await supabase

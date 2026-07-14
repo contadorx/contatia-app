@@ -18,10 +18,15 @@ export type EmailCheck = {
   syntax: boolean;
   disposable: boolean;
   hasMx: boolean;
+  unknown?: boolean;              // M6: o lookup FALHOU (timeout/servfail) — indeterminado
   reason?: string;
 };
 
 const RE = /^[^\s@]+@([^\s@]+\.[^\s@]+)$/;
+
+// erros de DNS que significam "não deu pra checar agora" (transitório), e não
+// "o domínio não existe / não recebe" (definitivo).
+const TRANSIENT = new Set(["ETIMEOUT", "ETIMEDOUT", "ESERVFAIL", "EAI_AGAIN", "ECONNREFUSED", "EREFUSED"]);
 
 export async function verifyEmail(raw: string): Promise<EmailCheck> {
   const email = (raw || "").trim().toLowerCase();
@@ -33,20 +38,29 @@ export async function verifyEmail(raw: string): Promise<EmailCheck> {
   if (disposable) return { email, valid: false, syntax: true, disposable: true, hasMx: false, reason: "Domínio descartável" };
 
   let hasMx = false;
+  let transient = false;
   try {
     const mx = await dns.resolveMx(domain);
     hasMx = Array.isArray(mx) && mx.length > 0;
-  } catch {
-    hasMx = false;
+  } catch (e: any) {
+    if (TRANSIENT.has(e?.code)) transient = true;
   }
   if (!hasMx) {
     // fallback: alguns domínios recebem por A record sem MX
     try {
       const a = await dns.resolve(domain);
       hasMx = Array.isArray(a) && a.length > 0;
-    } catch {
-      hasMx = false;
+      if (hasMx) transient = false;
+    } catch (e: any) {
+      if (TRANSIENT.has(e?.code)) transient = true;
     }
+  }
+
+  // M6: se o lookup falhou por motivo transitório e não achamos MX/A, o resultado é
+  // INDETERMINADO — não afirmamos "inválido" (senão um soluço de DNS derruba domínios
+  // válidos do outreach). Quem chama trata unknown como "não bloquear".
+  if (!hasMx && transient) {
+    return { email, valid: false, syntax: true, disposable: false, hasMx: false, unknown: true, reason: "Não foi possível verificar o domínio agora" };
   }
 
   return {

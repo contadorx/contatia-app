@@ -23,29 +23,35 @@ async function tenantId() {
 // pontuação, sem sufixos societários (ME, MEI, LTDA, EPP, EIRELI, S/A...), espaços
 // colapsados. Assim "Padaria do Bairro ME" e "Padaria do Bairro" batem como a MESMA.
 function normalizeCompany(raw: string): string {
-  let s = (raw || "")
+  const s = (raw || "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "") // tira acentos
     .replace(/[.,/\\\-&]/g, " ")      // pontuação vira espaço
     .replace(/\s+/g, " ")
     .trim();
-  // remove sufixos societários repetidamente (ex.: "x comercio ltda me")
-  const suffixes = ["me", "mei", "epp", "eireli", "ltda", "s a", "sa", "s s", "ss", "ei"];
+
+  // Sufixos societários. Separamos em dois grupos por AMBIGUIDADE:
+  //  - UNAMBÍGUOS: nunca são palavra real de nome (LTDA, EIRELI, EPP, MEI, ME) →
+  //    podem ser removidos mesmo que sobre uma única palavra ("TechLógica EIRELI" == "TechLógica").
+  //  - AMBÍGUOS: podem ser sobrenome/iniciais (SA→"Sá", SS, EI) → só removemos quando
+  //    ainda sobram ≥2 palavras, pra NÃO fundir "Consultoria Sá" com "Consultoria".
+  const UNAMBIG = new Set(["ltda", "eireli", "epp", "mei", "me"]);
+  const AMBIG = new Set(["sa", "ss", "ei"]);
+  const toks = s.split(" ").filter(Boolean);
   let changed = true;
-  while (changed) {
+  while (changed && toks.length > 0) {
     changed = false;
-    for (const suf of suffixes) {
-      if (s.endsWith(" " + suf)) {
-        s = s.slice(0, -(suf.length + 1)).trim();
-        changed = true;
-      } else if (s === suf) {
-        s = "";
-        changed = true;
-      }
+    const last = toks[toks.length - 1];
+    if (UNAMBIG.has(last) && toks.length >= 2) {
+      toks.pop();
+      changed = true;
+    } else if (AMBIG.has(last) && toks.length >= 3) {
+      toks.pop();
+      changed = true;
     }
   }
-  return s;
+  return toks.join(" ");
 }
 
 function onlyDigits(v: string | null | undefined): string {
@@ -57,7 +63,9 @@ function onlyDigits(v: string | null | undefined): string {
 // prioriza o CNPJ quando houver.
 async function ensureAccount(supabase: any, tenant_id: string, user_id: string | undefined, companyName: string | null | undefined, cnpj?: string | null) {
   const name = (companyName || "").trim();
-  const cnpjDigits = onlyDigits(cnpj);
+  // B4: só trata como CNPJ (chave de dedup) quando tem os 14 dígitos completos —
+  // "00.000" não pode fundir empresas nem virar chave.
+  const cnpjDigits = onlyDigits(cnpj).length === 14 ? onlyDigits(cnpj) : "";
   if (!name && !cnpjDigits) return null;
 
   // busca todas as empresas do tenant (poucas por conta; dedup em JS é seguro)
@@ -93,8 +101,21 @@ async function ensureAccount(supabase: any, tenant_id: string, user_id: string |
     .insert({ tenant_id, owner_id: user_id ?? null, name: name || cnpjDigits, cnpj: cnpj?.trim() || null })
     .select("id")
     .single();
-  if (error) return null;
-  return (created as any).id as string;
+  if (!error) return (created as any).id as string;
+
+  // M11: corrida — outra requisição criou a mesma empresa (índice único de CNPJ 0070).
+  // Em vez de devolver null (contato ficaria sem empresa), busca a existente.
+  if (cnpjDigits) {
+    const { data: again } = await supabase
+      .from("accounts")
+      .select("id")
+      .eq("tenant_id", tenant_id)
+      .eq("cnpj", cnpj?.trim() || "")
+      .limit(1)
+      .maybeSingle();
+    if (again) return (again as any).id as string;
+  }
+  return null;
 }
 
 export async function addContact(formData: FormData) {
@@ -175,6 +196,7 @@ export async function importContacts(rows: Row[]) {
   // verifica e-mails por DOMÍNIO único (uma checagem de MX por domínio, não por linha)
   const { verifyEmail } = await import("@/lib/emailverify");
   const domainStatus: Record<string, boolean> = {}; // domínio → recebe e-mail (MX)
+  const domainUnknown: Record<string, boolean> = {}; // domínio → checagem indeterminada
   const emailRe = /^[^\s@]+@([^\s@]+\.[^\s@]+)$/;
   for (const c of withAccounts) {
     const m = (c.email || "").toLowerCase().match(emailRe);
@@ -183,22 +205,34 @@ export async function importContacts(rows: Row[]) {
     if (dom in domainStatus) continue;
     const check = await verifyEmail(`x@${dom}`);
     domainStatus[dom] = check.hasMx && !check.disposable;
+    domainUnknown[dom] = !!check.unknown; // M6: DNS falhou → não marcar inválido
   }
   const withStatus = withAccounts.map((c) => {
     const m = (c.email || "").toLowerCase().match(emailRe);
     let email_status = "ok";
     if (c.email) {
       if (!m) email_status = "invalid";
+      // M6: domínio indeterminado (soluço de DNS) → dá o benefício da dúvida ("ok"),
+      // não grava "invalid" e não tira o contato da cadência de e-mail.
+      else if (domainUnknown[m[1]]) email_status = "ok";
       else email_status = domainStatus[m[1]] ? "ok" : "invalid";
     }
     return { ...c, email_status };
   });
   const invalidCount = withStatus.filter((c) => c.email && c.email_status === "invalid").length;
 
-  // insere em lotes de 500
+  // insere em lotes de 500. B7: se um lote falhar no meio, reporta quantos JÁ entraram
+  // (em vez de sumir com o número) — o usuário sabe de onde continuar.
+  let inserted = 0;
   for (let i = 0; i < withStatus.length; i += 500) {
-    const { error } = await supabase.from("contacts").insert(withStatus.slice(i, i + 500));
-    if (error) return { error: error.message };
+    const chunk = withStatus.slice(i, i + 500);
+    const { error } = await supabase.from("contacts").insert(chunk);
+    if (error) {
+      revalidatePath("/dashboard/contatos");
+      revalidatePath("/dashboard/contas");
+      return { error: `${error.message} (importados ${inserted} de ${withStatus.length} antes da falha).`, partial: inserted };
+    }
+    inserted += chunk.length;
   }
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/contas");
@@ -236,7 +270,8 @@ export async function updateContact(id: string, patch: {
       } else {
         const { verifyEmail } = await import("@/lib/emailverify");
         const check = await verifyEmail(em);
-        clean.email_status = check.hasMx && !check.disposable ? "ok" : "invalid";
+        // M6: se a checagem ficou indeterminada (DNS falhou), não marca inválido.
+        clean.email_status = check.unknown ? "ok" : check.hasMx && !check.disposable ? "ok" : "invalid";
       }
     }
   }
@@ -317,13 +352,15 @@ export async function enrichContact(id: string) {
   if (r.error || !r.data) return { error: r.error || "Não foi possível enriquecer." };
   const d = r.data;
 
+  // B3: só sobrescreve quando o provedor trouxe valor (fallback ReceitaWS é mais enxuto
+  // que a BrasilAPI — não apaga o que já estava bom no custom).
   const custom = { ...(((c as any).custom as Record<string, unknown>) || {}) };
-  custom.cnae = d.cnae;
-  custom.cnae_descricao = d.cnae_descricao;
-  custom.situacao = d.situacao;
-  custom.porte = d.porte;
-  custom.uf = d.uf;
-  custom.municipio = d.municipio;
+  if (d.cnae) custom.cnae = d.cnae;
+  if (d.cnae_descricao) custom.cnae_descricao = d.cnae_descricao;
+  if (d.situacao) custom.situacao = d.situacao;
+  if (d.porte) custom.porte = d.porte;
+  if (d.uf) custom.uf = d.uf;
+  if (d.municipio) custom.municipio = d.municipio;
   if (Array.isArray(d.socios) && d.socios.length) custom.socios = d.socios;
   custom.enriched_at = new Date().toISOString();
 
@@ -366,17 +403,23 @@ export async function addSocioContact(sourceContactId: string, socioName: string
     .eq("id", sourceContactId)
     .maybeSingle();
 
-  // evita duplicar: já existe um contato com esse nome na mesma empresa?
+  // M10: evita duplicar. Com empresa, checa dentro da empresa; SEM empresa (o guard
+  // antigo só rodava com account_id), checa por nome + empresa/CNPJ no tenant.
+  let dupQuery = supabase
+    .from("contacts")
+    .select("id")
+    .eq("tenant_id", tenant_id)
+    .ilike("name", name)
+    .limit(1);
   if ((src as any)?.account_id) {
-    const { data: dup } = await supabase
-      .from("contacts")
-      .select("id")
-      .eq("tenant_id", tenant_id)
-      .eq("account_id", (src as any).account_id)
-      .ilike("name", name)
-      .maybeSingle();
-    if (dup) return { error: "Já existe um contato com esse nome nesta empresa." };
+    dupQuery = dupQuery.eq("account_id", (src as any).account_id);
+  } else if ((src as any)?.cnpj) {
+    dupQuery = dupQuery.eq("cnpj", (src as any).cnpj);
+  } else if ((src as any)?.company) {
+    dupQuery = dupQuery.ilike("company", (src as any).company);
   }
+  const { data: dup } = await dupQuery.maybeSingle();
+  if (dup) return { error: "Já existe um contato com esse nome para esta empresa." };
 
   const { error } = await supabase.from("contacts").insert({
     tenant_id,

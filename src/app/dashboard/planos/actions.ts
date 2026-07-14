@@ -10,9 +10,15 @@ async function ctx() {
   return { supabase, user, tenant_id: (prof as any)?.tenant_id as string | null, role: (prof as any)?.role };
 }
 
-// Conta os usuários ativos do workspace (para calcular o valor por assento).
+// Conta os usuários ATIVOS do workspace (para calcular o valor por assento).
+// is_active=true: desativados não ocupam assento (senão sobrecobra e pode travar o
+// plano Individual). Alinha com o RPC seat_check.
 async function seatCount(supabase: any, tenant_id: string): Promise<number> {
-  const { count } = await supabase.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenant_id);
+  const { count } = await supabase
+    .from("profiles")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenant_id)
+    .eq("is_active", true);
   return Math.max(1, count ?? 1);
 }
 
@@ -68,25 +74,45 @@ export async function subscribePlan(planId: string, docNumber?: string, couponCo
   if (maxSeats) billedSeats = Math.min(billedSeats, maxSeats);
   const full = Number((plan as any).price_monthly) * billedSeats;
 
-  // cupom (opcional): validado com o admin client, pois platform_coupons é superadmin-only
+  // cupom (opcional): platform_coupons é superadmin-only → tudo via admin client.
+  // A6: o resgate é ATÔMICO (RPC redeem_coupon incrementa só se houver vaga). Se for o
+  // MESMO cupom que o tenant já tinha (troca de plano), reaproveita o desconto SEM
+  // resgatar de novo. Se a assinatura falhar depois, liberamos a reserva (release_coupon).
   let coupon: any = null;
-  if (couponCode && couponCode.trim()) {
+  let couponReserved = false;
+  const code = couponCode?.trim()?.toUpperCase() || "";
+  if (code) {
     const { createAdminClient } = await import("@/lib/supabaseAdmin");
     const admin = createAdminClient();
     if (!admin) return { error: "Cupons indisponíveis no momento." };
-    const code = couponCode.trim().toUpperCase();
-    const { data: c } = await admin.from("platform_coupons").select("*").eq("code", code).maybeSingle();
-    if (!c) return { error: "coupon_invalid" };
-    const expired = (c as any).expires_at && new Date((c as any).expires_at) < new Date();
-    const esgotado = (c as any).max_redemptions != null && (c as any).redeemed_count >= (c as any).max_redemptions;
-    if (!(c as any).is_active || expired || esgotado) return { error: "coupon_invalid" };
-    coupon = c;
+
+    const alreadyOnTenant = String((tenant as any).coupon_code || "").toUpperCase() === code;
+    if (alreadyOnTenant) {
+      const { data: c } = await admin.from("platform_coupons").select("code, percent_off, duration_months").eq("code", code).maybeSingle();
+      if (c) coupon = c; // reaplica sem contar nova redenção
+    } else {
+      const { data: red } = await admin.rpc("redeem_coupon", { p_code: code });
+      const row = Array.isArray(red) ? red[0] : red;
+      if (!row) return { error: "coupon_invalid" }; // inválido, expirado ou esgotado
+      coupon = { code, percent_off: (row as any).percent_off, duration_months: (row as any).duration_months };
+      couponReserved = true;
+    }
+  }
+
+  // libera a reserva do cupom (usado nos caminhos de falha após reservar)
+  async function releaseCoupon() {
+    if (!couponReserved) return;
+    try {
+      const { createAdminClient } = await import("@/lib/supabaseAdmin");
+      const admin = createAdminClient();
+      if (admin) await admin.rpc("release_coupon", { p_code: code });
+    } catch { /* melhor esforço */ }
   }
 
   const factor = coupon ? Math.max(0, 1 - Number(coupon.percent_off) / 100) : 1;
   const value = Math.round(full * factor * 100) / 100;
 
-  const { ensureAsaasCustomer, createAsaasSubscription, cancelAsaasSubscription } = await import("@/lib/asaas");
+  const { ensureAsaasCustomer, createAsaasSubscription, updateAsaasSubscription } = await import("@/lib/asaas");
 
   // garante o cliente no Asaas (e atualiza o documento se o customer já existia sem ele)
   const cust = await ensureAsaasCustomer({
@@ -95,22 +121,31 @@ export async function subscribePlan(planId: string, docNumber?: string, couponCo
     cpfCnpj: doc,
     existingId: (tenant as any).asaas_customer_id,
   });
-  if (cust.error || !cust.id) return { error: cust.error || "Falha ao registrar cliente no Asaas." };
+  if (cust.error || !cust.id) { await releaseCoupon(); return { error: cust.error || "Falha ao registrar cliente no Asaas." }; }
 
-  // troca de plano: cancela a assinatura anterior ANTES de criar a nova (evita cobrança dupla)
+  // M5: TROCA de plano REPRECIFICA a assinatura existente (updatePendingPayments) em vez
+  // de cancelar+recriar — o cancelar+recriar deixava o boleto antigo pagável junto do
+  // novo (duas cobranças em aberto). Assinatura nova só quando não havia nenhuma.
   const prevSub = (tenant as any).asaas_subscription_id as string | null;
+  let sub: { id?: string; link?: string | null; error?: string; firstPayment?: any };
   if (prevSub) {
-    const cancel = await cancelAsaasSubscription(prevSub);
-    if (cancel.error) return { error: `Não foi possível cancelar a assinatura anterior: ${cancel.error}` };
+    const upd = await updateAsaasSubscription(prevSub, value);
+    if (upd.error) { await releaseCoupon(); return { error: `Não foi possível atualizar a assinatura: ${upd.error}` }; }
+    sub = { id: prevSub, link: null, firstPayment: null };
+    // reprecifica a fatura pendente local (o Asaas reprecifica a dele via updatePendingPayments)
+    try {
+      const { createAdminClient } = await import("@/lib/supabaseAdmin");
+      const admin = createAdminClient();
+      if (admin) await admin.from("platform_invoices").update({ amount: value }).eq("tenant_id", tenant_id).eq("asaas_subscription_id", prevSub).eq("status", "pending");
+    } catch { /* não bloqueia a troca */ }
+  } else {
+    sub = await createAsaasSubscription({
+      customerId: cust.id,
+      value,
+      description: `Contatia ${(plan as any).name} — ${billedSeats} usuário(s)`,
+    });
+    if (sub.error) { await releaseCoupon(); return { error: sub.error }; }
   }
-
-  // cria a assinatura recorrente
-  const sub = await createAsaasSubscription({
-    customerId: cust.id,
-    value,
-    description: `Contatia ${(plan as any).name} — ${billedSeats} usuário(s)`,
-  });
-  if (sub.error) return { error: sub.error };
 
   // vincula o plano ao tenant (status aguardando 1º pagamento; o webhook confirma)
   const revertsOn = coupon && Number(coupon.duration_months) > 0 ? addMonthsISO(Number(coupon.duration_months)) : null;
@@ -134,31 +169,23 @@ export async function subscribePlan(planId: string, docNumber?: string, couponCo
       const admin = createAdminClient();
       if (admin) {
         const fp = (sub as any).firstPayment;
-        const { data: existing } = await admin.from("platform_invoices").select("id").eq("asaas_payment_id", fp.asaasId).maybeSingle();
-        if (!existing) {
-          await admin.from("platform_invoices").insert({
-            tenant_id,
-            amount: fp.value ?? value,
-            description: fp.description || `Contatia ${(plan as any).name} — ${billedSeats} usuário(s)`,
-            due_date: fp.dueDate || null,
-            payment_link: fp.invoiceUrl || sub.link || null,
-            asaas_payment_id: fp.asaasId,
-            asaas_subscription_id: sub.id || null,
-            status: "pending",
-          });
-        }
+        // M3: upsert idempotente por asaas_payment_id — se o webhook PAYMENT_CREATED
+        // chegar junto, um dos dois vence e não duplica (índice único 0070).
+        await admin.from("platform_invoices").upsert({
+          tenant_id,
+          amount: fp.value ?? value,
+          description: fp.description || `Contatia ${(plan as any).name} — ${billedSeats} usuário(s)`,
+          due_date: fp.dueDate || null,
+          payment_link: fp.invoiceUrl || sub.link || null,
+          asaas_payment_id: fp.asaasId,
+          asaas_subscription_id: sub.id || null,
+          status: "pending",
+        }, { onConflict: "asaas_payment_id", ignoreDuplicates: true });
       }
     } catch { /* a fatura também chega pelo webhook; não bloqueia a assinatura */ }
   }
 
-  // resgata o cupom (conta a redenção)
-  if (coupon) {
-    try {
-      const { createAdminClient } = await import("@/lib/supabaseAdmin");
-      const admin = createAdminClient();
-      if (admin) await admin.from("platform_coupons").update({ redeemed_count: Number(coupon.redeemed_count) + 1 }).eq("id", coupon.id);
-    } catch { /* não bloqueia a assinatura */ }
-  }
+  // (a redenção do cupom já foi contada atomicamente lá em cima, no redeem_coupon)
 
   revalidatePath("/dashboard/planos");
   return { ok: true, link: sub.link, value, full, seats, billedSeats, planName: (plan as any).name, discountPct: coupon?.percent_off || 0 };
@@ -197,6 +224,11 @@ export async function cancelSubscription() {
     asaas_subscription_id: null,
     mrr: 0,
   }).eq("id", tenant_id);
+
+  // M4: faturas pendentes desta assinatura deixam de ser cobráveis — marca canceladas
+  // para não ficarem em aberto na central (e um pagamento tardio não reativa a conta,
+  // graças à guarda no webhook).
+  await supabase.from("platform_invoices").update({ status: "canceled" }).eq("tenant_id", tenant_id).eq("status", "pending");
 
   revalidatePath("/dashboard/planos");
   return { ok: true };

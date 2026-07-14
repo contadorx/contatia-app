@@ -103,13 +103,12 @@ export async function enrichAccount(id: string) {
   if (r.error || !r.data) return { error: r.error || "Não foi possível enriquecer." };
   const d = r.data;
 
-  const patch: Record<string, unknown> = {
-    cnpj,
-    cnae: d.cnae,
-    porte: d.porte,
-    uf: d.uf,
-    municipio: d.municipio,
-  };
+  // B3: só grava o que veio (fallback ReceitaWS é mais enxuto — não apaga dado bom)
+  const patch: Record<string, unknown> = { cnpj };
+  if (d.cnae) patch.cnae = d.cnae;
+  if (d.porte) patch.porte = d.porte;
+  if (d.uf) patch.uf = d.uf;
+  if (d.municipio) patch.municipio = d.municipio;
   if (!(acc as any).phone && d.telefone) patch.phone = d.telefone;
 
   const { error } = await supabase.from("accounts").update(patch as any).eq("id", id).eq("tenant_id", tenant_id);

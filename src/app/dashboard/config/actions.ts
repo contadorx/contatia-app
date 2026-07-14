@@ -89,7 +89,7 @@ export async function updateEmailAccount(id: string, input: {
 
   const { data: cur } = await supabase
     .from("email_accounts")
-    .select("smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass")
+    .select("smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, verified, verified_at")
     .eq("id", id)
     .eq("tenant_id", tenant_id)
     .maybeSingle();
@@ -103,18 +103,34 @@ export async function updateEmailAccount(id: string, input: {
     smtp_pass: input.smtp_pass?.trim() ? input.smtp_pass : ((cur as any).smtp_pass || ""),
   };
 
-  const check = await verifySmtpConnection(merged);
+  // B6: só re-testa (e arrisca rebaixar o selo) se algo da CONEXÃO mudou. Se o usuário
+  // só ativou o IMAP ou trocou o nome, mantém o status de validação atual — um soluço de
+  // SMTP não derruba uma caixa que já estava verde.
+  const connChanged =
+    merged.smtp_host !== ((cur as any).smtp_host || "") ||
+    merged.smtp_port !== (Number((cur as any).smtp_port) || 587) ||
+    !!merged.smtp_secure !== !!(cur as any).smtp_secure ||
+    merged.smtp_user !== ((cur as any).smtp_user || "") ||
+    !!input.smtp_pass?.trim();
 
-  const patch: Record<string, unknown> = {
-    smtp_host: merged.smtp_host.trim(),
-    smtp_port: merged.smtp_port,
-    smtp_secure: !!merged.smtp_secure,
-    smtp_user: merged.smtp_user.trim(),
-    detect_replies: !!input.detect_replies,
-    imap_host: input.imap_host?.trim() || null,
-    verified: check.ok,
-    verified_at: check.ok ? new Date().toISOString() : null,
-  };
+  let verified = !!(cur as any).verified;
+  let verified_at = (cur as any).verified_at || null;
+  if (connChanged) {
+    const check = await verifySmtpConnection(merged);
+    verified = check.ok;
+    verified_at = check.ok ? new Date().toISOString() : null;
+  }
+
+  // B5: campos parciais — só grava o que veio no input (não sobrescreve com default).
+  const patch: Record<string, unknown> = { verified, verified_at };
+  if (connChanged) {
+    patch.smtp_host = merged.smtp_host.trim();
+    patch.smtp_port = merged.smtp_port;
+    patch.smtp_secure = !!merged.smtp_secure;
+    patch.smtp_user = merged.smtp_user.trim();
+  }
+  if (input.detect_replies !== undefined) patch.detect_replies = !!input.detect_replies;
+  if (input.imap_host !== undefined) patch.imap_host = input.imap_host?.trim() || null;
   if (input.from_email !== undefined) patch.from_email = input.from_email.trim();
   if (input.display_name !== undefined) patch.display_name = input.display_name.trim() || null;
   if (input.smtp_pass?.trim()) patch.smtp_pass = input.smtp_pass;
@@ -122,7 +138,7 @@ export async function updateEmailAccount(id: string, input: {
   const { error } = await supabase.from("email_accounts").update(patch).eq("id", id).eq("tenant_id", tenant_id);
   if (error) return { error: error.message };
   revalidatePath("/dashboard/config");
-  return { ok: true, verified: check.ok };
+  return { ok: true, verified };
 }
 
 // Verifica a conexão SMTP (usado no teste, no salvar e no editar). Reaproveitado.
@@ -238,13 +254,27 @@ export async function saveBookingSettings(input: {
 }) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
-  if (Number(input.startHour) >= Number(input.endHour)) return { error: "A hora de início deve ser antes da hora de fim." };
+
+  // M12: coerção segura a NaN que ACEITA 0 (meia-noite). `Number(x) || 9` transformava
+  // startHour=0 em 9 → depois start>=end e a agenda pública ficava sem horários.
+  const numOr = (v: unknown, def: number) => {
+    const n = Math.floor(Number(v));
+    return Number.isFinite(n) ? n : def;
+  };
+  const startHour = Math.min(23, Math.max(0, numOr(input.startHour, 9)));
+  const endHour = Math.min(24, Math.max(1, numOr(input.endHour, 18)));
+  if (startHour >= endHour) return { error: "A hora de início deve ser antes da hora de fim." };
+
+  // B10: com o link ativo, precisa de ao menos um dia — antes um "" virava seg–sex sem avisar.
+  const days = (input.days || "").split(",").map((d) => d.trim()).filter(Boolean);
+  if (input.enabled && !days.length) return { error: "Escolha ao menos um dia disponível." };
+
   const { error } = await supabase.from("tenants").update({
     booking_enabled: !!input.enabled,
-    booking_duration_min: Number(input.duration) || 30,
-    booking_days: input.days || "1,2,3,4,5",
-    booking_start_hour: Number(input.startHour) || 9,
-    booking_end_hour: Number(input.endHour) || 18,
+    booking_duration_min: numOr(input.duration, 30) || 30,
+    booking_days: days.join(",") || "1,2,3,4,5",
+    booking_start_hour: startHour,
+    booking_end_hour: endHour,
     booking_title: input.title?.trim() || null,
   }).eq("id", tenant_id);
   if (error) return { error: error.message };

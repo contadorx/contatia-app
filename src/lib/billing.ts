@@ -39,7 +39,8 @@ export async function syncTenantSeats(tenantId: string): Promise<{ changed?: boo
   if (!price) return {};
   const minSeats = Math.max(1, Number((t as any).platform_plans?.min_seats) || 1);
 
-  const { count } = await admin.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId);
+  // só usuários ATIVOS ocupam assento (não sobrecobra por perfil desativado)
+  const { count } = await admin.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("is_active", true);
   const seats = Math.max(minSeats, count ?? 1);
 
   // cupom (se as colunas existirem)

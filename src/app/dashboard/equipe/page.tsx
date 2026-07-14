@@ -18,6 +18,8 @@ export default async function Equipe() {
   } = await supabase.auth.getUser();
   const { data: meProfile } = await supabase.from("profiles").select("role, team_role").eq("id", user?.id ?? "").maybeSingle();
   const canManage = isMgr((meProfile as any)?.role, (meProfile as any)?.team_role);
+  // B2: convidar é capability "team" = dono OU admin (gestor gerencia, mas não convida)
+  const canInvite = (meProfile as any)?.role === "owner" || (meProfile as any)?.team_role === "admin";
 
   const [{ data: members }, { data: contacts }, { data: opps }, { count: unassignedCount }, { data: invites }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, email, role, team_role, is_active").order("full_name", { ascending: true }),
@@ -129,9 +131,11 @@ export default async function Equipe() {
           </summary>
           <p className="mt-1 text-sm text-subtle">Convide pessoas, defina o papel de cada uma e libere agendas para os SDRs.</p>
 
-          <div className="mt-4">
-            <InviteTools pending={(invites as any[]) || []} />
-          </div>
+          {canInvite && (
+            <div className="mt-4">
+              <InviteTools pending={(invites as any[]) || []} />
+            </div>
+          )}
 
           <div className="mt-6">
             <TeamManager

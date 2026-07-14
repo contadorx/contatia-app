@@ -50,9 +50,14 @@ export async function POST(req: Request) {
       }
       if (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") {
         await admin.from("platform_invoices").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", (inv as any).id);
-        const base = dueDate ? new Date(dueDate) : new Date();
-        base.setMonth(base.getMonth() + 1);
-        await admin.from("tenants").update({ subscription_status: "active", current_period_end: base.toISOString().slice(0, 10), ...(value ? { mrr: value } : {}) }).eq("id", (inv as any).tenant_id);
+        // M4: pagamento tardio de um tenant JÁ CANCELADO (sem assinatura ativa) NÃO
+        // ressuscita a conta. Só reativa se ainda houver assinatura vinculada.
+        const { data: tRow } = await admin.from("tenants").select("asaas_subscription_id").eq("id", (inv as any).tenant_id).maybeSingle();
+        if ((tRow as any)?.asaas_subscription_id) {
+          const base = dueDate ? new Date(dueDate) : new Date();
+          base.setMonth(base.getMonth() + 1);
+          await admin.from("tenants").update({ subscription_status: "active", current_period_end: base.toISOString().slice(0, 10), ...(value ? { mrr: value } : {}) }).eq("id", (inv as any).tenant_id);
+        }
       } else if (event === "PAYMENT_OVERDUE") {
         await admin.from("platform_invoices").update({ status: "overdue" }).eq("id", (inv as any).id);
         await admin.from("tenants").update({ subscription_status: "past_due" }).eq("id", (inv as any).tenant_id);
@@ -65,7 +70,8 @@ export async function POST(req: Request) {
     if (event === "PAYMENT_CREATED" && custId) {
       const { data: t } = await admin.from("tenants").select("id").eq("asaas_customer_id", custId).maybeSingle();
       if (t) {
-        await admin.from("platform_invoices").insert({
+        // M3: upsert idempotente — se o action de assinar já criou esta fatura, não duplica
+        await admin.from("platform_invoices").upsert({
           tenant_id: (t as any).id,
           amount: value,
           description: description || "Assinatura Contatia",
@@ -74,7 +80,7 @@ export async function POST(req: Request) {
           asaas_payment_id: payId,
           asaas_subscription_id: subId || null,
           status: "pending",
-        });
+        }, { onConflict: "asaas_payment_id", ignoreDuplicates: true });
         return NextResponse.json({ ok: true, event, note: "fatura criada a partir do Asaas" });
       }
     }

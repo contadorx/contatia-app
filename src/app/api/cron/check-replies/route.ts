@@ -28,14 +28,26 @@ export async function GET(req: Request) {
   let suggestions = 0;
   const errors: string[] = [];
 
+  // M8: a fase de IMAP não pode consumir todo o orçamento (maxDuration=60) e impedir os
+  // jobs seguintes (cobrança, retenção, lifecycle) de rodar. Damos um teto de tempo à
+  // fase inteira e um timeout por caixa — o que sobrar é retomado na próxima rodada.
+  const IMAP_PHASE_DEADLINE = Date.now() + 30_000;
+  const PER_ACCOUNT_MS = 12_000;
+  const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
+    Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error("imap timeout")), ms))]);
+
   for (const acc of (accounts as any[]) || []) {
+    if (Date.now() > IMAP_PHASE_DEADLINE) {
+      errors.push("orçamento de IMAP esgotado nesta rodada; caixas restantes na próxima");
+      break;
+    }
     const since = acc.last_reply_check_at
       ? new Date(acc.last_reply_check_at)
       : new Date(Date.now() - 24 * 3600 * 1000);
 
     let msgs: { from: string; subject: string }[] = [];
     try {
-      msgs = await fetchRecentMessages(acc, since);
+      msgs = await withTimeout(fetchRecentMessages(acc, since), PER_ACCOUNT_MS);
     } catch (e: any) {
       errors.push(`${acc.id}: ${e?.message || "imap erro"}`);
       continue; // não atualiza o cursor se falhou, tenta de novo depois

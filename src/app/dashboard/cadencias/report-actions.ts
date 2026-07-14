@@ -1,14 +1,20 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { isManager } from "@/lib/permissions";
 
 async function ctx() {
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { data } = await supabase.from("profiles").select("tenant_id").eq("id", user?.id ?? "").maybeSingle();
-  return { supabase, tenant_id: (data as any)?.tenant_id as string | null };
+  const { data } = await supabase.from("profiles").select("tenant_id, role, team_role").eq("id", user?.id ?? "").maybeSingle();
+  return {
+    supabase,
+    tenant_id: (data as any)?.tenant_id as string | null,
+    user_id: user?.id,
+    gerente: isManager((data as any)?.role, (data as any)?.team_role),
+  };
 }
 
 export type StepReport = {
@@ -24,8 +30,14 @@ export type StepReport = {
 // Monta o relatório por passo: para cada passo da sequência, quantas tasks foram enviadas
 // e quantas respostas ocorreram. Se o passo tem A/B de assunto, quebra por variante.
 export async function getCadenceReport(sequenceId: string) {
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id, gerente } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
+
+  // A1: vendedor só vê o relatório das próprias cadências
+  if (!gerente) {
+    const { data: seq } = await supabase.from("sequences").select("created_by").eq("id", sequenceId).maybeSingle();
+    if (!seq || (seq as any).created_by !== user_id) return { error: "Cadência não encontrada." };
+  }
 
   const { data: steps } = await supabase
     .from("sequence_steps")

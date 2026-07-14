@@ -11,8 +11,10 @@ export async function acceptInvite(token: string) {
   const { data, error } = await supabase.rpc("accept_invite", { p_token: token });
   if (error) return { error: error.message };
   if (data === "invalid") return { error: "Convite inválido ou expirado." };
+  if (data === "email_mismatch") return { error: "Este convite foi enviado para outro e-mail. Entre com a conta do e-mail convidado." };
 
   // aplica o papel escolhido no convite ao perfil recém-vinculado (AUT-03).
+  // team_role é coluna protegida (0068) → grava pelo admin client (service_role).
   try {
     const { data: inv } = await supabase
       .from("tenant_invites")
@@ -21,7 +23,9 @@ export async function acceptInvite(token: string) {
       .maybeSingle();
     const papel = (inv as any)?.team_role;
     if (["admin", "gestor", "sdr", "vendedor"].includes(papel || "")) {
-      await supabase.from("profiles").update({ team_role: papel }).eq("id", user.id);
+      const { createAdminClient } = await import("@/lib/supabaseAdmin");
+      const admin = createAdminClient();
+      if (admin) await admin.from("profiles").update({ team_role: papel }).eq("id", user.id);
     }
   } catch { /* papel pode ser ajustado depois em Equipe */ }
 
