@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export type SmartOption = { value: string; label: string; disabled?: boolean };
 
@@ -56,8 +57,33 @@ export default function SmartSelect(props: Props) {
   const [query, setQuery] = useState("");
   const [hi, setHi] = useState(0); // índice destacado
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listboxId = useId();
+
+  // O MENU vai num PORTAL com posição fixed — assim nenhum container com overflow
+  // (barras de filtro, tabelas com scroll) corta a lista. Medimos o botão e posicionamos
+  // abaixo (ou acima, se faltar espaço).
+  const [coords, setCoords] = useState<{ top: number; left: number; width: number; up: boolean } | null>(null);
+  function measure() {
+    const el = rootRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const belowSpace = window.innerHeight - r.bottom;
+    const up = belowSpace < 280 && r.top > belowSpace;
+    setCoords({ top: up ? r.top : r.bottom, left: r.left, width: r.width, up });
+  }
+  useLayoutEffect(() => {
+    if (!open) return;
+    measure();
+    const onScroll = () => measure();
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [open]);
 
   // sincroniza quando controlado por fora
   useEffect(() => {
@@ -70,11 +96,14 @@ export default function SmartSelect(props: Props) {
     }
   }, [multiple, (props as SingleProps).value]);
 
-  // fecha ao clicar fora / Esc
+  // fecha ao clicar fora (considera o menu no portal também) / Esc
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (rootRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
@@ -185,9 +214,18 @@ export default function SmartSelect(props: Props) {
         </span>
       </button>
 
-      {open && (
+      {open && typeof document !== "undefined" && coords && createPortal(
         <div
-          className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-line bg-surface shadow-lg"
+          ref={menuRef}
+          style={{
+            position: "fixed",
+            left: coords.left,
+            width: coords.width,
+            top: coords.up ? undefined : coords.top + 4,
+            bottom: coords.up ? window.innerHeight - coords.top + 4 : undefined,
+            zIndex: 1000,
+          }}
+          className="overflow-hidden rounded-xl border border-line bg-surface shadow-lg"
           role="listbox"
           id={listboxId}
           aria-multiselectable={multiple}
@@ -239,7 +277,8 @@ export default function SmartSelect(props: Props) {
               <button type="button" className="hover:text-ink" onClick={() => setOpen(false)}>Fechar</button>
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
