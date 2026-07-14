@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
-import { fetchRecentMessages } from "@/lib/imap";
+import { fetchRecentEmails } from "@/lib/imap";
 import { POINTS } from "@/lib/scoring";
 
 export const dynamic = "force-dynamic";
@@ -45,9 +45,9 @@ export async function GET(req: Request) {
       ? new Date(acc.last_reply_check_at)
       : new Date(Date.now() - 24 * 3600 * 1000);
 
-    let msgs: { from: string; subject: string }[] = [];
+    let msgs: { from: string; subject: string; text: string; messageId: string | null; date: string | null }[] = [];
     try {
-      msgs = await withTimeout(fetchRecentMessages(acc, since), PER_ACCOUNT_MS);
+      msgs = await withTimeout(fetchRecentEmails(acc, since), PER_ACCOUNT_MS);
     } catch (e: any) {
       errors.push(`${acc.id}: ${e?.message || "imap erro"}`);
       continue; // não atualiza o cursor se falhou, tenta de novo depois
@@ -58,6 +58,33 @@ export async function GET(req: Request) {
       // assunto por remetente (o primeiro que aparece) — para o contexto na timeline
       const subjectByEmail: Record<string, string> = {};
       for (const m of msgs) if (m.from && !subjectByEmail[m.from]) subjectByEmail[m.from] = m.subject;
+
+      // CAIXA UNIFICADA: guarda o CORPO das respostas de contatos conhecidos em
+      // email_messages (dedup por Message-ID) → o quadro de Respostas mostra o e-mail.
+      try {
+        const { data: known } = await admin
+          .from("contacts")
+          .select("id, email")
+          .eq("tenant_id", acc.tenant_id)
+          .in("email", Array.from(set));
+        const idByEmail: Record<string, string> = {};
+        for (const k of (known as any[]) || []) if (k.email) idByEmail[(k.email as string).toLowerCase()] = k.id;
+        const rows = msgs
+          .filter((m) => idByEmail[m.from])
+          .map((m) => ({
+            tenant_id: acc.tenant_id,
+            contact_id: idByEmail[m.from],
+            email: m.from,
+            direction: "in",
+            subject: m.subject || null,
+            text: m.text || null,
+            message_id: m.messageId,
+            created_at: m.date || new Date().toISOString(),
+          }));
+        if (rows.length) {
+          await admin.from("email_messages").upsert(rows, { onConflict: "tenant_id,message_id", ignoreDuplicates: true });
+        }
+      } catch { /* guardar o corpo não deve quebrar a detecção */ }
       const { data: enrs } = await admin
         .from("enrollments")
         .select("id, contact_id, contacts(email)")

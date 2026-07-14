@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   replyWhatsApp,
+  replyEmail,
   markThreadRead,
   createContactFromThread,
   blockThread,
@@ -15,9 +16,12 @@ import { waLink } from "@/lib/cadence";
 
 export type Thread = {
   key: string;
+  channel: "whatsapp" | "email";
   contactId: string | null;
   name: string;
   phone: string;
+  email?: string;
+  subject?: string;   // último assunto (para o "Re:" ao responder por e-mail)
   messages: { id: string; direction: string; text: string; mediaType: string | null; created_at: string; read: boolean }[];
   unread: number;
   lastAt: string;
@@ -52,7 +56,7 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
   useEffect(() => {
     setConfirm(null);
     if (active && active.unread > 0) {
-      markThreadRead({ contactId: active.contactId, phone: active.phone }).then(() => router.refresh());
+      markThreadRead({ contactId: active.contactId, phone: active.phone, email: active.email, channel: active.channel }).then(() => router.refresh());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel]);
@@ -60,7 +64,7 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
   if (!threads.length) {
     return (
       <div className="card p-10 text-center text-sm text-subtle">
-        Nenhuma resposta ainda. Quando um lead responder no WhatsApp, a conversa aparece aqui — e a cadência dele pausa sozinha.
+        Nenhuma resposta ainda. Quando um lead responder — no WhatsApp ou por e-mail — a conversa aparece aqui, e a cadência dele pausa sozinha.
       </div>
     );
   }
@@ -75,7 +79,13 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
   }
   function send() {
     if (!active || !text.trim()) return;
-    act(() => replyWhatsApp({ contactId: active.contactId, phone: active.phone, text }), () => setText(""));
+    if (active.channel === "email") {
+      if (!active.contactId) { setErr("Vincule o contato para responder por e-mail."); return; }
+      const subj = active.subject ? `Re: ${active.subject.replace(/^re:\s*/i, "")}` : "Re:";
+      act(() => replyEmail({ contactId: active.contactId as string, subject: subj, body: text }), () => setText(""));
+    } else {
+      act(() => replyWhatsApp({ contactId: active.contactId, phone: active.phone, text }), () => setText(""));
+    }
   }
 
   return (
@@ -101,7 +111,10 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
             className={`flex w-full items-start gap-2 p-3 text-left transition ${sel === t.key ? "bg-brand-soft/50" : "hover:bg-muted"}`}
           >
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase ${t.channel === "email" ? "bg-brand-soft text-brand-dark" : "bg-signal/15 text-signal"}`}>
+                  {t.channel === "email" ? "@" : "WA"}
+                </span>
                 <p className="truncate text-sm font-semibold">{t.name}</p>
                 {t.unread > 0 && <span className="rounded-full bg-signal px-1.5 py-0.5 text-[10px] font-bold text-white">{t.unread}</span>}
               </div>
@@ -119,15 +132,18 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
           {/* cabeçalho com gestão */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line p-4">
             <div className="min-w-0">
-              <p className="truncate font-display font-bold">{active.name}</p>
-              <p className="text-xs text-subtle">{active.phone || "—"}</p>
+              <p className="flex items-center gap-1.5 truncate font-display font-bold">
+                <span className={`rounded px-1 py-0.5 text-[9px] font-bold uppercase ${active.channel === "email" ? "bg-brand-soft text-brand-dark" : "bg-signal/15 text-signal"}`}>{active.channel === "email" ? "E-MAIL" : "WHATSAPP"}</span>
+                {active.name}
+              </p>
+              <p className="text-xs text-subtle">{active.channel === "email" ? (active.email || "—") : (active.phone || "—")}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs">
               {active.contactId ? (
                 <Link href={`/dashboard/contatos/${active.contactId}`} className="rounded-lg border border-line px-2 py-1 text-brand-dark hover:bg-muted">
                   Ver contato
                 </Link>
-              ) : (
+              ) : active.channel === "whatsapp" ? (
                 <button
                   className="rounded-lg border border-brand/40 px-2 py-1 font-semibold text-brand-dark hover:bg-brand-soft"
                   disabled={pending}
@@ -135,13 +151,18 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
                 >
                   + Cadastrar contato
                 </button>
+              ) : null}
+              {/* bloquear/excluir são do WhatsApp (por número) */}
+              {active.channel === "whatsapp" && (
+                <>
+                  <button className="rounded-lg border border-line px-2 py-1 text-subtle hover:text-warn" disabled={pending} onClick={() => setConfirm(confirm === "block" ? null : "block")}>
+                    Bloquear
+                  </button>
+                  <button className="rounded-lg border border-line px-2 py-1 text-subtle hover:text-danger" disabled={pending} onClick={() => setConfirm(confirm === "delete" ? null : "delete")}>
+                    Excluir
+                  </button>
+                </>
               )}
-              <button className="rounded-lg border border-line px-2 py-1 text-subtle hover:text-warn" disabled={pending} onClick={() => setConfirm(confirm === "block" ? null : "block")}>
-                Bloquear
-              </button>
-              <button className="rounded-lg border border-line px-2 py-1 text-subtle hover:text-danger" disabled={pending} onClick={() => setConfirm(confirm === "delete" ? null : "delete")}>
-                Excluir
-              </button>
             </div>
           </div>
 
@@ -188,7 +209,25 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
 
           {/* resposta */}
           <div className="border-t border-line p-3">
-            {canReply ? (
+            {active.channel === "email" ? (
+              // e-mail: responder daqui sempre (usa a sua caixa; não depende do modo WhatsApp)
+              <>
+                {active.subject && <p className="mb-1 text-[11px] text-subtle">Assunto: <b>Re: {active.subject.replace(/^re:\s*/i, "")}</b></p>}
+                <div className="flex items-end gap-2">
+                  <textarea
+                    className="input min-h-[44px] flex-1 text-sm"
+                    placeholder={active.contactId ? "Escreva sua resposta por e-mail…" : "Vincule o contato para responder…"}
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }}
+                  />
+                  <button className="btn-brand py-2 text-sm" disabled={pending || !text.trim() || !active.contactId} onClick={send}>
+                    {pending ? "…" : "Enviar"}
+                  </button>
+                </div>
+                <p className="mt-1 text-[11px] text-subtle">Ctrl/⌘+Enter envia. Sai pela sua caixa (rotação/assinatura) e fica registrado aqui.</p>
+              </>
+            ) : canReply ? (
               <>
                 <div className="flex items-end gap-2">
                   <textarea
