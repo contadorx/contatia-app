@@ -72,15 +72,21 @@ export async function removeTagFromContact(contactId: string, tagId: string) {
 }
 
 // Aplica uma tag a vários contatos (lote) — dispara automação em cada um.
-export async function bulkTag(contactIds: string[], tagId: string) {
+// Aplica UMA OU VÁRIAS tags a vários contatos de uma vez. Aceita string (compat) ou array.
+export async function bulkTag(contactIds: string[], tags: string | string[]) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
-  if (!contactIds.length || !tagId) return { error: "Selecione contatos e a tag." };
-  const rows = contactIds.map((id) => ({ tenant_id, contact_id: id, tag_id: tagId }));
+  const tagIds = (Array.isArray(tags) ? tags : [tags]).filter(Boolean);
+  if (!contactIds.length || !tagIds.length) return { error: "Selecione contatos e ao menos uma tag." };
+
+  const rows = contactIds.flatMap((id) => tagIds.map((tagId) => ({ tenant_id, contact_id: id, tag_id: tagId })));
   await supabase.from("contact_tags").upsert(rows, { onConflict: "contact_id,tag_id", ignoreDuplicates: true });
-  for (const id of contactIds.slice(0, 500)) await fireTagAutomation(supabase, tenant_id, id, tagId);
+  // dispara a automação de "recebeu tag" para cada par (contato, tag)
+  for (const id of contactIds.slice(0, 500)) {
+    for (const tagId of tagIds) await fireTagAutomation(supabase, tenant_id, id, tagId);
+  }
   revalidatePath("/dashboard/contatos");
-  return { ok: true, count: contactIds.length };
+  return { ok: true, count: contactIds.length, tags: tagIds.length };
 }
 
 // ---- Tags de EMPRESA (account_tags) ----

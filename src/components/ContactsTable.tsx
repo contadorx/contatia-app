@@ -39,7 +39,7 @@ export default function ContactsTable({
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [seq, setSeq] = useState("");
   const [assignTo, setAssignTo] = useState("");
-  const [tagId, setTagId] = useState("");
+  const [tagIds, setTagIds] = useState<string[]>([]);
   const [newTag, setNewTag] = useState("");
   const [showNewTag, setShowNewTag] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -86,15 +86,15 @@ export default function ContactsTable({
     });
   }
   function doTag() {
-    if (!tagId) return setMsg("Escolha a tag.");
+    if (!tagIds.length) return setMsg("Escolha ao menos uma tag.");
     setMsg(null);
     start(async () => {
-      const res = (await bulkTag([...sel], tagId)) as { count?: number; error?: string };
+      const res = (await bulkTag([...sel], tagIds)) as { count?: number; tags?: number; error?: string };
       if (res?.error) setMsg(res.error);
       else {
-        setMsg(`✓ tag aplicada a ${res.count} contatos.`);
+        setMsg(`✓ ${res.tags && res.tags > 1 ? `${res.tags} tags aplicadas` : "tag aplicada"} a ${res.count} contatos.`);
         clear();
-        setTagId("");
+        setTagIds([]);
       }
     });
   }
@@ -167,14 +167,14 @@ export default function ContactsTable({
           {tags.length > 0 && (
             <div className="flex items-center gap-1">
               <SmartSelect
+                multiple
                 className="py-1.5 text-sm"
                 options={tagOpts}
-                value={tagId}
-                onValueChange={(v) => setTagId(v)}
-                placeholder="Aplicar tag…"
-                clearable
+                values={tagIds}
+                onValuesChange={setTagIds}
+                placeholder="Aplicar tags…"
               />
-              <button className="btn-ghost py-1.5 text-sm" onClick={doTag} disabled={pending || !tagId}>Aplicar</button>
+              <button className="btn-ghost py-1.5 text-sm" onClick={doTag} disabled={pending || !tagIds.length}>Aplicar</button>
             </div>
           )}
 
