@@ -2,6 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { saveBookingSettings } from "@/app/dashboard/config/actions";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
+
+const DURATION_OPTS: SmartOption[] = [
+  { value: "15", label: "15 min" },
+  { value: "30", label: "30 min" },
+  { value: "45", label: "45 min" },
+  { value: "60", label: "60 min" },
+];
 
 const DAYS = [["1", "Seg"], ["2", "Ter"], ["3", "Qua"], ["4", "Qui"], ["5", "Sex"], ["6", "Sáb"], ["0", "Dom"]];
 
@@ -45,12 +53,9 @@ export function BookingSettings({ token, initial }: {
             <div><label className="label">Fim (h)</label><input className="input mt-1" type="number" min={1} max={24} value={f.endHour} onChange={(e) => setF({ ...f, endHour: Number(e.target.value) })} /></div>
             <div>
               <label className="label">Duração</label>
-              <select className="input mt-1" value={f.duration} onChange={(e) => setF({ ...f, duration: Number(e.target.value) })}>
-                <option value={15}>15 min</option>
-                <option value={30}>30 min</option>
-                <option value={45}>45 min</option>
-                <option value={60}>60 min</option>
-              </select>
+              <div className="mt-1">
+                <SmartSelect options={DURATION_OPTS} value={String(f.duration)} onValueChange={(v) => setF({ ...f, duration: Number(v) })} />
+              </div>
             </div>
           </div>
           <div><label className="label">Título da reunião</label><input className="input mt-1" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Ex.: Diagnóstico gratuito" /></div>

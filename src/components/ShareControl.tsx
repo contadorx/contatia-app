@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { createShare } from "@/app/dashboard/propostas/actions";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 type Contact = { id: string; name: string };
 
@@ -33,14 +34,13 @@ export default function ShareControl({ documentId, contacts }: { documentId: str
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      <select className="input max-w-[200px] py-1.5 text-sm" value={contactId} onChange={(e) => setContactId(e.target.value)}>
-        <option value="">Gerar link para…</option>
-        {contacts.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+      <SmartSelect
+        className="max-w-[200px] py-1.5 text-sm"
+        placeholder="Gerar link para…"
+        value={contactId}
+        onValueChange={(v) => setContactId(v)}
+        options={contacts.map((c): SmartOption => ({ value: c.id, label: c.name }))}
+      />
       <button className="btn-ghost py-1.5 text-sm" onClick={generate} disabled={pending || !contactId}>
         {pending ? "..." : selName ? `Gerar link para ${selName}` : "Gerar link"}
       </button>

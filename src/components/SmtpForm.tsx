@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { saveSmtpAccount, updateEmailAccount, testSmtp } from "@/app/dashboard/config/actions";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 type EditAccount = {
   id: string;
@@ -21,6 +22,8 @@ const PRESETS: { id: string; label: string; host: string; port: number; secure: 
   { id: "outlook", label: "Outlook / Microsoft 365", host: "smtp.office365.com", port: 587, secure: false, hint: "Usuário = seu e-mail completo. Pode exigir SMTP AUTH habilitado no admin." },
   { id: "hostgator", label: "HostGator / cPanel", host: "mail.SEUDOMINIO.com.br", port: 465, secure: true, hint: "Troque SEUDOMINIO. Reputação/limite baixos — evite para cadência em volume; prefira o Brevo." },
 ];
+
+const PRESET_OPTS: SmartOption[] = PRESETS.map((p) => ({ value: p.id, label: p.label }));
 
 export default function SmtpForm({ editAccount }: { editAccount?: EditAccount }) {
   const isEdit = !!editAccount;
@@ -115,14 +118,14 @@ export default function SmtpForm({ editAccount }: { editAccount?: EditAccount })
 
       <div className="mb-4 rounded-xl bg-muted p-3">
         <label className="label">Preset (preenche host/porta/SSL)</label>
-        <select className="input mt-1" defaultValue="" onChange={(e) => applyPreset(e.target.value)}>
-          <option value="">Escolher provedor…</option>
-          {PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
+        <div className="mt-1">
+          <SmartSelect
+            options={PRESET_OPTS}
+            defaultValue=""
+            onValueChange={(v) => applyPreset(v)}
+            placeholder="Escolher provedor…"
+          />
+        </div>
         {presetHint && <p className="mt-2 text-xs text-subtle">{presetHint}</p>}
       </div>
 

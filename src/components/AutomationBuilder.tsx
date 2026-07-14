@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { createAutomation } from "@/app/dashboard/automacoes/actions";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 type Seq = { id: string; name: string };
 type Stage = { id: string; name: string };
@@ -58,11 +59,12 @@ export default function AutomationBuilder({ sequences, stages, tags }: { sequenc
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div className="rounded-xl bg-muted p-4">
           <p className="label">Quando (gatilho)</p>
-          <select className="input mt-1" value={f.trigger_type} onChange={(e) => up("trigger_type", e.target.value)}>
-            {TRIGGERS.map((t) => (
-              <option key={t.v} value={t.v}>{t.l}</option>
-            ))}
-          </select>
+          <SmartSelect
+            className="mt-1"
+            value={f.trigger_type}
+            onValueChange={(v) => up("trigger_type", v)}
+            options={TRIGGERS.map((t): SmartOption => ({ value: t.v, label: t.l }))}
+          />
           {needsValue && (
             <input
               className="input mt-2"
@@ -73,37 +75,42 @@ export default function AutomationBuilder({ sequences, stages, tags }: { sequenc
             />
           )}
           {f.trigger_type === "tag_added" && (
-            <select className="input mt-2" value={f.trigger_value} onChange={(e) => up("trigger_value", e.target.value)}>
-              <option value="">Qualquer tag</option>
-              {(tags || []).map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
+            <SmartSelect
+              className="mt-2"
+              placeholder="Qualquer tag"
+              clearable
+              value={f.trigger_value}
+              onValueChange={(v) => up("trigger_value", v)}
+              options={(tags || []).map((t): SmartOption => ({ value: t.id, label: t.name }))}
+            />
           )}
         </div>
 
         <div className="rounded-xl bg-muted p-4">
           <p className="label">Então (ação)</p>
-          <select className="input mt-1" value={f.action_type} onChange={(e) => up("action_type", e.target.value)}>
-            {ACTIONS.map((a) => (
-              <option key={a.v} value={a.v}>{a.l}</option>
-            ))}
-          </select>
+          <SmartSelect
+            className="mt-1"
+            value={f.action_type}
+            onValueChange={(v) => up("action_type", v)}
+            options={ACTIONS.map((a): SmartOption => ({ value: a.v, label: a.l }))}
+          />
           {f.action_type === "enroll" && (
-            <select className="input mt-2" value={f.action_seq} onChange={(e) => up("action_seq", e.target.value)}>
-              <option value="">Escolha a cadência…</option>
-              {sequences.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+            <SmartSelect
+              className="mt-2"
+              placeholder="Escolha a cadência…"
+              value={f.action_seq}
+              onValueChange={(v) => up("action_seq", v)}
+              options={sequences.map((s): SmartOption => ({ value: s.id, label: s.name }))}
+            />
           )}
           {f.action_type === "move_stage" && (
-            <select className="input mt-2" value={f.action_stage} onChange={(e) => up("action_stage", e.target.value)}>
-              <option value="">Escolha o estágio…</option>
-              {stages.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+            <SmartSelect
+              className="mt-2"
+              placeholder="Escolha o estágio…"
+              value={f.action_stage}
+              onValueChange={(v) => up("action_stage", v)}
+              options={stages.map((s): SmartOption => ({ value: s.id, label: s.name }))}
+            />
           )}
         </div>
       </div>

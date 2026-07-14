@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { enrichBatch, importBatch } from "@/app/dashboard/contatos/lote/[id]/actions";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 type Item = {
   name: string;
@@ -33,6 +34,7 @@ export function BatchReview({
 
   const comDominio = items.filter((i) => i.domain).length;
   const semDominio = items.length - comDominio;
+  const cadOpts: SmartOption[] = cadences.map((c) => ({ value: c.id, label: c.name }));
 
   function alternar(i: number) {
     const s = new Set(sel);
@@ -152,10 +154,14 @@ export function BatchReview({
         <div className="mt-4 flex flex-wrap items-end gap-3">
           <div>
             <label className="label">Inscrever na cadência</label>
-            <select className="input mt-1 max-w-[240px]" value={cad} onChange={(e) => setCad(e.target.value)}>
-              <option value="">Não inscrever agora</option>
-              {cadences.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <SmartSelect
+              className="mt-1 max-w-[240px]"
+              options={cadOpts}
+              value={cad}
+              onValueChange={(v) => setCad(v)}
+              placeholder="Não inscrever agora"
+              clearable
+            />
           </div>
           <button className="btn-brand" onClick={importar} disabled={pending || !sel.size}>
             {pending ? "Importando…" : `Importar ${sel.size} contatos`}

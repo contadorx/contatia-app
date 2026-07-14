@@ -2,6 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { updateContact } from "@/app/dashboard/contatos/actions";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
+
+const STATUS_OPTS: SmartOption[] = [
+  { value: "novo", label: "Novo" },
+  { value: "ativo", label: "Ativo" },
+  { value: "qualificado", label: "Qualificado" },
+  { value: "descartado", label: "Descartado" },
+];
 
 type C = { id: string; name: string; email?: string | null; phone?: string | null; company?: string | null; company_domain?: string | null; role_title?: string | null; cnpj?: string | null; status?: string | null };
 
@@ -39,12 +47,12 @@ export default function EditContactButton({ contact }: { contact: C }) {
         <div><label className="label">CNPJ</label><input className="input mt-1" value={f.cnpj} onChange={(e) => up("cnpj", e.target.value)} /></div>
         <div>
           <label className="label">Situação</label>
-          <select className="input mt-1" value={f.status} onChange={(e) => up("status", e.target.value)}>
-            <option value="novo">Novo</option>
-            <option value="ativo">Ativo</option>
-            <option value="qualificado">Qualificado</option>
-            <option value="descartado">Descartado</option>
-          </select>
+          <SmartSelect
+            className="mt-1"
+            options={STATUS_OPTS}
+            value={f.status}
+            onValueChange={(v) => up("status", v)}
+          />
         </div>
       </div>
       {msg && <p className="mt-2 text-sm text-danger">{msg}</p>}

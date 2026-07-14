@@ -3,6 +3,7 @@
 import { useTransition, useState, useEffect, useRef } from "react";
 import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask, sendAllEmailTasks, completeTasks } from "@/app/dashboard/task-actions";
 import { channelLabel, waLink, type Channel } from "@/lib/cadence";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 type Task = {
   id: string;
@@ -70,16 +71,16 @@ export default function TaskQueue({
   // filtros
   const [periodo, setPeriodo] = useState<"hoje" | "3dias" | "todos">("hoje");
   const [canal, setCanal] = useState<string>("todos");
-  const [tagFilter, setTagFilter] = useState<string>("");
+  const [tagFilters, setTagFilters] = useState<string[]>([]);   // filtro por VÁRIAS tags
 
   const cadences = Array.from(new Set(allTasks.map((t) => t.cadence).filter(Boolean))) as string[];
-  const [cadFilter, setCadFilter] = useState<string>("");
+  const [cadFilters, setCadFilters] = useState<string[]>([]);   // filtro por VÁRIAS cadências
 
   const tasks = allTasks.filter((t) => {
     if (periodo === "hoje" && t.is_future) return false;
     if (canal !== "todos" && t.channel !== canal) return false;
-    if (tagFilter && !(t.tags || []).some((tg) => tg.id === tagFilter)) return false;
-    if (cadFilter && t.cadence !== cadFilter) return false;
+    if (tagFilters.length && !(t.tags || []).some((tg) => tagFilters.includes(tg.id))) return false;
+    if (cadFilters.length && !cadFilters.includes(t.cadence || "")) return false;
     return true;
   });
 
@@ -187,24 +188,43 @@ export default function TaskQueue({
             </button>
           ))}
         </div>
-        <select className="input py-1 text-xs" style={{ width: 150, flex: "0 0 auto" }} value={canal} onChange={(e) => setCanal(e.target.value)}>
-          <option value="todos">Todos os canais</option>
-          <option value="email">E-mail</option>
-          <option value="whatsapp">WhatsApp</option>
-          <option value="call">Ligação</option>
-          <option value="linkedin">LinkedIn</option>
-        </select>
+        <div className="w-[150px] shrink-0 grow-0">
+          <SmartSelect
+            className="py-1 text-xs"
+            value={canal}
+            onValueChange={(v) => setCanal(v)}
+            options={[
+              { value: "todos", label: "Todos os canais" },
+              { value: "email", label: "E-mail" },
+              { value: "whatsapp", label: "WhatsApp" },
+              { value: "call", label: "Ligação" },
+              { value: "linkedin", label: "LinkedIn" },
+            ]}
+          />
+        </div>
         {cadences.length > 0 && (
-          <select className="input py-1 text-xs" style={{ width: 150, flex: "0 0 auto" }} value={cadFilter} onChange={(e) => setCadFilter(e.target.value)}>
-            <option value="">Todas as cadências</option>
-            {cadences.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <div className="w-[150px] shrink-0 grow-0">
+            <SmartSelect
+              multiple
+              className="py-1 text-xs"
+              placeholder="Todas as cadências"
+              values={cadFilters}
+              onValuesChange={setCadFilters}
+              options={cadences.map((c): SmartOption => ({ value: c, label: c }))}
+            />
+          </div>
         )}
         {allTags.length > 0 && (
-          <select className="input py-1 text-xs" style={{ width: 130, flex: "0 0 auto" }} value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
-            <option value="">Todas as tags</option>
-            {allTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          <div className="w-[130px] shrink-0 grow-0">
+            <SmartSelect
+              multiple
+              className="py-1 text-xs"
+              placeholder="Todas as tags"
+              values={tagFilters}
+              onValuesChange={setTagFilters}
+              options={allTags.map((t): SmartOption => ({ value: t.id, label: t.name }))}
+            />
+          </div>
         )}
         <span className="shrink-0 text-xs text-subtle">{tasks.length} na visão</span>
       </div>

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { enrichAndPush } from "@/app/dashboard/radar/actions";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 export default function RadarPushButton({
   radarId,
@@ -41,14 +42,14 @@ export default function RadarPushButton({
 
   return (
     <div className="flex items-center justify-end gap-2">
-      <select className="input max-w-[130px] py-1 text-xs" value={seq} onChange={(e) => setSeq(e.target.value)}>
-        <option value="">Sem cadência</option>
-        {sequences.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </select>
+      <SmartSelect
+        className="max-w-[130px] py-1 text-xs"
+        placeholder="Sem cadência"
+        clearable
+        value={seq}
+        onValueChange={(v) => setSeq(v)}
+        options={sequences.map((s): SmartOption => ({ value: s.id, label: s.name }))}
+      />
       <button className="btn-brand py-1 text-xs" onClick={push} disabled={pending}>
         {pending ? "..." : "Adicionar"}
       </button>

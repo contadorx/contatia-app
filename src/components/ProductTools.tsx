@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { createProduct, updateProduct, deleteProduct } from "@/app/dashboard/config/produtos/actions";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
@@ -9,6 +10,20 @@ type Account = { id: string; from_email: string; display_name?: string | null };
 type Product = { id: string; name: string; kind: string; billing: string; price: number; active: boolean; email_account_id?: string | null; email_accounts?: { from_email: string } | null };
 
 const boxLabel = (a: Account) => a.display_name ? `${a.display_name} <${a.from_email}>` : a.from_email;
+
+const KIND_OPTS: SmartOption[] = [
+  { value: "servico", label: "Serviço" },
+  { value: "produto", label: "Produto" },
+];
+const BILLING_OPTS: SmartOption[] = [
+  { value: "recorrente", label: "Recorrente (mensal)" },
+  { value: "avulso", label: "Avulso (única)" },
+];
+const BILLING_OPTS_SHORT: SmartOption[] = [
+  { value: "recorrente", label: "Recorrente" },
+  { value: "avulso", label: "Avulso" },
+];
+const accountOpts = (accounts: Account[]): SmartOption[] => accounts.map((a) => ({ value: a.id, label: boxLabel(a) }));
 
 export function ProductForm({ accounts = [] }: { accounts?: Account[] }) {
   const [f, setF] = useState({ name: "", kind: "servico", billing: "recorrente", price: "", email_account_id: "" });
@@ -22,25 +37,29 @@ export function ProductForm({ accounts = [] }: { accounts?: Account[] }) {
         <div className="sm:col-span-2"><label className="label">Nome *</label><input className="input mt-1" value={f.name} onChange={(e) => up("name", e.target.value)} placeholder="Ex.: BPO Financeiro, Implantação, Consultoria" /></div>
         <div>
           <label className="label">Tipo</label>
-          <select className="input mt-1" value={f.kind} onChange={(e) => up("kind", e.target.value)}>
-            <option value="servico">Serviço</option>
-            <option value="produto">Produto</option>
-          </select>
+          <div className="mt-1">
+            <SmartSelect options={KIND_OPTS} value={f.kind} onValueChange={(v) => up("kind", v)} />
+          </div>
         </div>
         <div>
           <label className="label">Cobrança</label>
-          <select className="input mt-1" value={f.billing} onChange={(e) => up("billing", e.target.value)}>
-            <option value="recorrente">Recorrente (mensal)</option>
-            <option value="avulso">Avulso (única)</option>
-          </select>
+          <div className="mt-1">
+            <SmartSelect options={BILLING_OPTS} value={f.billing} onValueChange={(v) => up("billing", v)} />
+          </div>
         </div>
         <div><label className="label">Preço de referência (R$)</label><input className="input mt-1" type="number" value={f.price} onChange={(e) => up("price", e.target.value)} placeholder="0" /></div>
         <div>
           <label className="label">Caixa de e-mail deste produto</label>
-          <select className="input mt-1" value={f.email_account_id} onChange={(e) => up("email_account_id", e.target.value)} disabled={!accounts.length}>
-            <option value="">{accounts.length ? "Usar rodízio (padrão)" : "Nenhuma caixa conectada"}</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{boxLabel(a)}</option>)}
-          </select>
+          <div className="mt-1">
+            <SmartSelect
+              options={accountOpts(accounts)}
+              value={f.email_account_id}
+              onValueChange={(v) => up("email_account_id", v)}
+              disabled={!accounts.length}
+              placeholder={accounts.length ? "Usar rodízio (padrão)" : "Nenhuma caixa conectada"}
+              clearable
+            />
+          </div>
         </div>
       </div>
       <p className="mt-2 text-xs text-subtle">As cadências deste produto enviam por esta caixa (a cadência pode sobrescrever). Sem caixa, o envio usa o rodízio entre as caixas ativas.</p>
@@ -65,13 +84,24 @@ export function ProductRow({ p, accounts = [] }: { p: Product; accounts?: Accoun
         <td className="px-4 py-2" colSpan={5}>
           <div className="flex flex-wrap items-center gap-2">
             <input className="input py-1 text-sm" style={{ width: 180 }} value={f.name} onChange={(e) => up("name", e.target.value)} />
-            <select className="input py-1 text-sm" style={{ width: 110 }} value={f.kind} onChange={(e) => up("kind", e.target.value)}><option value="servico">Serviço</option><option value="produto">Produto</option></select>
-            <select className="input py-1 text-sm" style={{ width: 130 }} value={f.billing} onChange={(e) => up("billing", e.target.value)}><option value="recorrente">Recorrente</option><option value="avulso">Avulso</option></select>
+            <div style={{ width: 110 }}>
+              <SmartSelect className="py-1 text-sm" options={KIND_OPTS} value={f.kind} onValueChange={(v) => up("kind", v)} />
+            </div>
+            <div style={{ width: 130 }}>
+              <SmartSelect className="py-1 text-sm" options={BILLING_OPTS_SHORT} value={f.billing} onValueChange={(v) => up("billing", v)} />
+            </div>
             <input className="input py-1 text-sm" style={{ width: 90 }} type="number" value={f.price} onChange={(e) => up("price", e.target.value)} />
-            <select className="input py-1 text-sm" style={{ width: 200 }} value={f.email_account_id} onChange={(e) => up("email_account_id", e.target.value)} disabled={!accounts.length} title="Caixa de e-mail do produto">
-              <option value="">Caixa: rodízio</option>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{boxLabel(a)}</option>)}
-            </select>
+            <div style={{ width: 200 }} title="Caixa de e-mail do produto">
+              <SmartSelect
+                className="py-1 text-sm"
+                options={accountOpts(accounts)}
+                value={f.email_account_id}
+                onValueChange={(v) => up("email_account_id", v)}
+                disabled={!accounts.length}
+                placeholder="Caixa: rodízio"
+                clearable
+              />
+            </div>
             <button className="btn-brand py-1 text-xs" disabled={pending} onClick={() => start(async () => { await updateProduct(p.id, { ...f, price: Number(f.price) }); setEdit(false); })}>Salvar</button>
             <button className="text-xs text-subtle hover:text-ink" onClick={() => setEdit(false)}>cancelar</button>
           </div>

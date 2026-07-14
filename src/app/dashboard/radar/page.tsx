@@ -1,9 +1,8 @@
-import { hasFeature } from "@/lib/plan";
-import { FeatureLock } from "@/components/UsageLimits";
 import { createClient } from "@/lib/supabase/server";
 import RadarImport from "@/components/RadarImport";
 import RadarPushButton from "@/components/RadarPushButton";
 import RadarSeedButton from "@/components/RadarSeedButton";
+import SmartSelect from "@/components/SmartSelect";
 
 export const dynamic = "force-dynamic";
 
@@ -12,18 +11,7 @@ export default async function Radar({
 }: {
   searchParams: { cnae?: string; uf?: string; municipio?: string; bairro?: string; capital?: string; porte?: string; tier?: string; q?: string };
 }) {
-  // O Radar é uma feature do Profissional para cima — é ele que faz o Essencial
-  // apertar e o cliente migrar.
-  if (!(await hasFeature("radar"))) {
-    return (
-      <FeatureLock
-        feature="radar"
-        titulo="Radar de CNPJs da Receita"
-        descricao="Encontre empresas brasileiras por atividade, região e porte usando dados públicos — e transforme cada CNPJ em lead com contato."
-      />
-    );
-  }
-
+  // O Radar está incluído em TODOS os planos (Individual e Equipes) — sem gate.
   const supabase = createClient();
 
   let query = supabase
@@ -74,13 +62,18 @@ export default async function Radar({
             <input name="cnae" defaultValue={searchParams.cnae} className="input" placeholder="Atividade (CNAE)" />
             <input name="bairro" defaultValue={searchParams.bairro} className="input" placeholder="Bairro" />
             <input name="porte" defaultValue={searchParams.porte} className="input" placeholder="Porte" />
-            <select name="tier" defaultValue={searchParams.tier} className="input">
-              <option value="">Prioridade (todas)</option>
-              <option value="T1">T1 — alta</option>
-              <option value="T2">T2 — média-alta</option>
-              <option value="T3">T3 — média</option>
-              <option value="T4">T4 — baixa</option>
-            </select>
+            <SmartSelect
+              name="tier"
+              defaultValue={searchParams.tier}
+              placeholder="Prioridade (todas)"
+              clearable
+              options={[
+                { value: "T1", label: "T1 — alta" },
+                { value: "T2", label: "T2 — média-alta" },
+                { value: "T3", label: "T3 — média" },
+                { value: "T4", label: "T4 — baixa" },
+              ]}
+            />
             <label className="flex items-center gap-2 text-sm text-subtle">
               <input type="checkbox" name="capital" value="1" defaultChecked={searchParams.capital === "1"} />
               Só capitais

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import SmartSelect from "@/components/SmartSelect";
 import { openTicket, sendTicketMessage, setTicketStatus } from "@/app/dashboard/suporte/actions";
 
 const ST: Record<string, { l: string; c: string }> = {
@@ -40,11 +41,13 @@ export function TicketComposer({ onDone, onBack, autoFocus }: { onDone: () => vo
         <div><label className="label">Assunto *</label><input className="input mt-1" autoFocus={autoFocus} value={f.subject} onChange={(e) => up("subject", e.target.value)} placeholder="Resumo do problema" /></div>
         <div>
           <label className="label">Prioridade</label>
-          <select className="input mt-1" style={{ width: 160 }} value={f.priority} onChange={(e) => up("priority", e.target.value)}>
-            <option value="low">Baixa</option>
-            <option value="normal">Normal</option>
-            <option value="high">Alta</option>
-          </select>
+          <div style={{ width: 160 }}>
+            <SmartSelect className="mt-1" options={[
+              { value: "low", label: "Baixa" },
+              { value: "normal", label: "Normal" },
+              { value: "high", label: "Alta" },
+            ]} value={f.priority} onValueChange={(v) => up("priority", v)} />
+          </div>
         </div>
         <div><label className="label">Mensagem *</label><textarea className="input mt-1 min-h-[120px]" value={f.body} onChange={(e) => up("body", e.target.value)} placeholder="Descreva o que está acontecendo, com o máximo de detalhe." /></div>
       </div>
@@ -87,17 +90,19 @@ export function ReplyBox({ ticketId, staff }: { ticketId: string; staff?: boolea
 export function StatusControl({ ticketId, status }: { ticketId: string; status: string }) {
   const [pending, start] = useTransition();
   return (
-    <select
-      className="input py-1 text-xs"
-      style={{ width: 160 }}
-      value={status}
-      disabled={pending}
-      onChange={(e) => start(async () => void (await setTicketStatus(ticketId, e.target.value)))}
-    >
-      <option value="open">Aberto</option>
-      <option value="pending">Aguardando cliente</option>
-      <option value="resolved">Resolvido</option>
-      <option value="closed">Fechado</option>
-    </select>
+    <div style={{ width: 160 }}>
+      <SmartSelect
+        className="py-1 text-xs"
+        options={[
+          { value: "open", label: "Aberto" },
+          { value: "pending", label: "Aguardando cliente" },
+          { value: "resolved", label: "Resolvido" },
+          { value: "closed", label: "Fechado" },
+        ]}
+        value={status}
+        disabled={pending}
+        onValueChange={(v) => start(async () => void (await setTicketStatus(ticketId, v)))}
+      />
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { setTeamRole } from "@/app/dashboard/equipe/actions";
 import { toggleCalendarPermission } from "@/app/dashboard/equipe/team-actions";
 import { effectiveRole, ROLE_LABEL, type Role } from "@/lib/permissions";
@@ -130,14 +131,15 @@ export function TeamManager({
                     </td>
                     <td className="px-4 py-3">
                       {podeEditar ? (
-                        <select
-                          className="input max-w-[180px] py-1.5 text-sm"
-                          value={PAPEIS.some((p) => p.v === eff) ? eff : "vendedor"}
-                          disabled={pending}
-                          onChange={(e) => mudarPapel(m.id, e.target.value)}
-                        >
-                          {PAPEIS.map((p) => <option key={p.v} value={p.v}>{p.t}</option>)}
-                        </select>
+                        <div className="max-w-[180px]">
+                          <SmartSelect
+                            className="py-1.5 text-sm"
+                            value={PAPEIS.some((p) => p.v === eff) ? eff : "vendedor"}
+                            disabled={pending}
+                            onValueChange={(v) => mudarPapel(m.id, v)}
+                            options={PAPEIS.map((p): SmartOption => ({ value: p.v, label: p.t }))}
+                          />
+                        </div>
                       ) : (
                         <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">
                           {ROLE_LABEL[eff as Role] || eff}

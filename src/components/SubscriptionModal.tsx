@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { getSubscription, saveSubscription } from "@/app/dashboard/superadmin/subscription-actions";
 
 type Plan = { id: string; name: string; price_monthly: number };
@@ -70,16 +71,11 @@ export function SubscriptionModal({ plans }: { plans: Plan[] }) {
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="label">Status</label>
-                <select name="status" className="input mt-1" defaultValue={d.subscription_status || "trialing"}>
-                  {STATUS.map((s) => <option key={s.v} value={s.v}>{s.t}</option>)}
-                </select>
+                <SmartSelect name="status" className="mt-1" options={STATUS.map((s): SmartOption => ({ value: s.v, label: s.t }))} defaultValue={d.subscription_status || "trialing"} />
               </div>
               <div>
                 <label className="label">Plano</label>
-                <select name="plan_id" className="input mt-1" defaultValue={d.plan_id || ""}>
-                  <option value="">— sem plano —</option>
-                  {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
+                <SmartSelect name="plan_id" className="mt-1" placeholder="— sem plano —" clearable options={plans.map((p): SmartOption => ({ value: p.id, label: p.name }))} defaultValue={d.plan_id || ""} />
               </div>
               <div>
                 <label className="label">Valor mensal (R$)</label>
@@ -87,9 +83,7 @@ export function SubscriptionModal({ plans }: { plans: Plan[] }) {
               </div>
               <div>
                 <label className="label">Ciclo</label>
-                <select name="cycle" className="input mt-1" defaultValue={d.billing_cycle || "monthly"}>
-                  {CICLOS.map((c) => <option key={c.v} value={c.v}>{c.t}</option>)}
-                </select>
+                <SmartSelect name="cycle" className="mt-1" options={CICLOS.map((c): SmartOption => ({ value: c.v, label: c.t }))} defaultValue={d.billing_cycle || "monthly"} />
               </div>
               <div>
                 <label className="label">Trial até</label>

@@ -3,6 +3,7 @@
 import { useState, useTransition, useEffect, useRef } from "react";
 import { createSequence, updateSequence, generateSequenceAI, loadAiContext, saveAiContext, opusRemaining, type StepInput } from "@/app/dashboard/cadencias/actions";
 import type { Channel } from "@/lib/cadence";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 const CHANNELS: { v: Channel; l: string }[] = [
   { v: "email", l: "E-mail" },
@@ -298,18 +299,28 @@ export default function SequenceBuilder({
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <div>
             <label className="label">Produto</label>
-            <select className="input mt-1" value={productId} onChange={(e) => setProductId(e.target.value)} disabled={!products.length}>
-              <option value="">{products.length ? "Nenhum (rodízio de caixas)" : "Nenhum produto cadastrado"}</option>
-              {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            <SmartSelect
+              className="mt-1"
+              placeholder={products.length ? "Nenhum (rodízio de caixas)" : "Nenhum produto cadastrado"}
+              clearable
+              disabled={!products.length}
+              value={productId}
+              onValueChange={(v) => setProductId(v)}
+              options={products.map((p): SmartOption => ({ value: p.id, label: p.name }))}
+            />
             <p className="mt-1 text-[11px] text-subtle">A cadência envia pela caixa deste produto.</p>
           </div>
           <div>
             <label className="label">Caixa de envio (sobrescrever)</label>
-            <select className="input mt-1" value={emailAccountId} onChange={(e) => setEmailAccountId(e.target.value)} disabled={!accounts.length}>
-              <option value="">{accounts.length ? "Usar a do produto" : "Nenhuma caixa conectada"}</option>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.display_name ? `${a.display_name} <${a.from_email}>` : a.from_email}</option>)}
-            </select>
+            <SmartSelect
+              className="mt-1"
+              placeholder={accounts.length ? "Usar a do produto" : "Nenhuma caixa conectada"}
+              clearable
+              disabled={!accounts.length}
+              value={emailAccountId}
+              onValueChange={(v) => setEmailAccountId(v)}
+              options={accounts.map((a): SmartOption => ({ value: a.id, label: a.display_name ? `${a.display_name} <${a.from_email}>` : a.from_email }))}
+            />
             <p className="mt-1 text-[11px] text-subtle">Opcional. Força uma caixa específica, ignorando a do produto.</p>
           </div>
         </div>
@@ -320,17 +331,14 @@ export default function SequenceBuilder({
           <div key={i} className="rounded-xl border border-line p-4">
             <div className="flex items-center gap-3">
               <span className="text-xs font-bold text-brand">Passo {i + 1}</span>
-              <select
-                className="input max-w-[140px] py-1"
-                value={s.channel}
-                onChange={(e) => update(i, { channel: e.target.value as Channel })}
-              >
-                {CHANNELS.map((c) => (
-                  <option key={c.v} value={c.v}>
-                    {c.l}
-                  </option>
-                ))}
-              </select>
+              <div className="w-[140px] shrink-0">
+                <SmartSelect
+                  className="py-1"
+                  value={s.channel}
+                  onValueChange={(v) => update(i, { channel: v as Channel })}
+                  options={CHANNELS.map((c): SmartOption => ({ value: c.v, label: c.l }))}
+                />
+              </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-subtle">após</span>
                 <input

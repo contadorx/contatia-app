@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { scheduleMeeting } from "@/app/dashboard/reunioes/actions";
 
 type Contact = { id: string; name: string };
@@ -61,14 +62,13 @@ export default function MeetingForm({ contacts }: { contacts: Contact[] }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className="label">Contato *</label>
-          <select className="input mt-1" value={contactId} onChange={(e) => setContactId(e.target.value)}>
-            <option value="">Selecione…</option>
-            {contacts.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <SmartSelect
+            className="mt-1"
+            placeholder="Selecione…"
+            value={contactId}
+            onValueChange={setContactId}
+            options={contacts.map((c): SmartOption => ({ value: c.id, label: c.name }))}
+          />
         </div>
         <div>
           <label className="label">Título</label>
@@ -80,12 +80,17 @@ export default function MeetingForm({ contacts }: { contacts: Contact[] }) {
         </div>
         <div>
           <label className="label">Duração</label>
-          <select className="input mt-1" value={duration} onChange={(e) => setDuration(e.target.value)}>
-            <option value="15">15 min</option>
-            <option value="30">30 min</option>
-            <option value="45">45 min</option>
-            <option value="60">1 hora</option>
-          </select>
+          <SmartSelect
+            className="mt-1"
+            value={duration}
+            onValueChange={setDuration}
+            options={[
+              { value: "15", label: "15 min" },
+              { value: "30", label: "30 min" },
+              { value: "45", label: "45 min" },
+              { value: "60", label: "1 hora" },
+            ]}
+          />
         </div>
         <div className="sm:col-span-2">
           <label className="label">Local / link</label>

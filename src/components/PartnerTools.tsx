@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { createPartner, togglePartner, recordReferral, setReferralStatus } from "@/app/dashboard/superadmin/parceiros/actions";
 
 export function PartnerForm() {
@@ -81,27 +82,21 @@ export function ReferralForm({ partners, tenants }: { partners: { id: string; na
       <div className="grid gap-3 sm:grid-cols-3">
         <div>
           <label className="label">Parceiro *</label>
-          <select className="input mt-1" value={f.partner_id} onChange={(e) => up("partner_id", e.target.value)}>
-            <option value="">Escolha…</option>
-            {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <SmartSelect className="mt-1" placeholder="Escolha…" options={partners.map((p): SmartOption => ({ value: p.id, label: p.name }))} value={f.partner_id} onValueChange={(v) => up("partner_id", v)} />
         </div>
         <div>
           <label className="label">Workspace indicado</label>
-          <select className="input mt-1" value={f.tenant_id} onChange={(e) => up("tenant_id", e.target.value)}>
-            <option value="">— (ainda não é cliente)</option>
-            {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          <SmartSelect className="mt-1" placeholder="— (ainda não é cliente)" clearable options={tenants.map((t): SmartOption => ({ value: t.id, label: t.name }))} value={f.tenant_id} onValueChange={(v) => up("tenant_id", v)} />
         </div>
         <div><label className="label">MRR do indicado (R$)</label><input className="input mt-1" type="number" value={f.mrr} onChange={(e) => up("mrr", e.target.value)} placeholder="ex.: 179" /></div>
         <div className="sm:col-span-2"><label className="label">Rótulo (se ainda não virou workspace)</label><input className="input mt-1" value={f.label} onChange={(e) => up("label", e.target.value)} placeholder="Escritório Fulano" /></div>
         <div>
           <label className="label">Status</label>
-          <select className="input mt-1" value={f.status} onChange={(e) => up("status", e.target.value)}>
-            <option value="active">Ativo</option>
-            <option value="pending">Pendente</option>
-            <option value="churned">Cancelado</option>
-          </select>
+          <SmartSelect className="mt-1" options={[
+            { value: "active", label: "Ativo" },
+            { value: "pending", label: "Pendente" },
+            { value: "churned", label: "Cancelado" },
+          ]} value={f.status} onValueChange={(v) => up("status", v)} />
         </div>
       </div>
       {msg && <p className="mt-2 text-sm text-danger">{msg}</p>}
@@ -117,15 +112,16 @@ export function ReferralStatus({ id, status }: { id: string; status: string }) {
   const [pending, start] = useTransition();
   const map: Record<string, string> = { active: "bg-signal/10 text-signal", pending: "bg-warn/10 text-warn", churned: "bg-muted text-subtle" };
   return (
-    <select
+    <SmartSelect
       className={`rounded-full border-0 px-2 py-1 text-xs font-semibold ${map[status] || ""}`}
+      options={[
+        { value: "active", label: "Ativo" },
+        { value: "pending", label: "Pendente" },
+        { value: "churned", label: "Cancelado" },
+      ]}
       value={status}
       disabled={pending}
-      onChange={(e) => start(async () => void (await setReferralStatus(id, e.target.value)))}
-    >
-      <option value="active">Ativo</option>
-      <option value="pending">Pendente</option>
-      <option value="churned">Cancelado</option>
-    </select>
+      onValueChange={(v) => start(async () => void (await setReferralStatus(id, v)))}
+    />
   );
 }

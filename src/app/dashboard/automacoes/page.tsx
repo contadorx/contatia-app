@@ -1,5 +1,3 @@
-import { hasFeature } from "@/lib/plan";
-import { FeatureLock } from "@/components/UsageLimits";
 import { createClient } from "@/lib/supabase/server";
 import AutomationBuilder from "@/components/AutomationBuilder";
 import AutomationRow from "@/components/AutomationRow";
@@ -22,16 +20,7 @@ const ACTION_LABEL: Record<string, string> = {
 };
 
 export default async function Automacoes() {
-  if (!(await hasFeature("automacoes"))) {
-    return (
-      <FeatureLock
-        feature="automacoes"
-        titulo="Automações"
-        descricao="Regras que trabalham sozinhas: mover no pipeline, marcar quente, inscrever em cadência, avisar o vendedor."
-      />
-    );
-  }
-
+  // Automações incluídas em TODOS os planos (Individual e Equipes) — sem gate.
   const supabase = createClient();
 
   const [{ data: automations }, { data: sequences }, { data: stages }, { data: logs }, { data: tags }] = await Promise.all([

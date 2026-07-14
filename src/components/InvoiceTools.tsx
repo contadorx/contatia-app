@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { createInvoice, sendInvoiceEmail, setInvoiceStatus } from "@/app/dashboard/superadmin/cobranca/invoice-actions";
 
 const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
@@ -32,10 +33,7 @@ export function InvoiceForm({ tenants }: { tenants: Tenant[] }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className="label">Workspace *</label>
-          <select className="input mt-1" value={f.tenant_id} onChange={(e) => up("tenant_id", e.target.value)}>
-            <option value="">Escolha…</option>
-            {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          <SmartSelect className="mt-1" placeholder="Escolha…" options={tenants.map((t): SmartOption => ({ value: t.id, label: t.name }))} value={f.tenant_id} onValueChange={(v) => up("tenant_id", v)} />
         </div>
         <div><label className="label">Valor (R$) *</label><input className="input mt-1" type="number" value={f.amount} onChange={(e) => up("amount", e.target.value)} placeholder="179" /></div>
         <div><label className="label">Descrição</label><input className="input mt-1" value={f.description} onChange={(e) => up("description", e.target.value)} /></div>

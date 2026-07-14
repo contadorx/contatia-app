@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { createOpportunity, moveOpportunity, updateOpportunity, deleteOpportunity } from "@/app/dashboard/pipeline/actions";
 
 type Stage = { id: string; name: string; position: number; is_won: boolean; is_lost: boolean };
@@ -48,12 +49,12 @@ export default function PipelineBoard({
   const [pending, start] = useTransition();
 
   // filtros
-  const [fTag, setFTag] = useState("");
+  const [fTags, setFTags] = useState<string[]>([]);         // filtro por VÁRIAS tags
   const [fCad, setFCad] = useState<"todos" | "com" | "sem">("todos");
   const [fBusca, setFBusca] = useState("");
-  const [fProduct, setFProduct] = useState("");
+  const [fProducts, setFProducts] = useState<string[]>([]); // filtro por VÁRIOS produtos
   const cadences = Array.from(new Set(opps.map((o) => o.active_cadence).filter(Boolean))) as string[];
-  const [fCadName, setFCadName] = useState("");
+  const [fCadNames, setFCadNames] = useState<string[]>([]); // filtro por VÁRIAS cadências
   const [showFilters, setShowFilters] = useState(false);
 
   // form
@@ -117,11 +118,12 @@ export default function PipelineBoard({
 
   // aplica filtros
   const filtered = opps.filter((o) => {
-    if (fTag && !(o.tags || []).some((t) => t.id === fTag)) return false;
+    // filtros de MÚLTIPLA seleção: vazio = não filtra; com itens = OU entre eles
+    if (fTags.length && !(o.tags || []).some((t) => fTags.includes(t.id))) return false;
     if (fCad === "com" && !o.active_cadence) return false;
     if (fCad === "sem" && o.active_cadence) return false;
-    if (fCadName && o.active_cadence !== fCadName) return false;
-    if (fProduct && (o as any).product_id !== fProduct) return false;
+    if (fCadNames.length && !fCadNames.includes(o.active_cadence || "")) return false;
+    if (fProducts.length && !fProducts.includes((o as any).product_id)) return false;
     if (fBusca) {
       const q = fBusca.toLowerCase();
       const hay = `${o.title} ${o.contact_name || ""}`.toLowerCase();
@@ -129,9 +131,9 @@ export default function PipelineBoard({
     }
     return true;
   });
-  const hasFilter = !!(fTag || fCad !== "todos" || fCadName || fBusca || fProduct);
-  const activeCount = [fTag, fCad !== "todos", fCadName, fProduct].filter(Boolean).length;
-  function clearFilters() { setFTag(""); setFCad("todos"); setFCadName(""); setFBusca(""); setFProduct(""); }
+  const hasFilter = !!(fTags.length || fCad !== "todos" || fCadNames.length || fBusca || fProducts.length);
+  const activeCount = [fTags.length > 0, fCad !== "todos", fCadNames.length > 0, fProducts.length > 0].filter(Boolean).length;
+  function clearFilters() { setFTags([]); setFCad("todos"); setFCadNames([]); setFBusca(""); setFProducts([]); }
 
   return (
     <div>
@@ -158,25 +160,25 @@ export default function PipelineBoard({
             </div>
             <div>
               <label className="label">Empresa (opcional)</label>
-              <select className="input mt-1" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-                <option value="">—</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
+              <SmartSelect
+                className="mt-1"
+                placeholder="—"
+                clearable
+                value={accountId}
+                onValueChange={setAccountId}
+                options={accounts.map((a): SmartOption => ({ value: a.id, label: a.name }))}
+              />
             </div>
             <div>
               <label className="label">Contato (opcional)</label>
-              <select className="input mt-1" value={contactId} onChange={(e) => setContactId(e.target.value)}>
-                <option value="">—</option>
-                {contacts.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <SmartSelect
+                className="mt-1"
+                placeholder="—"
+                clearable
+                value={contactId}
+                onValueChange={setContactId}
+                options={contacts.map((c): SmartOption => ({ value: c.id, label: c.name }))}
+              />
             </div>
           </div>
           {msg && <p className="mt-2 text-sm text-danger">{msg}</p>}
@@ -211,22 +213,40 @@ export default function PipelineBoard({
               ))}
             </div>
             {cadences.length > 0 && (
-              <select className="input py-1 text-xs" style={{ width: 150, flex: "0 0 auto" }} value={fCadName} onChange={(e) => setFCadName(e.target.value)}>
-                <option value="">Qualquer cadência</option>
-                {cadences.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <div style={{ width: 150, flex: "0 0 auto" }}>
+                <SmartSelect
+                  multiple
+                  className="py-1 text-xs"
+                  placeholder="Qualquer cadência"
+                  values={fCadNames}
+                  onValuesChange={setFCadNames}
+                  options={cadences.map((c): SmartOption => ({ value: c, label: c }))}
+                />
+              </div>
             )}
             {allTags.length > 0 && (
-              <select className="input py-1 text-xs" style={{ width: 130, flex: "0 0 auto" }} value={fTag} onChange={(e) => setFTag(e.target.value)}>
-                <option value="">Todas as tags</option>
-                {allTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
+              <div style={{ width: 130, flex: "0 0 auto" }}>
+                <SmartSelect
+                  multiple
+                  className="py-1 text-xs"
+                  placeholder="Todas as tags"
+                  values={fTags}
+                  onValuesChange={setFTags}
+                  options={allTags.map((t): SmartOption => ({ value: t.id, label: t.name }))}
+                />
+              </div>
             )}
             {products.length > 0 && (
-              <select className="input py-1 text-xs" style={{ width: 160, flex: "0 0 auto" }} value={fProduct} onChange={(e) => setFProduct(e.target.value)}>
-                <option value="">Todos os produtos</option>
-                {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+              <div style={{ width: 160, flex: "0 0 auto" }}>
+                <SmartSelect
+                  multiple
+                  className="py-1 text-xs"
+                  placeholder="Todos os produtos"
+                  values={fProducts}
+                  onValuesChange={setFProducts}
+                  options={products.map((p): SmartOption => ({ value: p.id, label: p.name }))}
+                />
+              </div>
             )}
           </div>
         )}
@@ -274,19 +294,31 @@ export default function PipelineBoard({
                     <div className="mt-2 rounded-lg border border-line bg-muted p-2" onMouseDown={(e) => e.stopPropagation()} draggable={false}>
                       <input className="input py-1 text-xs" value={editOpp.title} onChange={(e) => setEditOpp({ ...editOpp, title: e.target.value })} placeholder="Título" />
                       <input className="input mt-1 py-1 text-xs" type="number" value={editOpp.value_mrr} onChange={(e) => setEditOpp({ ...editOpp, value_mrr: e.target.value })} placeholder="Valor/mês" />
-                      <select className="input mt-1 py-1 text-xs" value={editOpp.contact_id} onChange={(e) => setEditOpp({ ...editOpp, contact_id: e.target.value })}>
-                        <option value="">— sem contato</option>
-                        {contacts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
-                      <select className="input mt-1 py-1 text-xs" value={editOpp.account_id} onChange={(e) => setEditOpp({ ...editOpp, account_id: e.target.value })}>
-                        <option value="">— sem empresa</option>
-                        {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                      </select>
+                      <SmartSelect
+                        className="mt-1 py-1 text-xs"
+                        placeholder="— sem contato"
+                        clearable
+                        value={editOpp.contact_id}
+                        onValueChange={(v) => setEditOpp({ ...editOpp, contact_id: v })}
+                        options={contacts.map((c): SmartOption => ({ value: c.id, label: c.name }))}
+                      />
+                      <SmartSelect
+                        className="mt-1 py-1 text-xs"
+                        placeholder="— sem empresa"
+                        clearable
+                        value={editOpp.account_id}
+                        onValueChange={(v) => setEditOpp({ ...editOpp, account_id: v })}
+                        options={accounts.map((a): SmartOption => ({ value: a.id, label: a.name }))}
+                      />
                       {products.length > 0 && (
-                        <select className="input mt-1 py-1 text-xs" value={editOpp.product_id} onChange={(e) => setEditOpp({ ...editOpp, product_id: e.target.value })}>
-                          <option value="">— produto/serviço</option>
-                          {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
+                        <SmartSelect
+                          className="mt-1 py-1 text-xs"
+                          placeholder="— produto/serviço"
+                          clearable
+                          value={editOpp.product_id}
+                          onValueChange={(v) => setEditOpp({ ...editOpp, product_id: v })}
+                          options={products.map((p): SmartOption => ({ value: p.id, label: p.name }))}
+                        />
                       )}
                       <div className="mt-2 flex items-center gap-2">
                         <button className="btn-brand py-1 text-[11px]" disabled={pending} onClick={() => start(async () => {

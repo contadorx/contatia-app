@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isManager as isMgr } from "@/lib/permissions";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import GoalPanel from "@/components/GoalPanel";
+import SmartSelect from "@/components/SmartSelect";
 
 export const dynamic = "force-dynamic";
 
@@ -140,18 +141,27 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
       {/* Filtros */}
       <form className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-2.5">
         {isManager && (
-          <select name="vendedor" defaultValue={vendedor} className="input py-1 text-xs" style={{ width: 190 }}>
-            <option value="">Toda a equipe</option>
-            {memberList.map((m) => (
-              <option key={m.id} value={m.id}>{m.full_name || m.email}</option>
-            ))}
-          </select>
+          <div style={{ width: 190 }}>
+            <SmartSelect
+              name="vendedor"
+              defaultValue={vendedor}
+              placeholder="Toda a equipe"
+              clearable
+              options={memberList.map((m) => ({ value: m.id, label: m.full_name || m.email }))}
+            />
+          </div>
         )}
-        <select name="dias" defaultValue={String(dias)} className="input py-1 text-xs" style={{ width: 140 }}>
-          <option value="7">Últimos 7 dias</option>
-          <option value="30">Últimos 30 dias</option>
-          <option value="90">Últimos 90 dias</option>
-        </select>
+        <div style={{ width: 150 }}>
+          <SmartSelect
+            name="dias"
+            defaultValue={String(dias)}
+            options={[
+              { value: "7", label: "Últimos 7 dias" },
+              { value: "30", label: "Últimos 30 dias" },
+              { value: "90", label: "Últimos 90 dias" },
+            ]}
+          />
+        </div>
         <button className="btn-brand py-1 text-xs" type="submit">Aplicar</button>
         <span className="text-xs text-subtle">Visão: <b className="text-ink">{selectedName}</b></span>
       </form>

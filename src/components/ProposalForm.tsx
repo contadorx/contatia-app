@@ -1,7 +1,15 @@
 "use client";
 
 import { useState, useRef, useTransition } from "react";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { createDocument, uploadDocument } from "@/app/dashboard/propostas/actions";
+
+const TIPO_OPTS: SmartOption[] = [
+  { value: "proposta", label: "Proposta" },
+  { value: "deck", label: "Apresentação" },
+  { value: "one-pager", label: "Resumo (1 página)" },
+  { value: "case", label: "Case" },
+];
 
 export default function ProposalForm() {
   const [open, setOpen] = useState(false);
@@ -67,12 +75,12 @@ export default function ProposalForm() {
         </div>
         <div>
           <label className="label">Tipo</label>
-          <select className="input mt-1" value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="proposta">Proposta</option>
-            <option value="deck">Apresentação</option>
-            <option value="one-pager">Resumo (1 página)</option>
-            <option value="case">Case</option>
-          </select>
+          <SmartSelect
+            className="mt-1"
+            value={type}
+            onValueChange={setType}
+            options={TIPO_OPTS}
+          />
         </div>
         {mode === "upload" ? (
           <div>

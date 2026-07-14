@@ -50,14 +50,17 @@ create unique index if not exists platform_invoices_asaas_uniq
 -- ---------- M11: no máx. UMA empresa por (tenant, CNPJ) ----------
 -- Repointa os filhos das duplicatas para a empresa sobrevivente (menor id) e apaga as
 -- extras, para então poder criar o índice único.
+-- OBS: Postgres não tem min(uuid). Escolhemos a empresa sobrevivente (a mais antiga)
+-- com array_agg ordenado por created_at — evita o erro "function min(uuid) does not exist".
 create temporary table _acc_map on commit drop as
   select a.id as dup_id, k.keep_id
     from public.accounts a
     join (
-      select tenant_id, cnpj, min(id) as keep_id
+      select tenant_id, cnpj, (array_agg(id order by created_at asc, id asc))[1] as keep_id
         from public.accounts
        where cnpj is not null and cnpj <> ''
        group by tenant_id, cnpj
+      having count(*) > 1
     ) k on a.tenant_id = k.tenant_id and a.cnpj = k.cnpj
    where a.id <> k.keep_id;
 

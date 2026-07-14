@@ -2,8 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { saveWebhookConnection, savePipedriveConnection, saveHubspotConnection, saveRdstationConnection, disconnectCrm, testCrmConnection } from "@/app/dashboard/config/crm-actions";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 type Conn = any;
+
+const PUSH_ON_OPTS: SmartOption[] = [
+  { value: "replied", label: "O contato responder" },
+  { value: "meeting", label: "Uma reunião for marcada" },
+  { value: "both", label: "Nos dois casos" },
+];
 
 export function CrmIntegrations({ connections }: { connections: Conn[] }) {
   const [pending, start] = useTransition();
@@ -59,11 +66,9 @@ export function CrmIntegrations({ connections }: { connections: Conn[] }) {
           <div className="grid gap-3 md:grid-cols-2">
             <div>
               <label className="label">Enviar quando</label>
-              <select name="push_on" className="input mt-1" defaultValue={webhook?.push_on || "both"}>
-                <option value="replied">O contato responder</option>
-                <option value="meeting">Uma reunião for marcada</option>
-                <option value="both">Nos dois casos</option>
-              </select>
+              <div className="mt-1">
+                <SmartSelect name="push_on" options={PUSH_ON_OPTS} defaultValue={webhook?.push_on || "both"} />
+              </div>
             </div>
             <div>
               <label className="label">Segredo (opcional)</label>
@@ -120,11 +125,9 @@ export function CrmIntegrations({ connections }: { connections: Conn[] }) {
             </div>
             <div>
               <label className="label">Enviar quando</label>
-              <select name="push_on" className="input mt-1" defaultValue={pipedrive?.push_on || "both"}>
-                <option value="replied">O contato responder</option>
-                <option value="meeting">Uma reunião for marcada</option>
-                <option value="both">Nos dois casos</option>
-              </select>
+              <div className="mt-1">
+                <SmartSelect name="push_on" options={PUSH_ON_OPTS} defaultValue={pipedrive?.push_on || "both"} />
+              </div>
             </div>
           </div>
           <label className="flex items-center gap-2 text-sm">
@@ -173,11 +176,9 @@ export function CrmIntegrations({ connections }: { connections: Conn[] }) {
             </div>
             <div>
               <label className="label">Enviar quando</label>
-              <select name="push_on" className="input mt-1" defaultValue={hubspot?.push_on || "both"}>
-                <option value="replied">O contato responder</option>
-                <option value="meeting">Uma reunião for marcada</option>
-                <option value="both">Nos dois casos</option>
-              </select>
+              <div className="mt-1">
+                <SmartSelect name="push_on" options={PUSH_ON_OPTS} defaultValue={hubspot?.push_on || "both"} />
+              </div>
             </div>
           </div>
           <label className="flex items-center gap-2 text-sm">
@@ -223,11 +224,9 @@ export function CrmIntegrations({ connections }: { connections: Conn[] }) {
             </div>
             <div>
               <label className="label">Enviar quando</label>
-              <select name="push_on" className="input mt-1" defaultValue={rdstation?.push_on || "both"}>
-                <option value="replied">O contato responder</option>
-                <option value="meeting">Uma reunião for marcada</option>
-                <option value="both">Nos dois casos</option>
-              </select>
+              <div className="mt-1">
+                <SmartSelect name="push_on" options={PUSH_ON_OPTS} defaultValue={rdstation?.push_on || "both"} />
+              </div>
             </div>
           </div>
           <label className="flex items-center gap-2 text-sm">

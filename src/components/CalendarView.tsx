@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 // ============================================================
 // AGENDA EM CALENDÁRIO
@@ -132,13 +133,14 @@ export function CalendarView({
           </div>
 
           {vendedores && vendedores.length > 0 && (
-            <select
-              className="input max-w-[190px] py-1.5 text-sm"
-              value={vendedorAtivo || ""}
-              onChange={(e) => onTrocarVendedor?.(e.target.value)}
-            >
-              {vendedores.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </select>
+            <div className="max-w-[190px]">
+              <SmartSelect
+                className="py-1.5 text-sm"
+                value={vendedorAtivo || ""}
+                onValueChange={(v) => onTrocarVendedor?.(v)}
+                options={vendedores.map((v): SmartOption => ({ value: v.id, label: v.name }))}
+              />
+            </div>
           )}
         </div>
 

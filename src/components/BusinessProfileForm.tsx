@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { saveBusinessProfile } from "@/app/dashboard/config/actions";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 type Biz = {
   legal_name?: string | null;
@@ -24,6 +25,8 @@ const SEGMENTS = [
   { v: "ti", l: "TI / Software" },
   { v: "outro", l: "Outro" },
 ];
+
+const SEGMENT_OPTS: SmartOption[] = SEGMENTS.filter((s) => s.v !== "").map((s) => ({ value: s.v, label: s.l }));
 
 export default function BusinessProfileForm({ biz, canEdit }: { biz: Biz; canEdit: boolean }) {
   const [f, setF] = useState({
@@ -74,13 +77,16 @@ export default function BusinessProfileForm({ biz, canEdit }: { biz: Biz; canEdi
         </div>
         <div>
           <label className="label">Segmento</label>
-          <select className="input mt-1" value={f.segment} disabled={!canEdit} onChange={(e) => up("segment", e.target.value)}>
-            {SEGMENTS.map((s) => (
-              <option key={s.v} value={s.v}>
-                {s.l}
-              </option>
-            ))}
-          </select>
+          <div className="mt-1">
+            <SmartSelect
+              options={SEGMENT_OPTS}
+              value={f.segment}
+              disabled={!canEdit}
+              onValueChange={(v) => up("segment", v)}
+              placeholder="—"
+              clearable
+            />
+          </div>
         </div>
         <div>
           <label className="label">E-mail de contato</label>

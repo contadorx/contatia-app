@@ -2,6 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { saveRetention } from "@/app/dashboard/config/actions";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
+
+const RETENTION_OPTS: SmartOption[] = [
+  { value: "0", label: "Nunca expurgar" },
+  { value: "3", label: "3 meses" },
+  { value: "6", label: "6 meses" },
+  { value: "12", label: "12 meses" },
+  { value: "24", label: "24 meses" },
+];
 
 export default function RetentionForm({ initial }: { initial: number }) {
   const [months, setMonths] = useState(String(initial ?? 6));
@@ -10,13 +19,9 @@ export default function RetentionForm({ initial }: { initial: number }) {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <select className="input py-1.5 text-sm" style={{ width: 200 }} value={months} onChange={(e) => setMonths(e.target.value)}>
-        <option value="0">Nunca expurgar</option>
-        <option value="3">3 meses</option>
-        <option value="6">6 meses</option>
-        <option value="12">12 meses</option>
-        <option value="24">24 meses</option>
-      </select>
+      <div style={{ width: 200 }}>
+        <SmartSelect className="py-1.5 text-sm" options={RETENTION_OPTS} value={months} onValueChange={(v) => setMonths(v)} />
+      </div>
       <button
         className="btn-brand py-1.5 text-sm"
         disabled={pending}

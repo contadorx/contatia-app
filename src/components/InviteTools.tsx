@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { createInvite, revokeInvite } from "@/app/dashboard/equipe/actions";
 
 type Invite = { id: string; email: string; token: string; expires_at: string };
@@ -52,9 +53,9 @@ export default function InviteTools({ pending }: { pending: Invite[] }) {
         </div>
         <div>
           <label className="label">Papel</label>
-          <select className="input mt-1" value={teamRole} onChange={(e) => setTeamRole(e.target.value)} style={{ minWidth: 150 }}>
-            {ROLE_OPTS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
-          </select>
+          <div style={{ minWidth: 150 }}>
+            <SmartSelect className="mt-1" options={ROLE_OPTS.map((o): SmartOption => ({ value: o.v, label: o.l }))} value={teamRole} onValueChange={(v) => setTeamRole(v)} />
+          </div>
         </div>
         <button className="btn-brand py-2 text-sm" onClick={gerar} disabled={pendingTx || !email}>
           {pendingTx ? "..." : "Gerar convite"}

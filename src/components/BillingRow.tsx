@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { setTenantPlan } from "@/app/dashboard/superadmin/cobranca/actions";
 
 type Plan = { id: string; name: string; price_monthly: number };
@@ -23,6 +24,14 @@ export default function BillingRow({
   const [pending, start] = useTransition();
   const up = (k: string, v: string) => setF((s) => ({ ...s, [k]: v }));
 
+  const planOpts: SmartOption[] = plans.map((p) => ({ value: p.id, label: `${p.name} · R$${p.price_monthly}` }));
+  const statusOpts: SmartOption[] = [
+    { value: "trial", label: "Trial" },
+    { value: "active", label: "Ativo" },
+    { value: "past_due", label: "Vencido" },
+    { value: "canceled", label: "Cancelado" },
+  ];
+
   function save() {
     start(async () => {
       await setTenantPlan({
@@ -43,18 +52,10 @@ export default function BillingRow({
     <div className="mt-2 rounded-lg border border-line bg-muted p-3">
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="text-xs">Plano
-          <select className="input mt-1 py-1 text-xs" value={f.plan_id} onChange={(e) => up("plan_id", e.target.value)}>
-            <option value="">— sem plano</option>
-            {plans.map((p) => <option key={p.id} value={p.id}>{p.name} · R${p.price_monthly}</option>)}
-          </select>
+          <SmartSelect className="mt-1 py-1 text-xs" placeholder="— sem plano" clearable options={planOpts} value={f.plan_id} onValueChange={(v) => up("plan_id", v)} />
         </label>
         <label className="text-xs">Status
-          <select className="input mt-1 py-1 text-xs" value={f.subscription_status} onChange={(e) => up("subscription_status", e.target.value)}>
-            <option value="trial">Trial</option>
-            <option value="active">Ativo</option>
-            <option value="past_due">Vencido</option>
-            <option value="canceled">Cancelado</option>
-          </select>
+          <SmartSelect className="mt-1 py-1 text-xs" options={statusOpts} value={f.subscription_status} onValueChange={(v) => up("subscription_status", v)} />
         </label>
         <label className="text-xs">MRR (R$)
           <input className="input mt-1 py-1 text-xs" type="number" value={f.mrr} onChange={(e) => up("mrr", e.target.value)} />

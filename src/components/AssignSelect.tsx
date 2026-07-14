@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { assignContact } from "@/app/dashboard/equipe/actions";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 type Member = { id: string; full_name: string | null; email: string };
 
@@ -15,19 +16,16 @@ export default function AssignSelect({
   members: Member[];
 }) {
   const [pending, start] = useTransition();
+  const opts: SmartOption[] = members.map((m) => ({ value: m.id, label: m.full_name || m.email }));
   return (
-    <select
-      className="input max-w-[150px] py-1 text-xs"
+    <SmartSelect
+      className="max-w-[150px] py-1 text-xs"
+      options={opts}
       defaultValue={current || ""}
       disabled={pending}
-      onChange={(e) => start(async () => void (await assignContact(contactId, e.target.value || null)))}
-    >
-      <option value="">Sem dono</option>
-      {members.map((m) => (
-        <option key={m.id} value={m.id}>
-          {m.full_name || m.email}
-        </option>
-      ))}
-    </select>
+      placeholder="Sem dono"
+      clearable
+      onValueChange={(v) => start(async () => void (await assignContact(contactId, v || null)))}
+    />
   );
 }

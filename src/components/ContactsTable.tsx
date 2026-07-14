@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AssignSelect from "@/components/AssignSelect";
 import EnrollButton from "@/components/EnrollButton";
+import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { bulkAssign, bulkEnroll } from "@/app/dashboard/contatos/bulk-actions";
 import { bulkTag, createTag } from "@/app/dashboard/contatos/tag-actions";
 
@@ -46,6 +47,13 @@ export default function ContactsTable({
 
   const allIds = useMemo(() => contacts.map((c) => c.id), [contacts]);
   const allChecked = sel.size > 0 && sel.size === contacts.length;
+
+  const seqOpts: SmartOption[] = sequences.map((s) => ({ value: s.id, label: s.name }));
+  const assignOpts: SmartOption[] = [
+    { value: "__none__", label: "Sem dono" },
+    ...members.map((m) => ({ value: m.id, label: m.full_name || m.email })),
+  ];
+  const tagOpts: SmartOption[] = tags.map((t) => ({ value: t.id, label: t.name }));
 
   function toggle(id: string) {
     setSel((s) => {
@@ -120,29 +128,28 @@ export default function ContactsTable({
           <span className="text-sm font-semibold">{sel.size} selecionado{sel.size > 1 ? "s" : ""}</span>
 
           <div className="flex items-center gap-1">
-            <select className="input py-1.5 text-sm" value={seq} onChange={(e) => setSeq(e.target.value)}>
-              <option value="">Inscrever em cadência…</option>
-              {sequences.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+            <SmartSelect
+              className="py-1.5 text-sm"
+              options={seqOpts}
+              value={seq}
+              onValueChange={(v) => setSeq(v)}
+              placeholder="Inscrever em cadência…"
+              clearable
+            />
             <button className="btn-brand py-1.5 text-sm" onClick={doEnroll} disabled={pending || !seq}>
               {pending ? "..." : "Inscrever"}
             </button>
           </div>
 
           <div className="flex items-center gap-1">
-            <select className="input py-1.5 text-sm" value={assignTo} onChange={(e) => setAssignTo(e.target.value)}>
-              <option value="">Atribuir a…</option>
-              <option value="__none__">Sem dono</option>
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.full_name || m.email}
-                </option>
-              ))}
-            </select>
+            <SmartSelect
+              className="py-1.5 text-sm"
+              options={assignOpts}
+              value={assignTo}
+              onValueChange={(v) => setAssignTo(v)}
+              placeholder="Atribuir a…"
+              clearable
+            />
             <button
               className="btn-ghost py-1.5 text-sm"
               onClick={() => start(async () => {
@@ -159,12 +166,14 @@ export default function ContactsTable({
 
           {tags.length > 0 && (
             <div className="flex items-center gap-1">
-              <select className="input py-1.5 text-sm" value={tagId} onChange={(e) => setTagId(e.target.value)}>
-                <option value="">Aplicar tag…</option>
-                {tags.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
+              <SmartSelect
+                className="py-1.5 text-sm"
+                options={tagOpts}
+                value={tagId}
+                onValueChange={(v) => setTagId(v)}
+                placeholder="Aplicar tag…"
+                clearable
+              />
               <button className="btn-ghost py-1.5 text-sm" onClick={doTag} disabled={pending || !tagId}>Aplicar</button>
             </div>
           )}
