@@ -71,6 +71,7 @@ export default function TaskQueue({
   // filtros
   const [periodo, setPeriodo] = useState<"hoje" | "3dias" | "todos">("hoje");
   const [canal, setCanal] = useState<string>("todos");
+  const [busca, setBusca] = useState("");                        // busca por contato/empresa
   const [tagFilters, setTagFilters] = useState<string[]>([]);   // filtro por VÁRIAS tags
 
   const cadences = Array.from(new Set(allTasks.map((t) => t.cadence).filter(Boolean))) as string[];
@@ -81,6 +82,11 @@ export default function TaskQueue({
     if (canal !== "todos" && t.channel !== canal) return false;
     if (tagFilters.length && !(t.tags || []).some((tg) => tagFilters.includes(tg.id))) return false;
     if (cadFilters.length && !cadFilters.includes(t.cadence || "")) return false;
+    if (busca) {
+      const q = busca.toLowerCase();
+      const hay = `${t.contacts?.name || ""} ${t.contacts?.company || ""} ${t.contacts?.email || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     return true;
   });
 
@@ -188,6 +194,12 @@ export default function TaskQueue({
             </button>
           ))}
         </div>
+        <input
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+          placeholder="Buscar contato/empresa…"
+          className="input w-[190px] shrink-0 grow-0 py-1 text-xs"
+        />
         <div className="w-[150px] shrink-0 grow-0">
           <SmartSelect
             className="py-1 text-xs"

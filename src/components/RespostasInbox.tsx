@@ -38,12 +38,16 @@ const MEDIA_LABEL: Record<string, string> = { image: "imagem", audio: "áudio", 
 export default function RespostasInbox({ threads, canReply }: { threads: Thread[]; canReply: boolean }) {
   const router = useRouter();
   const [sel, setSel] = useState<string | null>(threads[0]?.key ?? null);
+  const [busca, setBusca] = useState("");
   const [text, setText] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<"block" | "delete" | null>(null);
   const [pending, start] = useTransition();
 
   const active = threads.find((t) => t.key === sel) || null;
+  const visibleThreads = busca
+    ? threads.filter((t) => `${t.name} ${t.phone} ${snippet(t)}`.toLowerCase().includes(busca.toLowerCase()))
+    : threads;
 
   useEffect(() => {
     setConfirm(null);
@@ -77,8 +81,20 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
   return (
     <div className="grid gap-4 md:grid-cols-[300px_1fr]">
       {/* lista de conversas */}
-      <div className="card divide-y divide-line overflow-hidden">
-        {threads.map((t) => (
+      <div className="card overflow-hidden">
+        <div className="border-b border-line p-2">
+          <input
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            placeholder="Buscar conversa…"
+            className="input py-1.5 text-sm"
+          />
+        </div>
+        <div className="divide-y divide-line">
+        {visibleThreads.length === 0 && (
+          <p className="p-4 text-sm text-subtle">Nenhuma conversa para “{busca}”.</p>
+        )}
+        {visibleThreads.map((t) => (
           <button
             key={t.key}
             onClick={() => setSel(t.key)}
@@ -94,6 +110,7 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
             <span className="shrink-0 text-[10px] text-subtle">{fmt(t.lastAt).split(" ")[0]}</span>
           </button>
         ))}
+        </div>
       </div>
 
       {/* conversa */}

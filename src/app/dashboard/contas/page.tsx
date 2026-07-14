@@ -4,13 +4,19 @@ import AccountTools from "@/components/AccountTools";
 
 export const dynamic = "force-dynamic";
 
-export default async function Contas({ searchParams }: { searchParams: { tag?: string } }) {
+export default async function Contas({ searchParams }: { searchParams: { tag?: string; q?: string } }) {
   const supabase = createClient();
-  const { data: accounts } = await supabase
+  const q = (searchParams.q || "").trim();
+  const qSafe = q.slice(0, 80).replace(/[,()%*]/g, " ").trim();
+
+  let accountsQuery = supabase
     .from("accounts")
     .select("id, name, uf, cnpj, domain, contacts(count), opportunities(count), account_tags(tags(id, name, color))")
     .order("created_at", { ascending: false })
     .limit(300);
+  // busca por nome, CNPJ ou domínio
+  if (qSafe) accountsQuery = accountsQuery.or(`name.ilike.%${qSafe}%,cnpj.ilike.%${qSafe}%,domain.ilike.%${qSafe}%`);
+  const { data: accounts } = await accountsQuery;
 
   const { data: allTags } = await supabase.from("tags").select("id, name, color").order("name", { ascending: true });
 
@@ -31,15 +37,30 @@ export default async function Contas({ searchParams }: { searchParams: { tag?: s
         <AccountTools />
       </div>
 
+      {/* busca por nome / CNPJ / domínio */}
+      <form className="mt-4 flex flex-wrap items-center gap-2">
+        {tagFilter && <input type="hidden" name="tag" value={tagFilter} />}
+        <input
+          name="q"
+          defaultValue={q}
+          className="input max-w-xs py-1.5 text-sm"
+          placeholder="Buscar por nome, CNPJ ou domínio…"
+        />
+        <button className="btn-ghost py-1.5 text-sm" type="submit">Buscar</button>
+        {q && (
+          <a href={tagFilter ? `/dashboard/contas?tag=${tagFilter}` : "/dashboard/contas"} className="text-xs text-subtle hover:text-ink">limpar busca</a>
+        )}
+      </form>
+
       {/* filtro por tag */}
       {((allTags as any[]) || []).length > 0 && (
-        <div className="mt-4 flex flex-wrap items-center gap-1.5">
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <span className="text-xs text-subtle">Filtrar:</span>
-          <Link href="/dashboard/contas" className={`rounded-full px-2 py-0.5 text-xs font-medium ${!tagFilter ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}>Todas</Link>
+          <Link href={q ? `/dashboard/contas?q=${encodeURIComponent(q)}` : "/dashboard/contas"} className={`rounded-full px-2 py-0.5 text-xs font-medium ${!tagFilter ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}>Todas</Link>
           {((allTags as any[]) || []).map((t) => (
             <Link
               key={t.id}
-              href={`/dashboard/contas?tag=${t.id}`}
+              href={`/dashboard/contas?tag=${t.id}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
               className="rounded-full px-2 py-0.5 text-xs font-medium"
               style={tagFilter === t.id ? { background: t.color, color: "#fff" } : { background: `${t.color}20`, color: t.color }}
             >

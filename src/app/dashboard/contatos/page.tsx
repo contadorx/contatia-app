@@ -6,9 +6,12 @@ import { isManager } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
-export default async function Contatos({ searchParams }: { searchParams: { tag?: string } }) {
+export default async function Contatos({ searchParams }: { searchParams: { tag?: string; q?: string } }) {
   const supabase = createClient();
   const tagFilter = searchParams.tag;
+  const q = (searchParams.q || "").trim();
+  // sanitiza para o filtro .or() do PostgREST (vírgula/parênteses/% têm significado)
+  const qSafe = q.slice(0, 80).replace(/[,()%*]/g, " ").trim();
 
   // Visibilidade por papel: Dono/Admin/Gestor veem os contatos de toda a equipe;
   // Vendedor/SDR veem só os seus (assigned_to = você).
@@ -34,6 +37,8 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
     .limit(200);
   if (idsWithTag) contactsQuery = contactsQuery.in("id", idsWithTag.length ? idsWithTag : ["00000000-0000-0000-0000-000000000000"]);
   if (!gerente) contactsQuery = contactsQuery.eq("assigned_to", user?.id ?? "");
+  // busca por nome, e-mail ou empresa
+  if (qSafe) contactsQuery = contactsQuery.or(`name.ilike.%${qSafe}%,email.ilike.%${qSafe}%,company.ilike.%${qSafe}%`);
 
   const [{ data: contacts }, { data: sequences }, { data: members }] = await Promise.all([
     contactsQuery,
@@ -63,17 +68,35 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
         <ContactTools />
       </div>
 
+      {/* Busca por nome / e-mail / empresa */}
+      <form className="mt-4 flex flex-wrap items-center gap-2">
+        {tagFilter && <input type="hidden" name="tag" value={tagFilter} />}
+        <input
+          name="q"
+          defaultValue={q}
+          className="input max-w-xs py-1.5 text-sm"
+          placeholder="Buscar por nome, e-mail ou empresa…"
+        />
+        <button className="btn-ghost py-1.5 text-sm" type="submit">Buscar</button>
+        {q && (
+          <a href={tagFilter ? `/dashboard/contatos?tag=${tagFilter}` : "/dashboard/contatos"} className="text-xs text-subtle hover:text-ink">
+            limpar busca
+          </a>
+        )}
+        {q && <span className="text-xs text-subtle">Resultados para “{q}”</span>}
+      </form>
+
       {/* Filtro por tag */}
       {tagList.length > 0 && (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className="text-xs text-subtle">Filtrar por tag:</span>
-          <Link href="/dashboard/contatos" className={`rounded-full px-3 py-1 text-xs ${!tagFilter ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}>
+          <Link href={q ? `/dashboard/contatos?q=${encodeURIComponent(q)}` : "/dashboard/contatos"} className={`rounded-full px-3 py-1 text-xs ${!tagFilter ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}>
             Todos
           </Link>
           {tagList.map((t) => (
             <Link
               key={t.id}
-              href={`/dashboard/contatos?tag=${t.id}`}
+              href={`/dashboard/contatos?tag=${t.id}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
               className={`rounded-full px-3 py-1 text-xs ${tagFilter === t.id ? "text-white" : "text-ink hover:opacity-80"}`}
               style={{ background: tagFilter === t.id ? t.color : `${t.color}22` }}
             >
