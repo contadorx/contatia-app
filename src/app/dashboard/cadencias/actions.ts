@@ -283,7 +283,9 @@ export async function generateSequenceAI(
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
 
   // ---- TRAVA DE USO JUSTO (todas as gerações do mês, padrão + Opus) ----
-  let quota = plan?.ai_quota ? Number(plan.ai_quota) : 50;
+  // fallback = 100 (alinhado ao valor dos planos na migration 0076); usa != null para
+  // respeitar um 0 explícito (plano que queira desativar), em vez de cair no fallback.
+  let quota = plan?.ai_quota != null ? Number(plan.ai_quota) : 100;
   if (plan?.segment === "equipe") {
     const { count: seats } = await supabase.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenant_id);
     quota = quota * Math.max(1, seats ?? 1);
@@ -302,7 +304,7 @@ export async function generateSequenceAI(
   const premium = !!opts?.premium;
   let model = (tenant as any)?.ai_model || undefined;
   if (premium) {
-    const opusQuota = plan?.opus_quota != null ? Number(plan.opus_quota) : 5;
+    const opusQuota = plan?.opus_quota != null ? Number(plan.opus_quota) : 20;
     const { count: usedOpus } = await supabase
       .from("events")
       .select("id", { count: "exact", head: true })
@@ -334,7 +336,7 @@ export async function opusRemaining(): Promise<{ used: number; quota: number }> 
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { used: 0, quota: 0 };
   const { data: tenant } = await supabase.from("tenants").select("platform_plans(opus_quota)").eq("id", tenant_id).maybeSingle();
-  const quota = (tenant as any)?.platform_plans?.opus_quota != null ? Number((tenant as any).platform_plans.opus_quota) : 5;
+  const quota = (tenant as any)?.platform_plans?.opus_quota != null ? Number((tenant as any).platform_plans.opus_quota) : 20;
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
   const { count } = await supabase
