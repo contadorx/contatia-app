@@ -22,7 +22,7 @@ function addMonthsISO(n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-export async function subscribePlan(planId: string, docNumber?: string, couponCode?: string) {
+export async function subscribePlan(planId: string, docNumber?: string, couponCode?: string, requestedSeats?: number) {
   const { supabase, tenant_id, role } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (role !== "owner") return { error: "Apenas o dono do workspace pode assinar." };
@@ -60,8 +60,12 @@ export async function subscribePlan(planId: string, docNumber?: string, couponCo
     return { error: `Este plano é para até ${maxSeats} usuário(s), mas seu workspace tem ${seats}. Escolha um plano de Equipes.` };
   }
 
-  // Equipes cobra por um mínimo de assentos (mesmo com menos gente hoje)
-  const billedSeats = Math.max(seats, minSeats);
+  // Assentos a cobrar: o maior entre (gente hoje), (mínimo do plano) e (o que o dono
+  // escolheu comprar agora) — assim já dá pra contratar 10 assentos de uma vez e a 1ª
+  // fatura sai correta. Respeita o teto do plano quando houver.
+  const wanted = Math.max(0, Math.floor(Number(requestedSeats) || 0));
+  let billedSeats = Math.max(seats, minSeats, wanted);
+  if (maxSeats) billedSeats = Math.min(billedSeats, maxSeats);
   const full = Number((plan as any).price_monthly) * billedSeats;
 
   // cupom (opcional): validado com o admin client, pois platform_coupons é superadmin-only
@@ -157,7 +161,7 @@ export async function subscribePlan(planId: string, docNumber?: string, couponCo
   }
 
   revalidatePath("/dashboard/planos");
-  return { ok: true, link: sub.link, value, full, seats, planName: (plan as any).name, discountPct: coupon?.percent_off || 0 };
+  return { ok: true, link: sub.link, value, full, seats, billedSeats, planName: (plan as any).name, discountPct: coupon?.percent_off || 0 };
 }
 
 // Valida um cupom sem assinar (para a tela mostrar o desconto antes de confirmar).

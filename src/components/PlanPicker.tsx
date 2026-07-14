@@ -5,16 +5,17 @@ import { subscribePlan, validateCoupon } from "@/app/dashboard/planos/actions";
 
 type Plan = { id: string; name: string; price_monthly: number; max_seats: number | null; min_seats?: number; sort: number; segment?: string };
 
-export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe }: {
+export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe, hasDoc }: {
   plans: Plan[];
   features: Record<string, string[]>;
   seats: number;
   currentPlanId?: string;
   canSubscribe: boolean;
+  hasDoc?: boolean;
 }) {
   const [pending, start] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [result, setResult] = useState<{ link?: string; planName?: string; value?: number } | null>(null);
+  const [result, setResult] = useState<{ link?: string; planName?: string; value?: number; billedSeats?: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [needDoc, setNeedDoc] = useState<string | null>(null); // planId aguardando CPF/CNPJ
   const [doc, setDoc] = useState("");
@@ -31,6 +32,14 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
   const isTeam = seg === "equipe";
   const gridCols = visiblePlans.length >= 3 ? "md:grid-cols-3" : visiblePlans.length === 2 ? "md:grid-cols-2" : "max-w-md";
 
+  // assentos que o dono quer contratar (Equipes): default = maior entre a equipe de
+  // hoje e o mínimo do plano visível. Assim dá pra comprar 10 de uma vez.
+  const teamMin = Math.max(1, ...visiblePlans.map((p) => Number(p.min_seats) || 1));
+  const [chosenSeats, setChosenSeats] = useState<number>(Math.max(seats, teamMin));
+  const billed = isTeam ? Math.max(chosenSeats, teamMin) : 1;
+  // documento já no cadastro? então nem pedimos → assinar é 1 clique.
+  const docReady = !!hasDoc;
+
   function checkCoupon() {
     setCouponMsg(null);
     if (!coupon.trim()) return;
@@ -43,13 +52,16 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
 
   function pick(planId: string, docNumber?: string) {
     setErr(null); setResult(null); setBusyId(planId);
+    // usa o doc informado agora OU o campo superior (quando não há doc no cadastro)
+    const useDoc = docNumber || (docReady ? undefined : doc || undefined);
+    const reqSeats = isTeam ? billed : undefined;
     start(async () => {
-      const r = (await subscribePlan(planId, docNumber, coupon.trim() || undefined)) as any;
+      const r = (await subscribePlan(planId, useDoc, coupon.trim() || undefined, reqSeats)) as any;
       setBusyId(null);
       if (r?.error === "need_doc") { setNeedDoc(planId); return; }
       if (r?.error === "coupon_invalid") { setCouponMsg({ t: "err", m: "Cupom inválido ou esgotado." }); return; }
       if (r?.error) setErr(r.error);
-      else { setNeedDoc(null); setResult({ link: r.link, planName: r.planName, value: r.value }); }
+      else { setNeedDoc(null); setResult({ link: r.link, planName: r.planName, value: r.value, billedSeats: r.billedSeats }); }
     });
   }
 
@@ -57,7 +69,7 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
     return (
       <div className="card p-6 text-center">
         <p className="font-display text-lg font-bold text-signal">Assinatura criada!</p>
-        <p className="mt-1 text-sm">Plano <b>{result.planName}</b> · {result.value != null ? brl(result.value) : ""}/mês para {seats} usuário(s).</p>
+        <p className="mt-1 text-sm">Plano <b>{result.planName}</b> · {result.value != null ? brl(result.value) : ""}/mês para {result.billedSeats ?? seats} usuário(s).</p>
         {result.link ? (
           <>
             <p className="mt-3 text-sm text-subtle">Falta só o pagamento para ativar. Você escolhe boleto, Pix ou cartão.</p>
@@ -111,13 +123,47 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
         {couponMsg && <span className={`text-sm ${couponMsg.t === "ok" ? "text-signal" : "text-danger"}`}>{couponMsg.m}</span>}
       </div>
 
+      {/* Assentos (Equipes) + CPF/CNPJ upfront → assinar em 1 clique */}
+      <div className="mb-5 flex flex-wrap items-end gap-4">
+        {isTeam && (
+          <div>
+            <label className="label">Quantos assentos contratar</label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                className="input"
+                type="number"
+                min={teamMin}
+                value={chosenSeats}
+                onChange={(e) => setChosenSeats(Math.max(teamMin, Number(e.target.value) || teamMin))}
+                style={{ width: 110 }}
+              />
+              <span className="text-xs text-subtle">mínimo {teamMin} · você tem {seats} hoje</span>
+            </div>
+          </div>
+        )}
+        {!docReady && (
+          <div>
+            <label className="label">CPF ou CNPJ do responsável pela cobrança</label>
+            <input
+              className="input mt-1"
+              inputMode="numeric"
+              placeholder="Só números"
+              value={doc}
+              onChange={(e) => setDoc(e.target.value.replace(/\D/g, "").slice(0, 14))}
+              style={{ width: 220 }}
+            />
+            <p className="mt-1 text-[11px] text-subtle">Exigido pelo Asaas. Fica salvo — assim você assina em um clique.</p>
+          </div>
+        )}
+      </div>
+
       <div className={`grid gap-4 ${gridCols}`}>
         {visiblePlans.map((p) => {
           const isPopular = p.id === popular;
           const isCurrent = p.id === currentPlanId;
           const min = Math.max(1, Number(p.min_seats) || 1);
-          const billed = isTeam ? Math.max(seats, min) : 1;
-          const total = Number(p.price_monthly) * billed;
+          const seatsForCard = isTeam ? Math.max(chosenSeats, min) : 1;
+          const total = Number(p.price_monthly) * seatsForCard;
           return (
             <div key={p.id} className={`card flex flex-col p-6 ${isPopular ? "ring-2 ring-brand" : ""}`}>
               {isPopular && <span className="mb-3 self-start rounded-full bg-brand px-3 py-0.5 text-xs font-bold uppercase tracking-wide text-white">Mais popular</span>}
@@ -127,7 +173,7 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
                 <span className="text-sm text-subtle">{isTeam ? "/usuário/mês" : "/mês"}</span>
               </div>
               <p className="mt-1 text-xs text-subtle">{isTeam ? `cobrança por assento · mínimo ${min} usuários` : "1 usuário"}</p>
-              {isTeam && <p className="mt-2 text-sm font-medium text-brand-dark">≈ {brl(total)}/mês para {Math.max(seats, min)} usuário(s){seats < min ? " (mínimo)" : ""}</p>}
+              {isTeam && <p className="mt-2 text-sm font-medium text-brand-dark">≈ {brl(total)}/mês para {seatsForCard} assento(s){chosenSeats <= min ? " (mínimo)" : ""}</p>}
 
               <ul className="mt-4 flex-1 space-y-2">
                 {(features[p.name] || []).map((f, i) => (
@@ -161,11 +207,17 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
                 </div>
               ) : (
                 <button
-                  className={`mt-5 justify-center ${isPopular ? "btn-brand" : "btn-dark"}`}
-                  disabled={!canSubscribe || pending}
+                  className={`mt-5 w-full justify-center ${isPopular ? "btn-brand" : "btn-dark"}`}
+                  disabled={!canSubscribe || pending || (!docReady && doc.length !== 11 && doc.length !== 14)}
                   onClick={() => pick(p.id)}
                 >
-                  {busyId === p.id ? "Gerando..." : currentPlanId ? "Trocar para este" : "Assinar"}
+                  {busyId === p.id
+                    ? "Gerando..."
+                    : !docReady && doc.length !== 11 && doc.length !== 14
+                      ? "Informe o CPF/CNPJ acima"
+                      : currentPlanId
+                        ? "Trocar para este"
+                        : "Assinar"}
                 </button>
               )}
             </div>

@@ -22,6 +22,9 @@ body {
   .btn-ghost {
     @apply btn border border-line bg-surface text-ink hover:bg-muted;
   }
+  .btn-dark {
+    @apply btn bg-ink text-white hover:opacity-90;
+  }
   .card {
     @apply rounded-xl border border-line bg-surface;
   }

@@ -5,17 +5,31 @@ import EditSequenceButton from "@/components/EditSequenceButton";
 import { CadenceReport } from "@/components/CadenceReport";
 import { listTemplates } from "@/app/dashboard/cadencias/actions";
 import { channelLabel, type Channel } from "@/lib/cadence";
+import { isManager } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
 export default async function Cadencias() {
   const supabase = createClient();
 
+  // Visibilidade por papel: Dono/Admin/Gestor veem as cadências de toda a equipe;
+  // Vendedor/SDR veem só as que criaram (decisão do produto).
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: me } = await supabase
+    .from("profiles")
+    .select("role, team_role")
+    .eq("id", user?.id ?? "")
+    .maybeSingle();
+  const gerente = isManager((me as any)?.role, (me as any)?.team_role);
+
+  let seqQuery = supabase
+    .from("sequences")
+    .select("id, name, audience, is_active, created_at, created_by, product_id, email_account_id, sequence_steps(channel, position), products(name), email_accounts(from_email)")
+    .order("created_at", { ascending: false });
+  if (!gerente) seqQuery = seqQuery.eq("created_by", user?.id ?? "");
+
   const [{ data: sequences }, { templates }, { data: products }, { data: accounts }] = await Promise.all([
-    supabase
-      .from("sequences")
-      .select("id, name, audience, is_active, created_at, product_id, email_account_id, sequence_steps(channel, position), products(name), email_accounts(from_email)")
-      .order("created_at", { ascending: false }),
+    seqQuery,
     listTemplates(),
     supabase.from("products").select("id, name").eq("active", true).order("name", { ascending: true }),
     supabase.from("email_accounts").select("id, from_email, display_name").eq("is_active", true).order("created_at", { ascending: true }),

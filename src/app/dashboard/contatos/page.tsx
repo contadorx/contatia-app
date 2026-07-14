@@ -2,12 +2,19 @@ import { createClient } from "@/lib/supabase/server";
 import ContactTools from "@/components/ContactTools";
 import ContactsTable from "@/components/ContactsTable";
 import Link from "next/link";
+import { isManager } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
 export default async function Contatos({ searchParams }: { searchParams: { tag?: string } }) {
   const supabase = createClient();
   const tagFilter = searchParams.tag;
+
+  // Visibilidade por papel: Dono/Admin/Gestor veem os contatos de toda a equipe;
+  // Vendedor/SDR veem só os seus (assigned_to = você).
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: me } = await supabase.from("profiles").select("role, team_role").eq("id", user?.id ?? "").maybeSingle();
+  const gerente = isManager((me as any)?.role, (me as any)?.team_role);
 
   const { data: tags } = await supabase.from("tags").select("id, name, color").order("name", { ascending: true });
   const { count: suggestionCount } = await supabase.from("contact_suggestions").select("id", { count: "exact", head: true }).eq("status", "pending");
@@ -26,6 +33,7 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
     .order("created_at", { ascending: false })
     .limit(200);
   if (idsWithTag) contactsQuery = contactsQuery.in("id", idsWithTag.length ? idsWithTag : ["00000000-0000-0000-0000-000000000000"]);
+  if (!gerente) contactsQuery = contactsQuery.eq("assigned_to", user?.id ?? "");
 
   const [{ data: contacts }, { data: sequences }, { data: members }] = await Promise.all([
     contactsQuery,

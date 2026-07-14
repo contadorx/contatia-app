@@ -19,21 +19,78 @@ async function tenantId() {
   return { supabase, tenant_id: data?.tenant_id as string | null, user_id: user?.id };
 }
 
-// Encontra (por nome, case-insensitive) ou cria a empresa em accounts e devolve o id.
+// Normaliza o nome de uma empresa para comparação: minúsculo, sem acento, sem
+// pontuação, sem sufixos societários (ME, MEI, LTDA, EPP, EIRELI, S/A...), espaços
+// colapsados. Assim "Padaria do Bairro ME" e "Padaria do Bairro" batem como a MESMA.
+function normalizeCompany(raw: string): string {
+  let s = (raw || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // tira acentos
+    .replace(/[.,/\\\-&]/g, " ")      // pontuação vira espaço
+    .replace(/\s+/g, " ")
+    .trim();
+  // remove sufixos societários repetidamente (ex.: "x comercio ltda me")
+  const suffixes = ["me", "mei", "epp", "eireli", "ltda", "s a", "sa", "s s", "ss", "ei"];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const suf of suffixes) {
+      if (s.endsWith(" " + suf)) {
+        s = s.slice(0, -(suf.length + 1)).trim();
+        changed = true;
+      } else if (s === suf) {
+        s = "";
+        changed = true;
+      }
+    }
+  }
+  return s;
+}
+
+function onlyDigits(v: string | null | undefined): string {
+  return (v || "").replace(/\D/g, "");
+}
+
+// Encontra (por CNPJ, ou por nome normalizado) ou cria a empresa em accounts e
+// devolve o id. Dedup robusto: casa mesmo com sufixo societário diferente e
+// prioriza o CNPJ quando houver.
 async function ensureAccount(supabase: any, tenant_id: string, user_id: string | undefined, companyName: string | null | undefined, cnpj?: string | null) {
   const name = (companyName || "").trim();
-  if (!name) return null;
-  const { data: found } = await supabase
+  const cnpjDigits = onlyDigits(cnpj);
+  if (!name && !cnpjDigits) return null;
+
+  // busca todas as empresas do tenant (poucas por conta; dedup em JS é seguro)
+  const { data: accounts } = await supabase
     .from("accounts")
-    .select("id")
-    .eq("tenant_id", tenant_id)
-    .ilike("name", name)
-    .limit(1)
-    .maybeSingle();
-  if (found) return (found as any).id as string;
+    .select("id, name, cnpj")
+    .eq("tenant_id", tenant_id);
+  const list = (accounts as any[]) || [];
+
+  // 1) match por CNPJ (mais forte)
+  if (cnpjDigits) {
+    const byCnpj = list.find((a) => onlyDigits(a.cnpj) && onlyDigits(a.cnpj) === cnpjDigits);
+    if (byCnpj) return byCnpj.id as string;
+  }
+
+  // 2) match por nome normalizado
+  if (name) {
+    const target = normalizeCompany(name);
+    if (target) {
+      const byName = list.find((a) => normalizeCompany(a.name || "") === target);
+      if (byName) {
+        // se a empresa achada não tem CNPJ e agora temos um, completa
+        if (cnpjDigits && !onlyDigits(byName.cnpj)) {
+          await supabase.from("accounts").update({ cnpj: cnpj?.trim() || null }).eq("id", byName.id).eq("tenant_id", tenant_id);
+        }
+        return byName.id as string;
+      }
+    }
+  }
+
   const { data: created, error } = await supabase
     .from("accounts")
-    .insert({ tenant_id, owner_id: user_id ?? null, name, cnpj: cnpj?.trim() || null })
+    .insert({ tenant_id, owner_id: user_id ?? null, name: name || cnpjDigits, cnpj: cnpj?.trim() || null })
     .select("id")
     .single();
   if (error) return null;
@@ -50,6 +107,7 @@ export async function addContact(formData: FormData) {
   const { supabase, tenant_id, user_id } = await tenantId();
   if (!tenant_id) return { error: "Sem workspace atribuído." };
 
+  const cnpj = String(formData.get("cnpj") || "").trim() || null;
   const payload = {
     tenant_id,
     assigned_to: user_id,
@@ -57,18 +115,24 @@ export async function addContact(formData: FormData) {
     email: String(formData.get("email") || "").trim().toLowerCase() || null,
     phone: String(formData.get("phone") || "").trim() || null,
     company: String(formData.get("company") || "").trim() || null,
+    role_title: String(formData.get("role_title") || "").trim() || null,
+    cnpj,
     origin: String(formData.get("origin") || "").trim() || null,
   };
   if (!payload.name) return { error: "Nome é obrigatório." };
 
-  // se veio empresa, encontra/cria em Empresas e vincula
-  const account_id = await ensureAccount(supabase, tenant_id, user_id, payload.company);
+  // se veio empresa (ou CNPJ), encontra/cria em Empresas e vincula
+  const account_id = await ensureAccount(supabase, tenant_id, user_id, payload.company, cnpj);
 
-  const { error } = await supabase.from("contacts").insert({ ...payload, account_id });
+  const { data: inserted, error } = await supabase
+    .from("contacts")
+    .insert({ ...payload, account_id })
+    .select("id")
+    .single();
   if (error) return { error: error.message };
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/contas");
-  return { ok: true };
+  return { ok: true, id: (inserted as any)?.id as string | undefined };
 }
 
 type Row = { name: string; email?: string; phone?: string; company?: string; origin?: string };
@@ -157,6 +221,25 @@ export async function updateContact(id: string, patch: {
   }
   if (typeof clean.email === "string") clean.email = (clean.email as string).toLowerCase();
   if (clean.name === null) return { error: "O nome não pode ficar vazio." };
+
+  // e-mail alterado → re-verifica automaticamente (MX/descartável) e grava o status,
+  // igual à importação. Assim a ficha reflete "válido/ inválido" sem passo manual.
+  if (patch.email !== undefined) {
+    const em = (clean.email as string | null) || null;
+    if (!em) {
+      clean.email_status = null;
+    } else {
+      const emailRe = /^[^\s@]+@([^\s@]+\.[^\s@]+)$/;
+      const m = em.match(emailRe);
+      if (!m) {
+        clean.email_status = "invalid";
+      } else {
+        const { verifyEmail } = await import("@/lib/emailverify");
+        const check = await verifyEmail(em);
+        clean.email_status = check.hasMx && !check.disposable ? "ok" : "invalid";
+      }
+    }
+  }
 
   // empresa alterada → encontra/cria em Empresas e revincula
   if (patch.company !== undefined && tenant_id) {

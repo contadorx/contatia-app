@@ -1,17 +1,27 @@
 import { createClient } from "@/lib/supabase/server";
 import PipelineBoard from "@/components/PipelineBoard";
+import { isManager } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
 export default async function Pipeline() {
   const supabase = createClient();
 
+  // Visibilidade por papel: Dono/Admin/Gestor veem o pipeline de toda a equipe;
+  // Vendedor/SDR veem só os próprios negócios (owner_id = você).
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: me } = await supabase.from("profiles").select("role, team_role").eq("id", user?.id ?? "").maybeSingle();
+  const gerente = isManager((me as any)?.role, (me as any)?.team_role);
+
+  let oppsQuery = supabase
+    .from("opportunities")
+    .select("id, title, value_mrr, stage_id, status, primary_contact_id, account_id, product_id, contacts:primary_contact_id(name, score)")
+    .order("created_at", { ascending: false });
+  if (!gerente) oppsQuery = oppsQuery.eq("owner_id", user?.id ?? "");
+
   const [{ data: stages }, { data: opps }, { data: contacts }, { data: accounts }, { data: products }] = await Promise.all([
     supabase.from("pipeline_stages").select("id, name, position, is_won, is_lost").order("position", { ascending: true }),
-    supabase
-      .from("opportunities")
-      .select("id, title, value_mrr, stage_id, status, primary_contact_id, account_id, product_id, contacts:primary_contact_id(name, score)")
-      .order("created_at", { ascending: false }),
+    oppsQuery,
     supabase.from("contacts").select("id, name").order("created_at", { ascending: false }).limit(500),
     supabase.from("accounts").select("id, name").order("created_at", { ascending: false }).limit(500),
     supabase.from("products").select("id, name, kind, billing, price").eq("active", true).order("name", { ascending: true }),

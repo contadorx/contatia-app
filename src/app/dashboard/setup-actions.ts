@@ -23,7 +23,7 @@ export async function setupWorkspace(name: string) {
 
   const { data: t, error: e1 } = await admin
     .from("tenants")
-    .insert({ name: wsName, contact_email: user.email || null })
+    .insert({ name: wsName, contact_email: user.email || null, inbound_token: crypto.randomUUID().replace(/-/g, "") })
     .select("id")
     .single();
   if (e1 || !t) return { error: e1?.message || "Não foi possível criar o workspace." };

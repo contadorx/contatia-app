@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { updateAccount } from "@/app/dashboard/contas/actions";
 
-type A = { id: string; name: string; cnpj?: string | null; uf?: string | null; domain?: string | null; phone?: string | null; website?: string | null };
+type A = { id: string; name: string; cnpj?: string | null; uf?: string | null; municipio?: string | null; domain?: string | null; phone?: string | null; website?: string | null };
 
 export default function EditAccountButton({ account }: { account: A }) {
   const [open, setOpen] = useState(false);
@@ -11,6 +11,7 @@ export default function EditAccountButton({ account }: { account: A }) {
     name: account.name || "",
     cnpj: account.cnpj || "",
     uf: account.uf || "",
+    municipio: account.municipio || "",
     domain: account.domain || "",
     phone: account.phone || "",
     website: account.website || "",
@@ -26,6 +27,7 @@ export default function EditAccountButton({ account }: { account: A }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <div><label className="label">Nome *</label><input className="input mt-1" value={f.name} onChange={(e) => up("name", e.target.value)} /></div>
         <div><label className="label">CNPJ</label><input className="input mt-1" value={f.cnpj} onChange={(e) => up("cnpj", e.target.value)} /></div>
+        <div><label className="label">Município</label><input className="input mt-1" value={f.municipio} onChange={(e) => up("municipio", e.target.value)} placeholder="São Paulo" /></div>
         <div><label className="label">UF</label><input className="input mt-1" value={f.uf} onChange={(e) => up("uf", e.target.value)} maxLength={2} placeholder="SP" /></div>
         <div><label className="label">Telefone</label><input className="input mt-1" value={f.phone} onChange={(e) => up("phone", e.target.value)} /></div>
         <div><label className="label">Domínio</label><input className="input mt-1" value={f.domain} onChange={(e) => up("domain", e.target.value)} placeholder="empresa.com.br" /></div>

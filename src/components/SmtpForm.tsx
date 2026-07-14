@@ -1,7 +1,19 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { saveSmtpAccount, testSmtp } from "@/app/dashboard/config/actions";
+import { saveSmtpAccount, updateEmailAccount, testSmtp } from "@/app/dashboard/config/actions";
+
+type EditAccount = {
+  id: string;
+  from_email?: string | null;
+  display_name?: string | null;
+  smtp_host?: string | null;
+  smtp_port?: number | null;
+  smtp_secure?: boolean | null;
+  smtp_user?: string | null;
+  detect_replies?: boolean | null;
+  imap_host?: string | null;
+};
 
 const PRESETS: { id: string; label: string; host: string; port: number; secure: boolean; hint: string }[] = [
   { id: "brevo", label: "Brevo (recomendado)", host: "smtp-relay.brevo.com", port: 587, secure: false, hint: "Usuário = e-mail de login do Brevo. Senha = chave SMTP (painel: SMTP & API → SMTP → Generate a new SMTP key). Remetente precisa ser um domínio verificado." },
@@ -10,18 +22,19 @@ const PRESETS: { id: string; label: string; host: string; port: number; secure: 
   { id: "hostgator", label: "HostGator / cPanel", host: "mail.SEUDOMINIO.com.br", port: 465, secure: true, hint: "Troque SEUDOMINIO. Reputação/limite baixos — evite para cadência em volume; prefira o Brevo." },
 ];
 
-export default function SmtpForm() {
+export default function SmtpForm({ editAccount }: { editAccount?: EditAccount }) {
+  const isEdit = !!editAccount;
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({
-    from_email: "",
-    display_name: "",
-    smtp_host: "",
-    smtp_port: 587,
-    smtp_secure: false,
-    smtp_user: "",
+    from_email: editAccount?.from_email || "",
+    display_name: editAccount?.display_name || "",
+    smtp_host: editAccount?.smtp_host || "",
+    smtp_port: editAccount?.smtp_port || 587,
+    smtp_secure: editAccount?.smtp_secure || false,
+    smtp_user: editAccount?.smtp_user || "",
     smtp_pass: "",
-    detect_replies: false,
-    imap_host: "",
+    detect_replies: editAccount?.detect_replies || false,
+    imap_host: editAccount?.imap_host || "",
   });
   const [msg, setMsg] = useState<string | null>(null);
   const [presetHint, setPresetHint] = useState<string | null>(null);
@@ -76,10 +89,14 @@ export default function SmtpForm() {
   function save() {
     setMsg(null);
     start(async () => {
-      const res = await saveSmtpAccount(f);
+      const res = isEdit ? await updateEmailAccount(editAccount!.id, f) : await saveSmtpAccount(f);
       if (res?.error) setMsg(res.error);
-      else {
+      else if (!isEdit && (res as any)?.verified === false) {
+        // salvou, mas a conexão não validou — avisa sem bloquear (a caixa fica vermelha).
         setF({ from_email: "", display_name: "", smtp_host: "", smtp_port: 587, smtp_secure: false, smtp_user: "", smtp_pass: "", detect_replies: false, imap_host: "" });
+        setOpen(false);
+      } else {
+        if (!isEdit) setF({ from_email: "", display_name: "", smtp_host: "", smtp_port: 587, smtp_secure: false, smtp_user: "", smtp_pass: "", detect_replies: false, imap_host: "" });
         setOpen(false);
       }
     });
@@ -87,8 +104,8 @@ export default function SmtpForm() {
 
   if (!open)
     return (
-      <button className="btn-ghost" onClick={() => setOpen(true)}>
-        + Conectar caixa SMTP (não-Google)
+      <button className={isEdit ? "btn-ghost py-1 text-xs" : "btn-ghost"} onClick={() => setOpen(true)}>
+        {isEdit ? "Editar" : "+ Conectar caixa SMTP (não-Google)"}
       </button>
     );
 
@@ -140,7 +157,7 @@ export default function SmtpForm() {
         </div>
         <div>
           <label className="label">Senha / senha de app</label>
-          <input type="password" className="input mt-1" value={f.smtp_pass} onChange={(e) => up("smtp_pass", e.target.value)} />
+          <input type="password" className="input mt-1" value={f.smtp_pass} onChange={(e) => up("smtp_pass", e.target.value)} placeholder={isEdit ? "deixe em branco para manter a atual" : ""} />
         </div>
       </div>
       <div className="mt-5 rounded-xl border border-line bg-surface p-4">
@@ -190,7 +207,7 @@ export default function SmtpForm() {
           {pending ? "Testando..." : "Testar conexão"}
         </button>
         <button className="btn-brand" onClick={save} disabled={pending}>
-          {pending ? "Salvando..." : "Conectar"}
+          {pending ? "Salvando..." : isEdit ? "Salvar alterações" : "Conectar"}
         </button>
         <button className="btn-ghost" onClick={() => setOpen(false)}>
           Cancelar

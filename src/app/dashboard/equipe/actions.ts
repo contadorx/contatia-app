@@ -86,11 +86,12 @@ export async function dedupeByEmail() {
 }
 
 // Gera um convite (owner). Retorna o token; o client monta o link.
-export async function createInvite(email: string) {
+export async function createInvite(email: string, teamRole?: string) {
   const { supabase, tenant_id, role, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (role !== "owner") return { error: "Só o admin convida." };
   if (!email.trim() || !email.includes("@")) return { error: "E-mail inválido." };
+  const papel = ["admin", "gestor", "sdr", "vendedor"].includes(teamRole || "") ? (teamRole as string) : "vendedor";
 
   // O plano tem teto de usuários? Se encheu, indicamos o plano certo em vez de
   // bloquear em silêncio.
@@ -105,7 +106,7 @@ export async function createInvite(email: string) {
 
   const { data, error } = await supabase
     .from("tenant_invites")
-    .insert({ tenant_id, email: email.trim().toLowerCase(), role: "partner", created_by: user_id })
+    .insert({ tenant_id, email: email.trim().toLowerCase(), role: "partner", team_role: papel, created_by: user_id })
     .select("token")
     .single();
   if (error) return { error: error.message };

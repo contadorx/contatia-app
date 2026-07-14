@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useRef, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import Papa from "papaparse";
 import { addContact, importContacts } from "@/app/dashboard/contatos/actions";
 
 export default function ContactTools() {
+  const router = useRouter();
   const [open, setOpen] = useState<"add" | "import" | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -18,6 +20,9 @@ export default function ContactTools() {
       else {
         setMsg(null);
         setOpen(null);
+        // abre a ficha completa do contato recém-criado (rapport, enriquecimento,
+        // demais dados) — sem precisar editar depois só para completar.
+        if ((res as any)?.id) router.push(`/dashboard/contatos/${(res as any).id}`);
       }
     });
   }
@@ -76,16 +81,25 @@ export default function ContactTools() {
               <input name="phone" className="input mt-1" />
             </div>
             <div>
+              <label className="label">Cargo</label>
+              <input name="role_title" className="input mt-1" placeholder="Sócio, Diretor Financeiro..." />
+            </div>
+            <div>
               <label className="label">Empresa</label>
               <input name="company" className="input mt-1" />
+            </div>
+            <div>
+              <label className="label">CNPJ da empresa</label>
+              <input name="cnpj" className="input mt-1" placeholder="00.000.000/0000-00" />
             </div>
             <div>
               <label className="label">Origem</label>
               <input name="origin" className="input mt-1" placeholder="Lead-Quente, Parceiro-Prospect..." />
             </div>
           </div>
+          <p className="text-xs text-subtle">Ao salvar, abrimos a ficha completa para você incluir rapport, LinkedIn e enriquecer pelo CNPJ.</p>
           <button className="btn-brand" disabled={pending}>
-            {pending ? "Salvando..." : "Salvar"}
+            {pending ? "Salvando..." : "Salvar e abrir ficha"}
           </button>
         </form>
       )}

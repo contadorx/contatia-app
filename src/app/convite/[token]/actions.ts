@@ -12,6 +12,19 @@ export async function acceptInvite(token: string) {
   if (error) return { error: error.message };
   if (data === "invalid") return { error: "Convite inválido ou expirado." };
 
+  // aplica o papel escolhido no convite ao perfil recém-vinculado (AUT-03).
+  try {
+    const { data: inv } = await supabase
+      .from("tenant_invites")
+      .select("team_role")
+      .eq("token", token)
+      .maybeSingle();
+    const papel = (inv as any)?.team_role;
+    if (["admin", "gestor", "sdr", "vendedor"].includes(papel || "")) {
+      await supabase.from("profiles").update({ team_role: papel }).eq("id", user.id);
+    }
+  } catch { /* papel pode ser ajustado depois em Equipe */ }
+
   // entrou um assento: reajusta o valor da assinatura no Asaas (per-seat)
   try {
     const { data: prof } = await supabase.from("profiles").select("tenant_id").eq("id", user.id).maybeSingle();

@@ -40,6 +40,15 @@ export async function saveSmtpAccount(input: {
   if (!input.from_email.trim() || !input.smtp_host.trim() || !input.smtp_user.trim())
     return { error: "Preencha remetente, host e usuário." };
 
+  // valida a conexão na hora de salvar → grava verde/vermelho na ficha da caixa.
+  const check = await verifySmtpConnection({
+    smtp_host: input.smtp_host,
+    smtp_port: input.smtp_port,
+    smtp_secure: input.smtp_secure,
+    smtp_user: input.smtp_user,
+    smtp_pass: input.smtp_pass,
+  });
+
   const { error } = await supabase.from("email_accounts").insert({
     tenant_id,
     user_id,
@@ -54,10 +63,88 @@ export async function saveSmtpAccount(input: {
     detect_replies: !!input.detect_replies,
     imap_host: input.imap_host?.trim() || null,
     is_active: true,
+    verified: check.ok,
+    verified_at: check.ok ? new Date().toISOString() : null,
   });
   if (error) return { error: error.message };
   revalidatePath("/dashboard/config");
-  return { ok: true };
+  return { ok: true, verified: check.ok };
+}
+
+// Edita uma caixa SMTP já criada (CFG-06: antes não dava para reabrir e ajustar,
+// ex.: ativar o IMAP depois). Senha em branco = mantém a atual. Revalida a conexão.
+export async function updateEmailAccount(id: string, input: {
+  from_email?: string;
+  display_name?: string;
+  smtp_host?: string;
+  smtp_port?: number;
+  smtp_secure?: boolean;
+  smtp_user?: string;
+  smtp_pass?: string; // vazio = mantém
+  detect_replies?: boolean;
+  imap_host?: string;
+}) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const { data: cur } = await supabase
+    .from("email_accounts")
+    .select("smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass")
+    .eq("id", id)
+    .eq("tenant_id", tenant_id)
+    .maybeSingle();
+  if (!cur) return { error: "Caixa não encontrada." };
+
+  const merged = {
+    smtp_host: (input.smtp_host ?? (cur as any).smtp_host) || "",
+    smtp_port: Number(input.smtp_port ?? (cur as any).smtp_port) || 587,
+    smtp_secure: input.smtp_secure ?? (cur as any).smtp_secure ?? false,
+    smtp_user: (input.smtp_user ?? (cur as any).smtp_user) || "",
+    smtp_pass: input.smtp_pass?.trim() ? input.smtp_pass : ((cur as any).smtp_pass || ""),
+  };
+
+  const check = await verifySmtpConnection(merged);
+
+  const patch: Record<string, unknown> = {
+    smtp_host: merged.smtp_host.trim(),
+    smtp_port: merged.smtp_port,
+    smtp_secure: !!merged.smtp_secure,
+    smtp_user: merged.smtp_user.trim(),
+    detect_replies: !!input.detect_replies,
+    imap_host: input.imap_host?.trim() || null,
+    verified: check.ok,
+    verified_at: check.ok ? new Date().toISOString() : null,
+  };
+  if (input.from_email !== undefined) patch.from_email = input.from_email.trim();
+  if (input.display_name !== undefined) patch.display_name = input.display_name.trim() || null;
+  if (input.smtp_pass?.trim()) patch.smtp_pass = input.smtp_pass;
+
+  const { error } = await supabase.from("email_accounts").update(patch).eq("id", id).eq("tenant_id", tenant_id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/config");
+  return { ok: true, verified: check.ok };
+}
+
+// Verifica a conexão SMTP (usado no teste, no salvar e no editar). Reaproveitado.
+async function verifySmtpConnection(input: {
+  smtp_host: string; smtp_port: number; smtp_secure: boolean; smtp_user: string; smtp_pass: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  if (!input.smtp_host?.trim() || !input.smtp_user?.trim()) return { ok: false, error: "Sem host/usuário." };
+  try {
+    const nodemailer = (await import("nodemailer")).default;
+    const transport = nodemailer.createTransport({
+      host: input.smtp_host.trim(),
+      port: Number(input.smtp_port) || 587,
+      secure: !!input.smtp_secure,
+      auth: { user: input.smtp_user.trim(), pass: input.smtp_pass || "" },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+    });
+    await transport.verify();
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "Falha na conexão." };
+  }
 }
 
 export async function toggleAccount(id: string, active: boolean) {
@@ -88,21 +175,8 @@ export async function testSmtp(input: {
   if (!input.smtp_host?.trim() || !input.smtp_user?.trim()) {
     return { error: "Preencha host e usuário para testar." };
   }
-  const nodemailer = (await import("nodemailer")).default;
-  const transport = nodemailer.createTransport({
-    host: input.smtp_host.trim(),
-    port: Number(input.smtp_port) || 587,
-    secure: !!input.smtp_secure,
-    auth: { user: input.smtp_user.trim(), pass: input.smtp_pass || "" },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-  });
-  try {
-    await transport.verify();
-    return { ok: true };
-  } catch (e: any) {
-    return { error: e?.message || "Falha na conexão." };
-  }
+  const check = await verifySmtpConnection(input);
+  return check.ok ? { ok: true } : { error: check.error || "Falha na conexão." };
 }
 
 // Salva a config de IA do workspace (modelo + chave). A chave só é atualizada se enviada.

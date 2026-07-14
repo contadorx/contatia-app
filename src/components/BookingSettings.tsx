@@ -66,6 +66,12 @@ export function BookingSettings({ token, initial }: {
         });
       }}>{pending ? "Salvando..." : "Salvar"}</button>
 
+      {f.enabled && !token && (
+        <p className="mt-4 rounded-lg bg-warn/10 p-3 text-xs text-warn">
+          O link será gerado assim que você salvar. Se não aparecer, recarregue a página — o token de captação do workspace está sendo preparado.
+        </p>
+      )}
+
       {f.enabled && token && (
         <div className="mt-4 rounded-lg bg-muted p-3">
           <p className="text-xs font-semibold text-subtle">SEU LINK PÚBLICO</p>

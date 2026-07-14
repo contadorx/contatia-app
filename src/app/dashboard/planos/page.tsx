@@ -44,7 +44,7 @@ export default async function Planos() {
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("plan_id, subscription_status, file_retention_months, platform_plans(name, file_retention_months)")
+    .select("plan_id, subscription_status, file_retention_months, cnpj, platform_plans(name, file_retention_months)")
     .eq("id", tenantId ?? "")
     .maybeSingle();
 
@@ -109,6 +109,7 @@ export default async function Planos() {
           seats={Math.max(1, seats ?? 1)}
           currentPlanId={currentPlanId}
           canSubscribe={isOwner}
+          hasDoc={!!String((tenant as any)?.cnpj || "").replace(/\D/g, "").match(/^\d{11}$|^\d{14}$/)}
         />
       </div>
 

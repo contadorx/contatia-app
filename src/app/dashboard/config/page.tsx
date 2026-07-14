@@ -8,7 +8,6 @@ import { DomainHealthPanel } from "@/components/DomainHealthPanel";
 import { BookingSettings } from "@/components/BookingSettings";
 import AccountRowActions from "@/components/AccountRowActions";
 import WebToLeadSnippet from "@/components/WebToLeadSnippet";
-import AiSettingsForm from "@/components/AiSettingsForm";
 import WhatsAppConnect from "@/components/WhatsAppConnect";
 import BusinessProfileForm from "@/components/BusinessProfileForm";
 import SignatureForm from "@/components/SignatureForm";
@@ -59,7 +58,7 @@ export default async function Config() {
   const supabase = createClient();
   const { data: accounts } = await supabase
     .from("email_accounts")
-    .select("id, provider, from_email, display_name, is_active, daily_cap, warmup_stage, created_at")
+    .select("id, provider, from_email, display_name, is_active, daily_cap, warmup_stage, created_at, verified, verified_at, smtp_host, smtp_port, smtp_secure, smtp_user, detect_replies, imap_host")
     .order("created_at", { ascending: false });
 
   const {
@@ -160,16 +159,28 @@ export default async function Config() {
                     const cap = capOf(a);
                     const warming = on && cap < target;
                     return (
-                      <div key={a.id} className="card flex items-center justify-between p-4">
+                      <div key={a.id} className="card flex flex-wrap items-center justify-between gap-3 p-4">
                         <div>
-                          <p className="text-sm font-semibold">
-                            {a.from_email}{" "}
-                            <span className="ml-1 rounded-full bg-muted px-2 py-0.5 text-xs text-subtle">{a.provider === "gmail" ? "Gmail" : "SMTP"}</span>
-                            {!a.is_active && <span className="ml-1 text-xs text-subtle">(inativa)</span>}
+                          <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold">
+                            {a.from_email}
+                            <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-subtle">{a.provider === "gmail" ? "Gmail" : "SMTP"}</span>
+                            {a.provider !== "gmail" && (
+                              a.verified ? (
+                                <span className="rounded-full bg-signal/10 px-2 py-0.5 text-xs font-medium text-signal">● validada</span>
+                              ) : (
+                                <span className="rounded-full bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">● não validada</span>
+                              )
+                            )}
+                            {a.detect_replies && <span className="rounded-full bg-brand-soft px-2 py-0.5 text-xs text-brand-dark">IMAP on</span>}
+                            {!a.is_active && <span className="text-xs text-subtle">(inativa)</span>}
                           </p>
                           <p className="text-xs text-subtle">
                             {warming ? `Aquecendo: hoje envia ${cap} e-mails. Sobe até ${target}/dia automaticamente.` : `Limite diário: ${target}/dia${on ? " (aquecida)" : " (aquecimento desligado)"}.`}
+                            {a.provider !== "gmail" && !a.verified && " · A conexão não validou no último teste — clique em Editar para corrigir host/porta/senha."}
                           </p>
+                          {a.provider !== "gmail" && (
+                            <div className="mt-2"><SmtpForm editAccount={a} /></div>
+                          )}
                         </div>
                         <AccountRowActions id={a.id} active={a.is_active} />
                       </div>
@@ -229,10 +240,13 @@ export default async function Config() {
               <LinkCard title="Catálogo de produtos e serviços" desc="Cadastre o que você vende (avulso ou recorrente) e vincule às oportunidades." href="/dashboard/config/produtos" />
             </Section>
 
-            <Section title="IA de cadência" desc="O modelo e a chave usados pela geração de cadência com IA. Definidos aqui, valem sem mexer no ambiente. (A geração em si fica na tela de Cadências.)">
+            <Section title="IA de cadência" desc="A IA que monta a cadência já vem incluída e gerenciada pela Contatia — nada para configurar aqui.">
               {temIA ? (
                 <div className="card p-5">
-                  <AiSettingsForm currentModel={aiModel} hasKey={aiHasKey} />
+                  <p className="text-sm text-subtle">
+                    A geração de cadência com IA já vem <b>pronta e gerenciada pela Contatia</b> — você não precisa
+                    informar modelo nem chave. Use direto na tela de <b>Cadências</b> (Começar → Com IA).
+                  </p>
                 </div>
               ) : (
                 <FeatureLock feature="ia" planoSugerido="Individual" titulo="IA que monta a cadência" descricao="Descreva o que você vende e para quem — a IA escreve a sequência completa: assuntos, corpos e intervalos." />
@@ -247,7 +261,7 @@ export default async function Config() {
                 {inboundToken ? (
                   <WebToLeadSnippet token={inboundToken} />
                 ) : (
-                  <p className="text-sm text-subtle">Token de captação indisponível. Rode a migration 0005 para gerá-lo.</p>
+                  <p className="text-sm text-subtle">O link de captação ainda está sendo preparado para este workspace. Recarregue a página em instantes; se continuar, fale com o suporte.</p>
                 )}
               </div>
             </Section>

@@ -121,28 +121,30 @@ export default async function Equipe() {
         </div>
       </div>
 
-      {/* GERENCIAR PESSOAS E PAPÉIS — colapsável */}
-      <details className="card mt-6 p-5" open={canManage}>
-        <summary className="cursor-pointer select-none font-display text-lg font-bold">
-          Gerenciar pessoas e papéis
-        </summary>
-        <p className="mt-1 text-sm text-subtle">Convide pessoas, defina o papel de cada uma e libere agendas para os SDRs.</p>
+      {/* GERENCIAR PESSOAS E PAPÉIS — só para quem gerencia (Dono/Admin/Gestor) */}
+      {canManage && (
+        <details className="card mt-6 p-5" open>
+          <summary className="cursor-pointer select-none font-display text-lg font-bold">
+            Gerenciar pessoas e papéis
+          </summary>
+          <p className="mt-1 text-sm text-subtle">Convide pessoas, defina o papel de cada uma e libere agendas para os SDRs.</p>
 
-        <div className="mt-4">
-          <InviteTools pending={(invites as any[]) || []} />
-        </div>
+          <div className="mt-4">
+            <InviteTools pending={(invites as any[]) || []} />
+          </div>
 
-        <div className="mt-6">
-          <TeamManager
-            membros={membrosList}
-            permissoes={(permsData as any[]) || []}
-            meuId={user?.id || ""}
-            souAdmin={(meProfile as any)?.role === "owner"}
-            canManage={canManage}
-            seats={seats}
-          />
-        </div>
-      </details>
+          <div className="mt-6">
+            <TeamManager
+              membros={membrosList}
+              permissoes={(permsData as any[]) || []}
+              meuId={user?.id || ""}
+              souAdmin={(meProfile as any)?.role === "owner"}
+              canManage={canManage}
+              seats={seats}
+            />
+          </div>
+        </details>
+      )}
 
       {/* MATRIZ DE PERMISSÕES — referência, colapsável */}
       <details className="card mt-6 p-5">

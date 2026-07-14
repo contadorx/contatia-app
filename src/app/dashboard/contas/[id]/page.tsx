@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import AddContactToAccount from "@/components/AddContactToAccount";
 import EditAccountButton from "@/components/EditAccountButton";
+import EnrichAccountButton from "@/components/EnrichAccountButton";
 import AccountTags from "@/components/AccountTags";
 
 export const dynamic = "force-dynamic";
@@ -60,7 +61,10 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
             <AccountTags accountId={account.id} tags={myTags} allTags={(allTags as any[]) || []} />
           </div>
         </div>
-        <EditAccountButton account={account as any} />
+        <div className="flex flex-col items-end gap-2">
+          <EnrichAccountButton accountId={account.id} />
+          <EditAccountButton account={account as any} />
+        </div>
       </div>
 
       {hasDetails && (
@@ -87,12 +91,17 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
           <div className="card divide-y divide-line">
             {cs.length ? (
               cs.map((c) => (
-                <div key={c.id} className="flex items-center justify-between p-3">
+                <Link
+                  key={c.id}
+                  href={`/dashboard/contatos/${c.id}`}
+                  className="flex items-center justify-between p-3 transition hover:bg-muted"
+                >
                   <div>
-                    <p className="text-sm font-medium">{c.name}</p>
+                    <p className="text-sm font-medium text-ink">{c.name}</p>
                     <p className="text-xs text-subtle">{c.role_title || c.email || c.phone || "—"}</p>
                   </div>
-                </div>
+                  <span className="text-xs text-subtle">abrir →</span>
+                </Link>
               ))
             ) : (
               <p className="p-4 text-sm text-subtle">Nenhum contato nesta empresa ainda.</p>
