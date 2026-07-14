@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import EnrollButton from "@/components/EnrollButton";
+import QuickSend from "@/components/QuickSend";
 import ContactReplyButton from "@/components/ContactReplyButton";
 import NoteComposer from "@/components/NoteComposer";
 import ContactCadences from "@/components/ContactCadences";
@@ -128,6 +129,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <EnrollButton contactId={c.id} sequences={(sequences as { id: string; name: string }[]) || []} />
+          <QuickSend contactId={c.id} hasEmail={!!c.email} hasPhone={!!c.phone} />
           <ContactReplyButton contactId={c.id} />
           <EditContactButton contact={c as any} />
         </div>
