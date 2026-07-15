@@ -2,6 +2,32 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { buscarAtividades, buscarEmpresas, receitaConfigurada, type FiltroReceita, type EmpresaReceita } from "@/lib/receita";
+
+// Capitais (para marcar is_capital nos leads importados da base).
+const CAPITAIS_BR = new Set([
+  "rio branco","maceio","macapa","manaus","salvador","fortaleza","brasilia","vitoria","goiania",
+  "sao luis","cuiaba","campo grande","belo horizonte","belem","joao pessoa","curitiba","recife",
+  "teresina","rio de janeiro","natal","porto alegre","porto velho","boa vista","florianopolis",
+  "sao paulo","aracaju","palmas",
+]);
+const semAcento = (s: string | null) =>
+  (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+const soDigitos = (s: string | null) => (s || "").replace(/\D/g, "");
+
+// Monta o filtro da API a partir do que a tela envia (validação básica).
+function montarFiltro(input: any): FiltroReceita {
+  const cnae = Array.isArray(input?.cnae) ? input.cnae.map(soDigitos).filter((c: string) => /^\d{7}$/.test(c)) : [];
+  return {
+    atividade: typeof input?.atividade === "string" && input.atividade.trim().length >= 3 ? input.atividade.trim() : undefined,
+    cnae: cnae.length ? cnae : undefined,
+    uf: typeof input?.uf === "string" && /^[A-Za-z]{2}$/.test(input.uf.trim()) ? input.uf.trim().toUpperCase() : undefined,
+    municipio: typeof input?.municipio === "string" && input.municipio.trim() ? input.municipio.trim() : undefined,
+    porte: ["ME", "EPP", "Demais"].includes(input?.porte) ? input.porte : undefined,
+    com_email: input?.com_email === true,
+    com_telefone: input?.com_telefone === true,
+  };
+}
 
 async function ctx() {
   const supabase = createClient();
@@ -278,4 +304,110 @@ export async function seedRadarDemo() {
   if (error) return { error: error.message };
   revalidatePath("/dashboard/radar");
   return { ok: true, count: rows.length };
+}
+
+// ============================================================
+// ETAPA 2 — Buscar na Base da Receita (substitui o CSV manual).
+// ============================================================
+
+// Autocomplete de atividade (o campo principal da busca).
+export async function atividadesReceita(q: string) {
+  const { tenant_id } = await ctx();
+  if (!tenant_id) return { atividades: [], error: "Sem workspace." };
+  return await buscarAtividades(q);
+}
+
+// Prévia: quantas empresas casam com os filtros + uma amostra + os CNAEs que casaram.
+export async function buscarNaBase(input: any) {
+  const { tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  if (!receitaConfigurada()) return { error: "Base da Receita não configurada (defina RECEITA_API_URL e RECEITA_API_TOKEN)." };
+
+  const f = montarFiltro(input);
+  if (!f.atividade && !f.cnae && !f.uf) {
+    return { error: "Escolha ao menos uma atividade (ou CNAE) ou uma UF." };
+  }
+  const r = await buscarEmpresas({ ...f, limit: 8, contar: true });
+  if (r.error) return { error: r.error };
+  return { ok: true, total: r.total, atividades: r.atividades, amostra: r.rows };
+}
+
+// Mapeia uma empresa da base para uma linha de radar_leads.
+function paraRadarLead(tenant_id: string, e: EmpresaReceita) {
+  const municipio = e.municipio || null;
+  return {
+    tenant_id,
+    cnpj: soDigitos(e.cnpj) || null,
+    razao_social: e.razao_social || null,
+    nome_fantasia: e.nome_fantasia || null,
+    cnae: e.cnae ? (e.cnae_descricao ? `${e.cnae} — ${e.cnae_descricao}` : e.cnae) : null,
+    uf: e.uf || null,
+    municipio,
+    bairro: e.bairro || null,
+    is_capital: CAPITAIS_BR.has(semAcento(municipio)),
+    situacao_cadastral: "ATIVA",
+    porte: e.porte || null,
+    tier: null,
+    contato_principal: null,
+    email: e.email || null,
+    telefone: e.telefone || null,
+  };
+}
+
+// Importa da base para radar_leads. Pagina na API (500/página) até o teto, deduplica por CNPJ.
+export async function importarDaBase(input: any) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  if (!receitaConfigurada()) return { error: "Base da Receita não configurada." };
+
+  const f = montarFiltro(input);
+  if (!f.atividade && !f.cnae && !f.uf) {
+    return { error: "Escolha ao menos uma atividade (ou CNAE) ou uma UF." };
+  }
+
+  const TETO = Math.min(Math.max(Number(input?.limite) || 500, 1), 2000); // teto de segurança
+  const PAGINA = 500;
+
+  // 1) puxa da API paginando até o teto
+  const empresas: EmpresaReceita[] = [];
+  for (let offset = 0; offset < TETO; offset += PAGINA) {
+    const r = await buscarEmpresas({ ...f, limit: Math.min(PAGINA, TETO - offset), offset });
+    if (r.error) return { error: r.error };
+    empresas.push(...r.rows);
+    if (r.rows.length < PAGINA) break; // acabaram os resultados
+  }
+  if (!empresas.length) return { ok: true, inserted: 0, skipped: 0, total: 0 };
+
+  // 2) deduplica contra o que já existe no radar_leads (por CNPJ) deste workspace
+  const cnpjs = Array.from(new Set(empresas.map((e) => soDigitos(e.cnpj)).filter(Boolean)));
+  const jaExiste = new Set<string>();
+  for (let i = 0; i < cnpjs.length; i += 500) {
+    const fatia = cnpjs.slice(i, i + 500);
+    const { data } = await supabase.from("radar_leads").select("cnpj").eq("tenant_id", tenant_id).in("cnpj", fatia);
+    for (const d of (data as any[]) || []) if (d.cnpj) jaExiste.add(soDigitos(d.cnpj));
+  }
+
+  const vistos = new Set<string>();
+  const rows = empresas
+    .filter((e) => {
+      const d = soDigitos(e.cnpj);
+      if (!d || jaExiste.has(d) || vistos.has(d)) return false; // pula duplicados
+      vistos.add(d);
+      return true;
+    })
+    .map((e) => paraRadarLead(tenant_id, e));
+
+  const skipped = empresas.length - rows.length;
+
+  // 3) insere em lotes de 500
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { error } = await supabase.from("radar_leads").insert(chunk);
+    if (error) return { error: error.message, inserted };
+    inserted += chunk.length;
+  }
+
+  revalidatePath("/dashboard/radar");
+  return { ok: true, inserted, skipped, total: empresas.length };
 }
