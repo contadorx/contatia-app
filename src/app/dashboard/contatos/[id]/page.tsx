@@ -5,6 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import EnrollButton from "@/components/EnrollButton";
 import QuickSend from "@/components/QuickSend";
+import ScheduleMeetingForContact from "@/components/ScheduleMeetingForContact";
+import RegisterTouchButton from "@/components/RegisterTouchButton";
+import NewOpportunityForContact from "@/components/NewOpportunityForContact";
 import ContactReplyButton from "@/components/ContactReplyButton";
 import NoteComposer from "@/components/NoteComposer";
 import ContactCadences from "@/components/ContactCadences";
@@ -56,13 +59,14 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
     .maybeSingle();
   if (!contact) notFound();
 
-  const [{ data: sequences }, { data: enrollments }, { data: tasks }, { data: events }, { data: meetings }] =
+  const [{ data: sequences }, { data: enrollments }, { data: tasks }, { data: events }, { data: meetings }, { data: opps }] =
     await Promise.all([
       supabase.from("sequences").select("id, name").eq("is_active", true),
       supabase.from("enrollments").select("id, status, sequences(name)").eq("contact_id", params.id).order("created_at", { ascending: false }),
       supabase.from("tasks").select("id, channel, title, due_date").eq("contact_id", params.id).eq("status", "pending").order("due_date", { ascending: true }),
       supabase.from("events").select("id, type, created_at, meta").eq("contact_id", params.id).order("created_at", { ascending: false }).limit(50),
       supabase.from("meetings").select("id, title, datetime, status").eq("contact_id", params.id).order("datetime", { ascending: false }),
+      supabase.from("opportunities").select("id, title, value_mrr, status").eq("primary_contact_id", params.id).order("created_at", { ascending: false }),
     ]);
 
   const c = contact as any;
@@ -90,6 +94,8 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
   const pendingTasks = (tasks as any[]) || [];
   const evs = (events as any[]) || [];
   const mtgs = (meetings as any[]) || [];
+  const oppList = (opps as any[]) || [];
+  const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
   return (
     <div className="max-w-4xl">
@@ -130,6 +136,8 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <EnrollButton contactId={c.id} sequences={(sequences as { id: string; name: string }[]) || []} />
           <QuickSend contactId={c.id} hasEmail={!!c.email} hasPhone={!!c.phone} />
+          <ScheduleMeetingForContact contactId={c.id} contactName={c.name} />
+          <RegisterTouchButton contactId={c.id} />
           <ContactReplyButton contactId={c.id} />
           <EditContactButton contact={c as any} />
         </div>
@@ -200,7 +208,10 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
           </div>
 
           <div>
-            <h2 className="mb-3 font-display text-lg font-bold">Reuniões</h2>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-display text-lg font-bold">Reuniões</h2>
+              <ScheduleMeetingForContact contactId={c.id} contactName={c.name} />
+            </div>
             <div className="card divide-y divide-line">
               {mtgs.length ? (
                 mtgs.map((m) => (
@@ -210,7 +221,29 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
                   </div>
                 ))
               ) : (
-                <p className="p-4 text-sm text-subtle">Nenhuma reunião.</p>
+                <p className="p-4 text-sm text-subtle">Nenhuma reunião. Use “Marcar reunião” acima.</p>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-display text-lg font-bold">Oportunidades</h2>
+              <NewOpportunityForContact contactId={c.id} defaultTitle={c.company || c.accounts?.name || c.name} />
+            </div>
+            <div className="card divide-y divide-line">
+              {oppList.length ? (
+                oppList.map((o) => (
+                  <Link key={o.id} href={`/dashboard/pipeline?opp=${o.id}`} className="flex items-center justify-between p-3 transition hover:bg-muted">
+                    <div>
+                      <p className="text-sm font-medium">{o.title}</p>
+                      <p className="text-xs text-subtle">{o.status} · abrir no funil →</p>
+                    </div>
+                    <span className="text-sm font-bold text-brand-dark">{brl(o.value_mrr)}/mês</span>
+                  </Link>
+                ))
+              ) : (
+                <p className="p-4 text-sm text-subtle">Nenhuma oportunidade. Use “Nova oportunidade” acima.</p>
               )}
             </div>
           </div>
@@ -227,8 +260,8 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
                 {evs.map((e) => (
                   <div key={e.id} className="relative">
                     <div className={`absolute -left-[18px] top-1 h-[9px] w-[9px] rounded-full ${EVENT_COLOR[e.type] || "bg-subtle"}`} />
-                    <p className="text-sm font-medium">{EVENT_LABEL[e.type] || e.type}</p>
-                    {(e.type === "note" || e.type === "replied") && e.meta?.text && (
+                    <p className="text-sm font-medium">{e.type === "task_done" && e.meta?.manual ? `Toque${e.meta?.canal ? ` · ${e.meta.canal}` : ""}` : (EVENT_LABEL[e.type] || e.type)}</p>
+                    {(e.type === "note" || e.type === "replied" || (e.type === "task_done" && e.meta?.text)) && e.meta?.text && (
                       <p className="mt-0.5 whitespace-pre-wrap text-sm text-ink/80">
                         {e.type === "replied" ? `"${e.meta.text}"` : e.meta.text}
                       </p>
