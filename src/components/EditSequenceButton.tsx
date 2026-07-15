@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import SequenceBuilder from "@/components/SequenceBuilder";
-import { loadSequence, type StepInput } from "@/app/dashboard/cadencias/actions";
+import { loadSequence, deleteSequence, type StepInput } from "@/app/dashboard/cadencias/actions";
 
 type ProductOpt = { id: string; name: string };
 type AccountOpt = { id: string; from_email: string; display_name?: string | null };
@@ -49,6 +49,22 @@ export default function EditSequenceButton({ sequenceId, products = [], accounts
         })}
       >
         {pending ? "abrindo..." : "editar"}
+      </button>
+      <button
+        className="ml-2 text-xs text-subtle hover:text-red-600"
+        disabled={pending}
+        title="Excluir esta cadência"
+        onClick={() => {
+          if (!confirm("Excluir esta cadência? (bloqueado se houver contatos ativos nela)")) return;
+          start(async () => {
+            setMsg(null);
+            const r = (await deleteSequence(sequenceId)) as any;
+            if (r?.error) setMsg(r.error);
+            else router.refresh();
+          });
+        }}
+      >
+        excluir
       </button>
       {msg && <span className="ml-2 text-xs text-danger">{msg}</span>}
     </span>

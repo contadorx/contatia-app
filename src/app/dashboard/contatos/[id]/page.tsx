@@ -12,6 +12,7 @@ import ContactReplyButton from "@/components/ContactReplyButton";
 import NoteComposer from "@/components/NoteComposer";
 import ContactCadences from "@/components/ContactCadences";
 import EditContactButton from "@/components/EditContactButton";
+import DeleteContactButton from "@/components/DeleteContactButton";
 import ContactExtras from "@/components/ContactExtras";
 import { EmailVerifyBadge, DecisorFinder, TestEmailBox } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
@@ -146,6 +147,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
           <RegisterTouchButton contactId={c.id} />
           <ContactReplyButton contactId={c.id} />
           <EditContactButton contact={c as any} />
+          <span className="ml-auto"><DeleteContactButton contactId={c.id} name={c.name} /></span>
         </div>
 
         {!c.email && (

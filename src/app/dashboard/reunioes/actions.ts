@@ -273,3 +273,13 @@ export async function recordOutcome(input: {
   revalidatePath("/dashboard/contatos");
   return { ok: true };
 }
+
+// Exclui uma reunião.
+export async function deleteMeeting(id: string) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { error } = await supabase.from("meetings").delete().eq("id", id).eq("tenant_id", tenant_id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/reunioes");
+  return { ok: true };
+}

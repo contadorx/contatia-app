@@ -8,6 +8,7 @@ import EnrollButton from "@/components/EnrollButton";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { bulkAssign, bulkEnroll } from "@/app/dashboard/contatos/bulk-actions";
 import { bulkTag, createTag } from "@/app/dashboard/contatos/tag-actions";
+import { bulkDeleteContacts } from "@/app/dashboard/contatos/actions";
 import { UltimoToque } from "@/lib/lastTouch";
 
 type Contact = {
@@ -180,7 +181,22 @@ export default function ContactsTable({
             </div>
           )}
 
-          <button className="ml-auto text-xs text-subtle hover:text-ink" onClick={clear}>
+          <button
+            className="ml-auto rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+            onClick={() => {
+              if (!confirm(`Excluir ${sel.size} contato(s)? Isso não pode ser desfeito.`)) return;
+              start(async () => {
+                setMsg(null);
+                const res = (await bulkDeleteContacts([...sel])) as { count?: number; error?: string };
+                if (res?.error) setMsg(res.error);
+                else { setMsg(`✓ ${res.count} excluído(s).`); clear(); router.refresh(); }
+              });
+            }}
+            disabled={pending}
+          >
+            Excluir
+          </button>
+          <button className="text-xs text-subtle hover:text-ink" onClick={clear}>
             limpar seleção
           </button>
         </div>

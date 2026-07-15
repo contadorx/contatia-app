@@ -452,3 +452,15 @@ export async function resumeEnrollment(enrollmentId: string) {
   revalidatePath("/dashboard/contatos", "layout");
   return { ok: true };
 }
+
+// Exclui uma cadência. Bloqueia se houver inscrições ativas/pausadas (evita perder trabalho).
+export async function deleteSequence(id: string) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { count } = await supabase.from("enrollments").select("id", { count: "exact", head: true }).eq("sequence_id", id).in("status", ["active", "paused"]);
+  if ((count ?? 0) > 0) return { error: `Há ${count} contato(s) ativo(s)/pausado(s) nesta cadência. Pause ou conclua antes de excluir.` };
+  const { error } = await supabase.from("sequences").delete().eq("id", id).eq("tenant_id", tenant_id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/cadencias");
+  return { ok: true };
+}

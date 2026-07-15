@@ -7,6 +7,7 @@ import NewOpportunityForAccount from "@/components/NewOpportunityForAccount";
 import SociosToContacts from "@/components/SociosToContacts";
 import EditAccountButton from "@/components/EditAccountButton";
 import EnrichAccountButton from "@/components/EnrichAccountButton";
+import DeleteAccountButton from "@/components/DeleteAccountButton";
 import AccountTags from "@/components/AccountTags";
 
 export const dynamic = "force-dynamic";
@@ -76,6 +77,7 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
         <div className="flex flex-col items-end gap-2">
           <EnrichAccountButton accountId={account.id} />
           <EditAccountButton account={account as any} />
+          <DeleteAccountButton accountId={account.id} name={account.name} />
         </div>
       </div>
 
@@ -103,8 +105,7 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
           {socios.length > 0 && (
             <div className="col-span-2 sm:col-span-3">
               <p className="label">Sócios</p>
-              <p>{socios.join(" · ")}</p>
-              <SociosToContacts accountId={account.id} total={socios.length} />
+              <SociosToContacts accountId={account.id} socios={socios} />
             </div>
           )}
         </div>

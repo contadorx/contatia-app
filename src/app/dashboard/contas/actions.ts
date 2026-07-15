@@ -178,6 +178,50 @@ export async function createContactForAccount(
   return { ok: true };
 }
 
+// Exclui uma empresa. contacts.account_id / opportunities.account_id são 'on delete set null'
+// (não apaga contatos/negócios, só desvincula); account_tags é cascade.
+export async function deleteAccountCompany(id: string) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { error } = await supabase.from("accounts").delete().eq("id", id).eq("tenant_id", tenant_id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/contas");
+  revalidatePath("/dashboard/contatos");
+  return { ok: true };
+}
+
+// Cria UM contato a partir de um sócio específico (botão por sócio, igual à ficha do contato).
+export async function criarContatoSocio(accountId: string, nomeSocio: string) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const nome = (nomeSocio || "").trim();
+  if (!nome) return { error: "Nome do sócio vazio." };
+
+  const lim = await canCreate("contatos");
+  if (!lim.permitido) return { error: mensagemLimite("contatos", lim.usado, lim.limite, lim.sugerido) };
+
+  const { data: acc } = await supabase.from("accounts").select("name, cnpj").eq("id", accountId).eq("tenant_id", tenant_id).maybeSingle();
+  if (!acc) return { error: "Empresa não encontrada." };
+
+  const { data: dup } = await supabase.from("contacts").select("id").eq("tenant_id", tenant_id).eq("account_id", accountId).ilike("name", nome).limit(1).maybeSingle();
+  if (dup) return { error: "Já existe um contato com esse nome nesta empresa." };
+
+  const { error } = await supabase.from("contacts").insert({
+    tenant_id,
+    assigned_to: user_id ?? null,
+    name: nome,
+    company: (acc as any).name || null,
+    account_id: accountId,
+    cnpj: (acc as any).cnpj || null,
+    origin: "Sócio",
+    status: "novo",
+  });
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/contas/${accountId}`);
+  revalidatePath("/dashboard/contatos");
+  return { ok: true };
+}
+
 // Cria contatos a partir dos SÓCIOS que o enriquecimento trouxe (custom.socios).
 // Assim o fluxo fecha: Radar → Empresas (enriquece com sócios) → Contatos (os sócios).
 export async function criarContatosDosSocios(accountId: string) {

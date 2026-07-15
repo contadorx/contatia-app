@@ -436,3 +436,26 @@ export async function addSocioContact(sourceContactId: string, socioName: string
   revalidatePath("/dashboard/contatos");
   return { ok: true };
 }
+
+// Exclui um contato (FKs são cascade/set null — não deixa órfãos).
+export async function deleteContact(id: string) {
+  const { supabase, tenant_id } = await tenantId();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { error } = await supabase.from("contacts").delete().eq("id", id).eq("tenant_id", tenant_id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/contatos");
+  revalidatePath("/dashboard/contas");
+  return { ok: true };
+}
+
+// Exclui vários contatos de uma vez (barra de lote).
+export async function bulkDeleteContacts(ids: string[]) {
+  const { supabase, tenant_id } = await tenantId();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const clean = (ids || []).filter(Boolean);
+  if (!clean.length) return { error: "Nenhum contato selecionado." };
+  const { error } = await supabase.from("contacts").delete().eq("tenant_id", tenant_id).in("id", clean);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/contatos");
+  return { ok: true, count: clean.length };
+}
