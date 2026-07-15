@@ -4,7 +4,7 @@ import { isManager } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
-export default async function Pipeline() {
+export default async function Pipeline({ searchParams }: { searchParams: { opp?: string } }) {
   const supabase = createClient();
 
   // Visibilidade por papel: Dono/Admin/Gestor veem o pipeline de toda a equipe;
@@ -15,7 +15,7 @@ export default async function Pipeline() {
 
   let oppsQuery = supabase
     .from("opportunities")
-    .select("id, title, value_mrr, stage_id, status, primary_contact_id, account_id, product_id, contacts:primary_contact_id(name, score)")
+    .select("id, title, value_mrr, stage_id, status, primary_contact_id, account_id, product_id, contacts:primary_contact_id(name, score, last_activity_at)")
     .order("created_at", { ascending: false });
   if (!gerente) oppsQuery = oppsQuery.eq("owner_id", user?.id ?? "");
 
@@ -75,6 +75,7 @@ export default async function Pipeline() {
       contact_id: cid,
       contact_name: o.contacts?.name ?? null,
       contact_score: o.contacts?.score ?? 0,
+      contact_last_at: o.contacts?.last_activity_at ?? null,
       last_activity: la ? `${EVENT_LABEL[la.type] || la.type} · ${rel(la.created_at)}` : null,
       active_cadence: cid ? activeCadence[cid] || null : null,
       tags: cid ? tagsByContact[cid] || [] : [],
@@ -96,6 +97,7 @@ export default async function Pipeline() {
           accounts={(accounts as { id: string; name: string }[]) || []}
           products={(products as any[]) || []}
           allTags={(allTags as any[]) || []}
+          openOppId={searchParams.opp}
         />
       </div>
     </div>

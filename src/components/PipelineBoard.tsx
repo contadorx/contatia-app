@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { createOpportunity, moveOpportunity, updateOpportunity, deleteOpportunity } from "@/app/dashboard/pipeline/actions";
+import { UltimoToque } from "@/lib/lastTouch";
 
 type Stage = { id: string; name: string; position: number; is_won: boolean; is_lost: boolean };
 type Opp = {
@@ -15,6 +16,7 @@ type Opp = {
   contact_id?: string | null;
   account_id?: string | null;
   contact_score?: number;
+  contact_last_at?: string | null;
   last_activity?: string | null;
   active_cadence?: string | null;
   product_id?: string | null;
@@ -34,6 +36,7 @@ export default function PipelineBoard({
   accounts,
   products = [],
   allTags = [],
+  openOppId,
 }: {
   stages: Stage[];
   opportunities: Opp[];
@@ -41,9 +44,20 @@ export default function PipelineBoard({
   accounts: Account[];
   products?: Product[];
   allTags?: { id: string; name: string; color: string }[];
+  openOppId?: string;
 }) {
   const [opps, setOpps] = useState<Opp[]>(opportunities);
   const [dragId, setDragId] = useState<string | null>(null);
+
+  // deep-link: chegou por /dashboard/pipeline?opp=<id> → abre o editor e rola até ele
+  useEffect(() => {
+    if (!openOppId) return;
+    const o = opportunities.find((x) => x.id === openOppId);
+    if (!o) return;
+    setEditOpp({ id: o.id, title: o.title, value_mrr: String(o.value_mrr || ""), contact_id: (o as any).contact_id || "", account_id: (o as any).account_id || "", product_id: (o as any).product_id || "" });
+    setTimeout(() => document.getElementById(`opp-${openOppId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 120);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openOppId]);
   const [showForm, setShowForm] = useState(false);
   const [editOpp, setEditOpp] = useState<{ id: string; title: string; value_mrr: string; contact_id: string; account_id: string; product_id: string } | null>(null);
   const [pending, start] = useTransition();
@@ -273,9 +287,10 @@ export default function PipelineBoard({
               {colOpps.map((o) => (
                 <div
                   key={o.id}
+                  id={`opp-${o.id}`}
                   draggable
                   onDragStart={() => setDragId(o.id)}
-                  className="group mb-2 cursor-grab rounded-lg border border-line bg-surface p-2.5 shadow-sm active:cursor-grabbing"
+                  className={`group mb-2 cursor-grab rounded-lg border bg-surface p-2.5 shadow-sm active:cursor-grabbing ${openOppId === o.id ? "border-brand ring-2 ring-brand/30" : "border-line"}`}
                 >
                   <div
                     className="h-0.5 rounded"
@@ -283,12 +298,15 @@ export default function PipelineBoard({
                   />
                   <div className="flex items-start justify-between gap-1">
                     <p className="text-sm font-semibold leading-tight">{o.title}</p>
-                    <button
-                      className="shrink-0 text-[11px] text-subtle opacity-0 transition hover:text-brand-dark group-hover:opacity-100"
-                      title="Editar"
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={(e) => { e.stopPropagation(); setEditOpp({ id: o.id, title: o.title, value_mrr: String(o.value_mrr || ""), contact_id: o.contact_id || "", account_id: (o as any).account_id || "", product_id: (o as any).product_id || "" }); }}
-                    >✎</button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <UltimoToque at={o.contact_last_at} titulo="Parado desde o último toque no contato do negócio." />
+                      <button
+                        className="text-[11px] text-subtle opacity-0 transition hover:text-brand-dark group-hover:opacity-100"
+                        title="Editar"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); setEditOpp({ id: o.id, title: o.title, value_mrr: String(o.value_mrr || ""), contact_id: o.contact_id || "", account_id: (o as any).account_id || "", product_id: (o as any).product_id || "" }); }}
+                      >✎</button>
+                    </div>
                   </div>
                   {editOpp?.id === o.id && (
                     <div className="mt-2 rounded-lg border border-line bg-muted p-2" onMouseDown={(e) => e.stopPropagation()} draggable={false}>

@@ -143,13 +143,17 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
           <div className="card divide-y divide-line">
             {os.length ? (
               os.map((o) => (
-                <div key={o.id} className="flex items-center justify-between p-3">
+                <Link
+                  key={o.id}
+                  href={`/dashboard/pipeline?opp=${o.id}`}
+                  className="flex items-center justify-between p-3 transition hover:bg-muted"
+                >
                   <div>
                     <p className="text-sm font-medium">{o.title}</p>
-                    <p className="text-xs text-subtle">{o.status}</p>
+                    <p className="text-xs text-subtle">{o.status} · abrir no funil →</p>
                   </div>
                   <span className="text-sm font-bold text-brand-dark">{brl(o.value_mrr)}/mês</span>
-                </div>
+                </Link>
               ))
             ) : (
               <p className="p-4 text-sm text-subtle">Nenhuma oportunidade ainda.</p>

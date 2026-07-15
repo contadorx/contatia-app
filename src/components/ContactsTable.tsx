@@ -8,6 +8,7 @@ import EnrollButton from "@/components/EnrollButton";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { bulkAssign, bulkEnroll } from "@/app/dashboard/contatos/bulk-actions";
 import { bulkTag, createTag } from "@/app/dashboard/contatos/tag-actions";
+import { UltimoToque } from "@/lib/lastTouch";
 
 type Contact = {
   id: string;
@@ -18,6 +19,7 @@ type Contact = {
   origin: string | null;
   score: number | null;
   assigned_to: string | null;
+  last_activity_at?: string | null;
   contact_tags?: { tag_id: string; tags: { id: string; name: string; color: string } | null }[];
 };
 type Member = { id: string; full_name: string | null; email: string };
@@ -219,6 +221,7 @@ export default function ContactsTable({
               <th className="px-4 py-3 font-medium">Contato</th>
               <th className="px-4 py-3 font-medium">Origem</th>
               <th className="px-4 py-3 font-medium" title="Quanto o contato está engajado. Quente a partir de 25.">Score</th>
+              <th className="px-4 py-3 font-medium" title="Última atividade com este contato.">Último toque</th>
               <th className="px-4 py-3 font-medium">Responsável</th>
               <th className="px-4 py-3 font-medium text-right">Ação</th>
             </tr>
@@ -272,6 +275,9 @@ export default function ContactsTable({
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-sm font-semibold ${(c.score ?? 0) >= 25 ? "text-warn" : "text-subtle"}`}>{c.score ?? 0}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <UltimoToque at={c.last_activity_at} />
                   </td>
                   <td className="px-4 py-3">
                     <AssignSelect contactId={c.id} current={c.assigned_to} members={members} />

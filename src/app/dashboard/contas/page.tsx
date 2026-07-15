@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import AccountTools from "@/components/AccountTools";
 import AccountImport from "@/components/AccountImport";
+import AccountsCockpit from "@/components/AccountsCockpit";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,7 @@ export default async function Contas({ searchParams }: { searchParams: { tag?: s
 
   let accountsQuery = supabase
     .from("accounts")
-    .select("id, name, uf, cnpj, domain, contacts(count), opportunities(count), account_tags(tags(id, name, color))")
+    .select("id, name, uf, municipio, cnpj, domain, contacts(id, name, role_title, email, last_activity_at), opportunities(id, title, value_mrr, status), account_tags(tags(id, name, color))")
     .order("created_at", { ascending: false })
     .limit(300);
   // busca por nome, CNPJ ou domínio
@@ -22,7 +23,19 @@ export default async function Contas({ searchParams }: { searchParams: { tag?: s
   const { data: allTags } = await supabase.from("tags").select("id, name, color").order("name", { ascending: true });
 
   let rows = ((accounts as any[]) || []).map((a) => ({
-    ...a,
+    id: a.id,
+    name: a.name,
+    domain: a.domain,
+    cnpj: a.cnpj,
+    uf: a.uf,
+    municipio: a.municipio,
+    contacts: (a.contacts as any[]) || [],
+    opps: (a.opportunities as any[]) || [],
+    ultimo: (((a.contacts as any[]) || [])
+      .map((c) => c.last_activity_at)
+      .filter(Boolean)
+      .sort()
+      .pop()) || null,
     tags: ((a.account_tags as any[]) || []).map((r) => r.tags).filter(Boolean),
   }));
 
@@ -72,45 +85,8 @@ export default async function Contas({ searchParams }: { searchParams: { tag?: s
         </div>
       )}
 
-      <div className="card mt-6 overflow-hidden">
-        {!rows.length ? (
-          <div className="p-10 text-center text-sm text-subtle">{tagFilter ? "Nenhuma empresa com essa tag." : "Nenhuma empresa ainda. Crie a primeira acima."}</div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="border-b border-line text-left text-subtle">
-              <tr>
-                <th className="px-4 py-3 font-medium">Empresa</th>
-                <th className="px-4 py-3 font-medium">Tags</th>
-                <th className="px-4 py-3 font-medium">UF</th>
-                <th className="px-4 py-3 font-medium">Contatos</th>
-                <th className="px-4 py-3 font-medium">Oportunidades</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((a) => (
-                <tr key={a.id} className="border-b border-line last:border-0 hover:bg-muted">
-                  <td className="px-4 py-3 font-medium">
-                    <Link href={`/dashboard/contas/${a.id}`} className="text-brand-dark hover:underline">
-                      {a.name}
-                    </Link>
-                    {a.domain && <span className="ml-2 text-xs text-subtle">{a.domain}</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="flex flex-wrap gap-1">
-                      {a.tags.map((t: any) => (
-                        <span key={t.id} className="rounded-full px-1.5 py-0.5 text-[11px] font-medium" style={{ background: `${t.color}20`, color: t.color }}>{t.name}</span>
-                      ))}
-                      {!a.tags.length && <span className="text-xs text-subtle">—</span>}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-subtle">{a.uf || "—"}</td>
-                  <td className="px-4 py-3 text-subtle">{a.contacts?.[0]?.count ?? 0}</td>
-                  <td className="px-4 py-3 text-subtle">{a.opportunities?.[0]?.count ?? 0}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <div className="mt-6">
+        <AccountsCockpit rows={rows} allTags={(allTags as any[]) || []} />
       </div>
     </div>
   );

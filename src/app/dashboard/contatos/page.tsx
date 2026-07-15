@@ -6,9 +6,10 @@ import { isManager } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
-export default async function Contatos({ searchParams }: { searchParams: { tag?: string; q?: string } }) {
+export default async function Contatos({ searchParams }: { searchParams: { tag?: string; q?: string; frio?: string } }) {
   const supabase = createClient();
   const tagFilter = searchParams.tag;
+  const frio = searchParams.frio || ""; // "15" | "30" | "nunca"
   const q = (searchParams.q || "").trim();
   // sanitiza para o filtro .or() do PostgREST (vírgula/parênteses/% têm significado)
   const qSafe = q.slice(0, 80).replace(/[,()%*]/g, " ").trim();
@@ -31,7 +32,7 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
 
   let contactsQuery = supabase
     .from("contacts")
-    .select("id, name, email, phone, company, origin, status, score, assigned_to, created_at, contact_tags(tag_id, tags(id, name, color))")
+    .select("id, name, email, phone, company, origin, status, score, assigned_to, created_at, last_activity_at, contact_tags(tag_id, tags(id, name, color))")
     .order("score", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(200);
@@ -39,6 +40,14 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
   if (!gerente) contactsQuery = contactsQuery.eq("assigned_to", user?.id ?? "");
   // busca por nome, e-mail ou empresa
   if (qSafe) contactsQuery = contactsQuery.or(`name.ilike.%${qSafe}%,email.ilike.%${qSafe}%,company.ilike.%${qSafe}%`);
+  // filtro de "frios": sem toque há N dias (ou nunca tocados)
+  if (frio === "nunca") {
+    contactsQuery = contactsQuery.is("last_activity_at", null);
+  } else if (frio === "15" || frio === "30") {
+    const corte = new Date();
+    corte.setDate(corte.getDate() - Number(frio));
+    contactsQuery = contactsQuery.or(`last_activity_at.is.null,last_activity_at.lt.${corte.toISOString()}`);
+  }
 
   const [{ data: contacts }, { data: sequences }, { data: members }] = await Promise.all([
     contactsQuery,
@@ -105,6 +114,29 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
           ))}
         </div>
       )}
+
+      {/* Filtro por último toque (carteira fria) */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="text-xs text-subtle">Último toque:</span>
+        {[
+          { k: "", label: "Todos" },
+          { k: "15", label: "Frios +15d" },
+          { k: "30", label: "Frios +30d" },
+          { k: "nunca", label: "Nunca tocados" },
+        ].map((o) => {
+          const params = new URLSearchParams();
+          if (q) params.set("q", q);
+          if (tagFilter) params.set("tag", tagFilter);
+          if (o.k) params.set("frio", o.k);
+          const href = `/dashboard/contatos${params.toString() ? `?${params.toString()}` : ""}`;
+          const ativo = frio === o.k;
+          return (
+            <Link key={o.k || "todos"} href={href} className={`rounded-full px-3 py-1 text-xs ${ativo ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}>
+              {o.label}
+            </Link>
+          );
+        })}
+      </div>
 
       <div className="mt-4">
         <ContactsTable contacts={(contacts as any[]) || []} sequences={seqs} members={memberList} tags={tagList} />
