@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import AccountTools from "@/components/AccountTools";
+import AccountImport from "@/components/AccountImport";
 
 export const dynamic = "force-dynamic";
 
@@ -33,8 +34,9 @@ export default async function Contas({ searchParams }: { searchParams: { tag?: s
       <h1 className="font-display text-2xl font-bold">Empresas</h1>
       <p className="mt-1 text-sm text-subtle">As contas B2B: cada empresa reúne seus contatos e oportunidades.</p>
 
-      <div className="mt-6">
+      <div className="mt-6 flex flex-wrap items-center gap-3">
         <AccountTools />
+        <AccountImport />
       </div>
 
       {/* busca por nome / CNPJ / domínio */}
