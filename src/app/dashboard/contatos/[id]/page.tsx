@@ -13,7 +13,7 @@ import NoteComposer from "@/components/NoteComposer";
 import ContactCadences from "@/components/ContactCadences";
 import EditContactButton from "@/components/EditContactButton";
 import ContactExtras from "@/components/ContactExtras";
-import { EmailVerifyBadge, DecisorFinder } from "@/components/EmailVerify";
+import { EmailVerifyBadge, DecisorFinder, TestEmailBox } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
 
 export const dynamic = "force-dynamic";
@@ -124,7 +124,10 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
             <p className="mt-1 text-sm text-subtle">{[c.email, c.phone].filter(Boolean).join(" · ") || "—"}</p>
             <div className="mt-2">
               <EmailVerifyBadge contactId={c.id} hasEmail={!!c.email} initial={(c as any).custom?.email_check ?? null} />
-              <div className="mt-1"><DecisorFinder contactId={c.id} /></div>
+              <div className="mt-1 space-y-1">
+                <DecisorFinder contactId={c.id} />
+                <TestEmailBox contactId={c.id} />
+              </div>
             </div>
           </div>
           <div className="text-right">

@@ -67,6 +67,26 @@ export async function suggestDecisorEmails(contactId: string) {
   return { ok: true, verificado: false, domain, candidates, domainValid: domainCheck.hasMx };
 }
 
+// Testa UM e-mail específico (ex.: contabil@empresa.com.br) por SMTP no worker.
+// Não salva — só diz se a caixa existe. (Fallback local = só checa domínio/MX.)
+export async function testarEmailAvulso(email: string) {
+  const { tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const addr = (email || "").trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) return { status: "invalid", reason: "E-mail com formato inválido.", verificado: false };
+
+  const { workerConfigurado, verifyEmail: workerVerify } = await import("@/lib/emailFinder");
+  if (workerConfigurado()) {
+    const r = await workerVerify(addr); // { status, reason } — valid | invalid | uncertain | blocked | error
+    return { verificado: true, status: r.status, reason: (r as any).reason || "" };
+  }
+
+  // sem worker: só dá pra checar sintaxe + domínio (MX), não a caixa
+  const { verifyEmail } = await import("@/lib/emailverify");
+  const r = await verifyEmail(addr);
+  return { verificado: false, status: r.hasMx ? "mx_ok" : "invalid", reason: r.reason || "" };
+}
+
 // Aplica um e-mail encontrado ao contato (e roda a verificação para o selo).
 export async function aplicarEmailContato(contactId: string, email: string) {
   const { supabase } = await ctx();

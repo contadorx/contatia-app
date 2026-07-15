@@ -75,7 +75,7 @@ export function EmailFinder({
     start(async () => {
       const r = await buscarEmailAgora(contactId, limpo);
       setRes(r);
-      if (r.ok) setTimeout(() => window.location.reload(), 1800);
+      // NÃO recarrega sozinho — deixa o resultado na tela até o usuário atualizar
     });
   }
 
@@ -151,7 +151,17 @@ export function EmailFinder({
 
               <p className="mt-1 text-sm opacity-90">{res.detalhe}</p>
 
-              {res.ok && <p className="mt-2 text-xs opacity-75">Salvando no contato…</p>}
+              {res.ok && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-signal/15 px-2 py-0.5 text-xs font-semibold text-signal">✓ salvo no contato</span>
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="rounded-lg border border-signal/40 px-2 py-0.5 text-xs font-medium text-signal hover:bg-signal/10"
+                  >
+                    Atualizar a ficha
+                  </button>
+                </div>
+              )}
 
               {/* o que foi testado (transparência) */}
               {res.tentativas && res.tentativas.length > 0 && (
