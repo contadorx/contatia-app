@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { canCreate, mensagemLimite } from "@/lib/plan";
-import { buscarAtividades, buscarEmpresas, receitaConfigurada, type FiltroReceita } from "@/lib/receita";
+import { buscarAtividades, buscarEmpresas, buscarEmpresaPorCnpj, receitaConfigurada, type FiltroReceita } from "@/lib/receita";
 
 async function ctx() {
   const supabase = createClient();
@@ -51,8 +51,25 @@ export async function buscarNaBase(input: any, offset = 0) {
   if (!receitaConfigurada()) return { error: "Base da Receita não configurada (defina RECEITA_API_URL e RECEITA_API_TOKEN)." };
 
   const f = montarFiltro(input);
-  if (!f.atividade && !f.cnae && !f.uf) {
-    return { error: "Escolha ao menos uma atividade (ou CNAE) ou uma UF." };
+
+  // Busca por NOME ou CNPJ (razão social / nome fantasia / CNPJ).
+  const busca = typeof input?.busca === "string" ? input.busca.trim() : "";
+  const digitos = busca.replace(/\D/g, "");
+  if (digitos.length === 14) {
+    // CNPJ completo → busca exata (traz mesmo se não tiver e-mail)
+    const r = await buscarEmpresaPorCnpj(digitos);
+    if (r.error) return { error: r.error };
+    const rows = r.empresa ? [r.empresa] : [];
+    return { ok: true, total: rows.length, atividades: [], rows, offset: 0 };
+  }
+  if (busca.length >= 3) {
+    // texto → procura em razão social + nome fantasia; não força "só com e-mail"
+    f.termo = busca;
+    f.com_email = false;
+  }
+
+  if (!f.atividade && !f.cnae && !f.uf && !f.termo) {
+    return { error: "Escolha uma atividade/UF, ou digite um nome ou CNPJ para buscar." };
   }
   const off = Math.max(Number(offset) || 0, 0);
   const r = await buscarEmpresas({ ...f, limit: 100, offset: off, contar: off === 0 });

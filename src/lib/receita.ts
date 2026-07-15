@@ -82,6 +82,26 @@ export async function buscarAtividades(q: string): Promise<{ atividades: { cnae:
   }
 }
 
+// Busca UMA empresa pelo CNPJ completo (14 dígitos) — usado na busca por CNPJ.
+export async function buscarEmpresaPorCnpj(cnpj: string): Promise<{ empresa: EmpresaReceita | null; error?: string }> {
+  const { url, token } = cfg();
+  if (!url || !token) return { empresa: null, error: "Base da Receita não configurada." };
+  const d = (cnpj || "").replace(/\D/g, "");
+  if (d.length !== 14) return { empresa: null, error: "CNPJ deve ter 14 dígitos." };
+  try {
+    const res = await comTimeout(
+      fetch(`${url}/empresa/${d}`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
+      10_000
+    );
+    if (res.status === 404) return { empresa: null };
+    if (!res.ok) return { empresa: null, error: `Base respondeu ${res.status}` };
+    const j = await res.json();
+    return { empresa: j as EmpresaReceita };
+  } catch (e: any) {
+    return { empresa: null, error: e?.name === "AbortError" ? "Base demorou a responder." : "Base indisponível." };
+  }
+}
+
 // Busca empresas ativas por filtros. Retorna a página + total (se contar=true) + os CNAEs que casaram.
 export async function buscarEmpresas(
   f: FiltroReceita

@@ -24,6 +24,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   const [municipio, setMunicipio] = useState("");
   const [porte, setPorte] = useState("");
   const [comEmail, setComEmail] = useState(true);
+  const [busca, setBusca] = useState("");
 
   // resultados
   const [resultados, setResultados] = useState<Empresa[]>([]);
@@ -66,6 +67,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       ...cnaeManual.split(/[,\s]+/).map((s) => s.replace(/\D/g, "")).filter((s) => s.length === 7),
     ];
     return {
+      busca: busca.trim() || undefined,
       cnae: cnaes.length ? cnaes : undefined,
       atividade: !cnaes.length && termo.trim().length >= 3 ? termo.trim() : undefined,
       uf: uf || undefined,
@@ -74,7 +76,9 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       com_email: comEmail,
     };
   }
-  const temFiltro = escolhidas.length > 0 || cnaeManual.replace(/\D/g, "").length >= 7 || termo.trim().length >= 3 || !!uf;
+  const buscaDigitos = busca.replace(/\D/g, "");
+  const temBusca = busca.trim().length >= 3 || buscaDigitos.length === 14;
+  const temFiltro = temBusca || escolhidas.length > 0 || cnaeManual.replace(/\D/g, "").length >= 7 || termo.trim().length >= 3 || !!uf;
 
   function buscar(offset = 0) {
     setErro(null);
@@ -136,6 +140,19 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
 
       {/* ---------- FILTROS ---------- */}
       <div className="card p-4">
+        {/* busca por razão social / nome fantasia / CNPJ */}
+        <label className="text-xs font-medium text-subtle">Razão social, nome fantasia ou CNPJ</label>
+        <input
+          className="input mt-1 w-full"
+          placeholder="Ex.: Padaria do Zé, ou 12.345.678/0001-90"
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); buscar(0); } }}
+        />
+        <div className="my-3 flex items-center gap-2 text-[11px] uppercase tracking-wide text-subtle">
+          <span className="h-px flex-1 bg-line" /> ou busque por segmento <span className="h-px flex-1 bg-line" />
+        </div>
+
         {/* atividade + autocomplete */}
         <label className="text-xs font-medium text-subtle">Atividade</label>
         <div className="relative mt-1">
