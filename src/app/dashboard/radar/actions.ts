@@ -32,6 +32,28 @@ function montarFiltro(input: any): FiltroReceita {
   };
 }
 
+// marca cada resultado com jaTem=true se o CNPJ já estiver em Empresas (evita repuxar)
+async function marcarJaTem(rows: any[]): Promise<any[]> {
+  if (!Array.isArray(rows) || !rows.length) return rows || [];
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return rows;
+  const cnpjs = Array.from(new Set(rows.map((r) => soDigitos(r.cnpj)).filter((d) => d.length === 14)));
+  const tem = new Set<string>();
+  for (let i = 0; i < cnpjs.length; i += 500) {
+    const { data } = await supabase.from("accounts").select("cnpj").eq("tenant_id", tenant_id).in("cnpj", cnpjs.slice(i, i + 500));
+    for (const a of (data as any[]) || []) if (a.cnpj) tem.add(soDigitos(a.cnpj));
+  }
+  return rows.map((r) => ({ ...r, jaTem: tem.has(soDigitos(r.cnpj)) }));
+}
+
+// garante a tag "Radar" e devolve o id (marca as empresas que vieram do Radar)
+async function tagRadarId(supabase: any, tenant_id: string): Promise<string | null> {
+  const { data: t } = await supabase.from("tags").select("id").eq("tenant_id", tenant_id).ilike("name", "Radar").maybeSingle();
+  if (t) return (t as any).id;
+  const { data: c } = await supabase.from("tags").insert({ tenant_id, name: "Radar", color: "#4A3AFF" }).select("id").maybeSingle();
+  return (c as any)?.id || null;
+}
+
 // ============================================================
 // Autocomplete de atividade (campo principal da busca).
 // ============================================================
@@ -59,7 +81,7 @@ export async function buscarNaBase(input: any, offset = 0) {
     // CNPJ completo → busca exata (traz mesmo se não tiver e-mail)
     const r = await buscarEmpresaPorCnpj(digitos);
     if (r.error) return { error: r.error };
-    const rows = r.empresa ? [r.empresa] : [];
+    const rows = await marcarJaTem(r.empresa ? [r.empresa] : []);
     return { ok: true, total: rows.length, atividades: [], rows, offset: 0 };
   }
   if (busca.length >= 3) {
@@ -74,7 +96,8 @@ export async function buscarNaBase(input: any, offset = 0) {
   const off = Math.max(Number(offset) || 0, 0);
   const r = await buscarEmpresas({ ...f, limit: 100, offset: off, contar: off === 0 });
   if (r.error) return { error: r.error };
-  return { ok: true, total: r.total, atividades: r.atividades, rows: r.rows, offset: off };
+  const rows = await marcarJaTem(r.rows);
+  return { ok: true, total: r.total, atividades: r.atividades, rows, offset: off };
 }
 
 // ============================================================
@@ -112,6 +135,8 @@ export async function enviarParaCadastro(empresas: any[]) {
   let contatosCriados = 0;
   let pulados = 0;
   const vistos = new Set<string>();
+  const tagId = await tagRadarId(supabase, tenant_id); // marca as empresas como vindas do Radar
+  const contasParaMarcar = new Set<string>();
 
   for (const e of empresas) {
     const cnpj = soDigitos(e.cnpj);
@@ -151,6 +176,7 @@ export async function enviarParaCadastro(empresas: any[]) {
       }
       if (account_id) contaPorCnpj.set(cnpj, account_id);
     }
+    if (account_id) contasParaMarcar.add(account_id); // será marcada com a tag Radar
 
     // 3) cria o CONTATO (a empresa vira o contato, já que sócios ficaram pra depois),
     //    a não ser que já exista um contato com esse CNPJ (dedup).
@@ -171,6 +197,12 @@ export async function enviarParaCadastro(empresas: any[]) {
       contatoTemCnpj.add(cnpj);
       contatosCriados++;
     }
+  }
+
+  // marca todas as empresas tocadas com a tag "Radar"
+  if (tagId && contasParaMarcar.size) {
+    const rows = Array.from(contasParaMarcar).map((account_id) => ({ tenant_id, account_id, tag_id: tagId }));
+    await supabase.from("account_tags").upsert(rows, { onConflict: "account_id,tag_id", ignoreDuplicates: true });
   }
 
   revalidatePath("/dashboard/contatos");

@@ -11,6 +11,7 @@ type Empresa = {
   cnpj: string; razao_social: string | null; nome_fantasia: string | null;
   cnae: string | null; cnae_descricao: string | null; uf: string | null;
   municipio: string | null; email: string | null; telefone: string | null; porte: string | null;
+  jaTem?: boolean;
 };
 
 export default function RadarBusca({ configurada }: { configurada: boolean }) {
@@ -107,9 +108,11 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       return n;
     });
   }
-  const todosMarcados = resultados.length > 0 && resultados.every((r) => sel.has(r.cnpj));
+  // "selecionar todos" só marca as que ainda NÃO estão na sua base
+  const selecionaveis = resultados.filter((r) => !r.jaTem);
+  const todosMarcados = selecionaveis.length > 0 && selecionaveis.every((r) => sel.has(r.cnpj));
   function toggleTodos() {
-    setSel(todosMarcados ? new Set() : new Set(resultados.map((r) => r.cnpj)));
+    setSel(todosMarcados ? new Set() : new Set(selecionaveis.map((r) => r.cnpj)));
   }
 
   function enviar() {
@@ -260,12 +263,15 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
               </thead>
               <tbody>
                 {resultados.length ? resultados.map((r) => (
-                  <tr key={r.cnpj} className={`border-b border-line last:border-0 ${sel.has(r.cnpj) ? "bg-brand-soft/40" : "hover:bg-muted"}`}>
+                  <tr key={r.cnpj} className={`border-b border-line last:border-0 ${r.jaTem ? "opacity-60" : sel.has(r.cnpj) ? "bg-brand-soft/40" : "hover:bg-muted"}`}>
                     <td className="px-3 py-3">
-                      <input type="checkbox" checked={sel.has(r.cnpj)} onChange={() => toggle(r.cnpj)} />
+                      <input type="checkbox" checked={sel.has(r.cnpj)} disabled={r.jaTem} onChange={() => toggle(r.cnpj)} title={r.jaTem ? "Já está na sua base" : ""} />
                     </td>
                     <td className="px-3 py-3">
-                      <p className="font-medium">{r.nome_fantasia || r.razao_social || "—"}</p>
+                      <p className="font-medium">
+                        {r.nome_fantasia || r.razao_social || "—"}
+                        {r.jaTem && <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-subtle">✓ já na base</span>}
+                      </p>
                       <p className="text-xs text-subtle">{r.cnpj}{r.porte ? ` · ${r.porte}` : ""}</p>
                     </td>
                     <td className="px-3 py-3 text-subtle">{r.cnae_descricao || r.cnae || "—"}</td>

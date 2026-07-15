@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import AddContactToAccount from "@/components/AddContactToAccount";
 import NewContactForAccount from "@/components/NewContactForAccount";
 import NewOpportunityForAccount from "@/components/NewOpportunityForAccount";
+import SociosToContacts from "@/components/SociosToContacts";
 import EditAccountButton from "@/components/EditAccountButton";
 import EnrichAccountButton from "@/components/EnrichAccountButton";
 import AccountTags from "@/components/AccountTags";
@@ -103,6 +104,7 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
             <div className="col-span-2 sm:col-span-3">
               <p className="label">Sócios</p>
               <p>{socios.join(" · ")}</p>
+              <SociosToContacts accountId={account.id} total={socios.length} />
             </div>
           )}
         </div>

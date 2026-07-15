@@ -178,6 +178,47 @@ export async function createContactForAccount(
   return { ok: true };
 }
 
+// Cria contatos a partir dos SÓCIOS que o enriquecimento trouxe (custom.socios).
+// Assim o fluxo fecha: Radar → Empresas (enriquece com sócios) → Contatos (os sócios).
+export async function criarContatosDosSocios(accountId: string) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const { data: acc } = await supabase.from("accounts").select("name, cnpj, custom").eq("id", accountId).eq("tenant_id", tenant_id).maybeSingle();
+  if (!acc) return { error: "Empresa não encontrada." };
+  const socios: string[] = Array.isArray((acc as any).custom?.socios) ? (acc as any).custom.socios : [];
+  if (!socios.length) return { error: "Sem sócios ainda. Clique em 'Enriquecer' pelo CNPJ primeiro." };
+
+  const lim = await canCreate("contatos");
+  if (!lim.permitido) return { error: mensagemLimite("contatos", lim.usado, lim.limite, lim.sugerido) };
+
+  // dedup: contatos que já existem nesta empresa (por nome)
+  const { data: existentes } = await supabase.from("contacts").select("name").eq("tenant_id", tenant_id).eq("account_id", accountId);
+  const jaTem = new Set(((existentes as any[]) || []).map((c) => normNome(c.name)));
+
+  let criados = 0;
+  let pulados = 0;
+  for (const nomeRaw of socios) {
+    const nome = String(nomeRaw || "").trim();
+    if (!nome || jaTem.has(normNome(nome))) { pulados++; continue; }
+    const { error } = await supabase.from("contacts").insert({
+      tenant_id,
+      assigned_to: user_id ?? null,
+      name: nome,
+      company: (acc as any).name || null,
+      account_id: accountId,
+      cnpj: (acc as any).cnpj || null,
+      origin: "Sócio",
+      status: "novo",
+    });
+    if (!error) { criados++; jaTem.add(normNome(nome)); }
+  }
+
+  revalidatePath(`/dashboard/contas/${accountId}`);
+  revalidatePath("/dashboard/contatos");
+  return { ok: true, criados, pulados };
+}
+
 // Cria uma NOVA oportunidade para esta empresa (no primeiro estágio do pipeline).
 export async function createOpportunityForAccount(
   accountId: string,
