@@ -24,7 +24,7 @@ export default function RegisterTouchButton({ contactId }: { contactId: string }
 
   return (
     <>
-      <button className="btn-ghost" onClick={() => setOpen(true)}>✓ Registrar toque</button>
+      <button className="btn-ghost py-1.5 text-sm" onClick={() => setOpen(true)}>✓ Registrar toque</button>
 
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setOpen(false)}>

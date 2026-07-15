@@ -43,7 +43,7 @@ export default function ScheduleMeetingForContact({ contactId, contactName }: { 
 
   return (
     <>
-      <button className="btn-ghost" onClick={() => setOpen(true)}>📅 Marcar reunião</button>
+      <button className="btn-ghost py-1.5 text-sm" onClick={() => setOpen(true)}>📅 Marcar reunião</button>
 
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setOpen(false)}>

@@ -124,9 +124,12 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
             <p className="mt-1 text-sm text-subtle">{[c.email, c.phone].filter(Boolean).join(" · ") || "—"}</p>
             <div className="mt-2">
               <EmailVerifyBadge contactId={c.id} hasEmail={!!c.email} initial={(c as any).custom?.email_check ?? null} />
-              <div className="mt-1 space-y-1">
-                <DecisorFinder contactId={c.id} />
-                <TestEmailBox contactId={c.id} />
+              <div className="mt-2">
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-subtle">Ferramentas de e-mail</p>
+                <div className="space-y-2">
+                  <DecisorFinder contactId={c.id} />
+                  <TestEmailBox contactId={c.id} />
+                </div>
               </div>
             </div>
           </div>

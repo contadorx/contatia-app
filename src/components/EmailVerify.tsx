@@ -96,17 +96,20 @@ export function TestEmailBox({ contactId }: { contactId: string }) {
 
   if (!open)
     return (
-      <button className="text-xs text-brand-dark hover:underline" onClick={() => setOpen(true)}>
-        Testar um e-mail específico
+      <button
+        className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-ink hover:border-brand hover:text-brand-dark"
+        onClick={() => setOpen(true)}
+      >
+        ✓ Testar um e-mail que já tenho
       </button>
     );
 
   const info = res && res.status ? MAPA[res.status] || MAPA.error : null;
 
   return (
-    <div className="mt-2 rounded-lg border border-line bg-muted p-3">
-      <p className="text-xs font-semibold">Testar um e-mail específico</p>
-      <p className="mt-0.5 text-[11px] text-subtle">Confirma se a caixa existe (ex.: contabil@empresa.com.br, contato@…). Bom pra e-mails que não seguem o nome da pessoa.</p>
+    <div className="mt-2 rounded-lg border border-line bg-surface p-3">
+      <p className="text-xs font-semibold">✓ Testar um e-mail que já tenho</p>
+      <p className="mt-0.5 text-[11px] text-subtle">Digite um endereço e confirmo se a caixa existe (ex.: contabil@empresa.com.br, contato@…). Bom pra e-mails por função, que não seguem o nome da pessoa.</p>
       <div className="mt-2 flex gap-2">
         <input
           className="input py-1 text-sm"
@@ -153,16 +156,17 @@ export function DecisorFinder({ contactId }: { contactId: string }) {
   if (!open)
     return (
       <button
-        className="text-xs text-brand-dark hover:underline"
+        className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-ink hover:border-brand hover:text-brand-dark"
         onClick={() => { setOpen(true); start(async () => setRes((await suggestDecisorEmails(contactId)) as any)); }}
       >
-        Encontrar e-mail do decisor
+        🔍 Descobrir e-mail pelo nome
       </button>
     );
 
   return (
-    <div className="mt-2 rounded-lg border border-line bg-muted p-3">
-      <p className="text-xs font-semibold">E-mail do decisor {res?.domain ? <span className="text-subtle">· {res.domain}</span> : ""}</p>
+    <div className="mt-2 rounded-lg border border-line bg-surface p-3">
+      <p className="text-xs font-semibold">🔍 Descobrir e-mail pelo nome {res?.domain ? <span className="text-subtle">· {res.domain}</span> : ""}</p>
+      <p className="mt-0.5 text-[11px] text-subtle">Testo os padrões (nome.sobrenome@, nome@…) no domínio da empresa e confirmo qual caixa existe.</p>
       {pending && <p className="mt-1 text-xs text-subtle">Testando as caixas… (a verificação SMTP leva alguns segundos)</p>}
       {res?.error && <p className="mt-1 text-xs text-danger">{res.error}</p>}
 

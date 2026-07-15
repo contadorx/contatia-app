@@ -23,8 +23,8 @@ export default function EnrollButton({ contactId, sequences }: { contactId: stri
 
   return (
     <div className="relative inline-block">
-      <button className="btn-ghost py-1 text-xs" onClick={() => setOpen((o) => !o)} disabled={pending}>
-        {pending ? "..." : "▶ Cadência"}
+      <button className="btn-ghost py-1.5 text-sm" onClick={() => setOpen((o) => !o)} disabled={pending}>
+        {pending ? "..." : "▶ Inscrever em cadência"}
       </button>
       {open && (
         <div className="absolute right-0 z-10 mt-1 w-52 rounded-xl border border-line bg-surface p-1 shadow-lg">
