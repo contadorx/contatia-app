@@ -83,7 +83,7 @@ export async function enrichAccount(id: string) {
 
   const { data: acc } = await supabase
     .from("accounts")
-    .select("id, cnpj, phone")
+    .select("id, cnpj, phone, email, custom")
     .eq("id", id)
     .eq("tenant_id", tenant_id)
     .maybeSingle();
@@ -108,18 +108,111 @@ export async function enrichAccount(id: string) {
   if (r.error || !r.data) return { error: r.error || "Não foi possível enriquecer." };
   const d = r.data;
 
-  // B3: só grava o que veio (fallback ReceitaWS é mais enxuto — não apaga dado bom)
+  // só grava o que veio (não apaga dado bom já existente)
   const patch: Record<string, unknown> = { cnpj };
   if (d.cnae) patch.cnae = d.cnae;
+  if (d.cnae_descricao) patch.cnae_descricao = d.cnae_descricao;
   if (d.porte) patch.porte = d.porte;
   if (d.uf) patch.uf = d.uf;
   if (d.municipio) patch.municipio = d.municipio;
+  if (d.situacao) patch.situacao = d.situacao;
+  if (d.cep) patch.cep = d.cep;
+  if (d.bairro) patch.bairro = d.bairro;
+  if (d.logradouro) patch.logradouro = d.logradouro;
+  if (d.numero) patch.numero = d.numero;
+  if (d.complemento) patch.complemento = d.complemento;
+  // e-mail/telefone só preenchem se estiverem vazios (não sobrescreve o que você digitou)
+  if (!(acc as any).email && d.email) patch.email = d.email;
   if (!(acc as any).phone && d.telefone) patch.phone = d.telefone;
+
+  // dados menos centrais ficam no jsonb `custom`
+  const custom: Record<string, unknown> = { ...((acc as any).custom || {}) };
+  if (d.socios?.length) custom.socios = d.socios;
+  if (d.capital_social != null) custom.capital_social = d.capital_social;
+  if (d.natureza_juridica) custom.natureza_juridica = d.natureza_juridica;
+  if (d.abertura) custom.abertura = d.abertura;
+  if (d.telefone2) custom.telefone2 = d.telefone2;
+  custom.enriched_at = new Date().toISOString();
+  custom.enrich_fontes = r.fontes || [];
+  patch.custom = custom;
 
   const { error } = await supabase.from("accounts").update(patch as any).eq("id", id).eq("tenant_id", tenant_id);
   if (error) return { error: error.message };
   revalidatePath(`/dashboard/contas/${id}`);
   revalidatePath("/dashboard/contas");
+  return { ok: true, fontes: r.fontes };
+}
+
+// Cria um NOVO contato já vinculado a esta empresa (a partir da ficha da empresa).
+export async function createContactForAccount(
+  accountId: string,
+  input: { name: string; email?: string; phone?: string; role_title?: string }
+) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const name = (input.name || "").trim();
+  if (!name) return { error: "Nome é obrigatório." };
+
+  const lim = await canCreate("contatos");
+  if (!lim.permitido) return { error: mensagemLimite("contatos", lim.usado, lim.limite, lim.sugerido) };
+
+  const { data: acc } = await supabase.from("accounts").select("name, cnpj").eq("id", accountId).eq("tenant_id", tenant_id).maybeSingle();
+  if (!acc) return { error: "Empresa não encontrada." };
+
+  const { error } = await supabase.from("contacts").insert({
+    tenant_id,
+    assigned_to: user_id ?? null,
+    name,
+    email: (input.email || "").trim().toLowerCase() || null,
+    phone: (input.phone || "").trim() || null,
+    role_title: (input.role_title || "").trim() || null,
+    company: (acc as any).name || null,
+    cnpj: (acc as any).cnpj || null,
+    account_id: accountId,
+    origin: "Empresa",
+    status: "novo",
+  });
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/contas/${accountId}`);
+  revalidatePath("/dashboard/contatos");
+  return { ok: true };
+}
+
+// Cria uma NOVA oportunidade para esta empresa (no primeiro estágio do pipeline).
+export async function createOpportunityForAccount(
+  accountId: string,
+  input: { title?: string; value_mrr?: number; primary_contact_id?: string }
+) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const { data: acc } = await supabase.from("accounts").select("name").eq("id", accountId).eq("tenant_id", tenant_id).maybeSingle();
+  if (!acc) return { error: "Empresa não encontrada." };
+  const title = (input.title || "").trim() || (acc as any).name;
+
+  const { data: stage } = await supabase
+    .from("pipeline_stages")
+    .select("id")
+    .eq("is_won", false)
+    .eq("is_lost", false)
+    .order("position", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (!stage) return { error: "Crie ao menos um estágio no Pipeline antes." };
+
+  const { error } = await supabase.from("opportunities").insert({
+    tenant_id,
+    title,
+    account_id: accountId,
+    primary_contact_id: input.primary_contact_id || null,
+    owner_id: user_id ?? null,
+    stage_id: (stage as any).id,
+    status: "open",
+    value_mrr: Number(input.value_mrr) || 0,
+  });
+  if (error) return { error: error.message };
+  revalidatePath(`/dashboard/contas/${accountId}`);
+  revalidatePath("/dashboard/pipeline");
   return { ok: true };
 }
 

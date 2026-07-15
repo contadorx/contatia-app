@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import AddContactToAccount from "@/components/AddContactToAccount";
+import NewContactForAccount from "@/components/NewContactForAccount";
+import NewOpportunityForAccount from "@/components/NewOpportunityForAccount";
 import EditAccountButton from "@/components/EditAccountButton";
 import EnrichAccountButton from "@/components/EnrichAccountButton";
 import AccountTags from "@/components/AccountTags";
@@ -25,13 +27,22 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
 
   const { data: account } = await supabase
     .from("accounts")
-    .select("id, name, cnpj, uf, domain, phone, website, cnae, municipio, porte")
+    .select("id, name, cnpj, uf, domain, phone, website, cnae, cnae_descricao, municipio, porte, email, cep, bairro, logradouro, numero, complemento, situacao, custom")
     .eq("id", params.id)
     .maybeSingle();
 
   if (!account) notFound();
   const a = account as any;
-  const hasDetails = !!(a.cnae || a.porte || a.municipio || a.phone || a.website);
+  const custom = a.custom || {};
+
+  // endereço completo (rua, número, complemento) + bairro/CEP/município
+  const linhaRua = ([a.logradouro, a.numero].filter(Boolean).join(", ") + (a.complemento ? ` — ${a.complemento}` : "")).trim();
+  const endereco = [linhaRua, a.bairro, [a.municipio, a.uf].filter(Boolean).join("/"), a.cep ? `CEP ${a.cep}` : ""]
+    .filter((s) => s && String(s).trim())
+    .join(" · ");
+  const capital = typeof custom.capital_social === "number" ? brl(custom.capital_social) : null;
+  const socios: string[] = Array.isArray(custom.socios) ? custom.socios : [];
+  const hasDetails = !!(a.cnae || a.porte || a.municipio || a.phone || a.email || a.website || endereco || a.situacao);
 
   const [{ data: contacts }, { data: opps }, { data: freeContacts }, { data: accountTags }, { data: allTags }] = await Promise.all([
     supabase.from("contacts").select("id, name, email, phone, role_title").eq("account_id", params.id),
@@ -55,7 +66,7 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
         <div>
           <h1 className="font-display text-2xl font-bold">{account.name}</h1>
           <p className="mt-1 text-sm text-subtle">
-            {[account.uf, account.cnpj, account.domain].filter(Boolean).join(" · ") || "—"}
+            {[a.situacao, a.cnpj, a.domain].filter(Boolean).join(" · ") || "—"}
           </p>
           <div className="mt-2">
             <AccountTags accountId={account.id} tags={myTags} allTags={(allTags as any[]) || []} />
@@ -68,11 +79,12 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
       </div>
 
       {hasDetails && (
-        <div className="card mt-4 grid grid-cols-2 gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-3">
-          <AField label="CNAE" value={a.cnae} />
+        <div className="card mt-4 grid grid-cols-2 gap-x-6 gap-y-3 p-4 text-sm sm:grid-cols-3">
+          <AField label="CNAE" value={[a.cnae, a.cnae_descricao].filter(Boolean).join(" — ") || a.cnae} />
           <AField label="Porte" value={a.porte} />
-          <AField label="Município/UF" value={[a.municipio, a.uf].filter(Boolean).join(" / ")} />
+          <AField label="Situação" value={a.situacao} />
           <AField label="Telefone" value={a.phone} />
+          <AField label="E-mail" value={a.email} />
           <div>
             <p className="label">Site</p>
             {a.website ? (
@@ -81,6 +93,18 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
               <p className="text-subtle">—</p>
             )}
           </div>
+          <div className="col-span-2 sm:col-span-3">
+            <AField label="Endereço" value={endereco} />
+          </div>
+          <AField label="Natureza jurídica" value={custom.natureza_juridica} />
+          <AField label="Capital social" value={capital} />
+          <AField label="Abertura" value={custom.abertura} />
+          {socios.length > 0 && (
+            <div className="col-span-2 sm:col-span-3">
+              <p className="label">Sócios</p>
+              <p>{socios.join(" · ")}</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -107,7 +131,8 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
               <p className="p-4 text-sm text-subtle">Nenhum contato nesta empresa ainda.</p>
             )}
           </div>
-          <div className="mt-3">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <NewContactForAccount accountId={account.id} />
             <AddContactToAccount accountId={account.id} available={(freeContacts as any[]) || []} />
           </div>
         </div>
@@ -127,8 +152,11 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
                 </div>
               ))
             ) : (
-              <p className="p-4 text-sm text-subtle">Nenhuma oportunidade. Crie no Pipeline vinculando esta empresa.</p>
+              <p className="p-4 text-sm text-subtle">Nenhuma oportunidade ainda.</p>
             )}
+          </div>
+          <div className="mt-3">
+            <NewOpportunityForAccount accountId={account.id} accountName={account.name} contacts={cs.map((c) => ({ id: c.id, name: c.name }))} />
           </div>
         </div>
       </div>
