@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isManager as isMgr } from "@/lib/permissions";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import { UltimoToque, diasSemToque } from "@/lib/lastTouch";
+import ReportTabs from "@/components/ReportTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -210,17 +211,9 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
         <button className="btn-brand px-4 py-1.5 text-sm" type="submit">Aplicar</button>
       </form>
 
-      {/* atalhos */}
-      <div className="mt-4 flex flex-wrap gap-2 text-xs">
-        {[
-          ["carteira", "Carteira parada"], ["aging", "Pipeline aging"], ["empresas", "Empresas vazias"],
-          ["quentes", "Quentes sem ação"], ["produtividade", "Produtividade"], ["cobertura", "Cobertura"], ["cadencias", "Cadências"],
-        ].map(([id, label]) => (
-          <a key={id} href={`#${id}`} className="rounded-full bg-muted px-3 py-1 text-subtle hover:text-ink">{label}</a>
-        ))}
-      </div>
-
-      {/* ================= 1 ================= */}
+      <ReportTabs
+        tabs={[
+          { id: "carteira", label: "Carteira parada", node: (
       <Secao id="carteira" titulo="Carteira parada / a resgatar" desc={`Contatos sem toque há +${frio} dias e fora de cadência ativa — o dinheiro parado. Ordenado por score (os mais quentes primeiro).`}>
         <div className="mb-3 flex flex-wrap gap-2 text-xs">
           <span className="rounded-full bg-red-100 px-3 py-1 font-medium text-red-700">{parados.length} parados</span>
@@ -244,8 +237,8 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
           nota={parados.length > 100 ? `Mostrando os 100 mais quentes de ${parados.length}.` : undefined}
         />
       </Secao>
-
-      {/* ================= 2 ================= */}
+          ) },
+          { id: "aging", label: "Pipeline aging", node: (
       <Secao id="aging" titulo="Pipeline aging" desc={`Oportunidades abertas paradas há +${frio} dias (sem movimento no funil). Negócios apodrecendo.`}>
         <div className="mb-3 flex flex-wrap gap-2 text-xs">
           <span className="rounded-full bg-red-100 px-3 py-1 font-medium text-red-700">{aging.length} paradas · {brl(agingValor)}/mês em risco</span>
@@ -266,8 +259,8 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
           nota={aging.length > 100 ? `Mostrando as 100 mais paradas de ${aging.length}.` : undefined}
         />
       </Secao>
-
-      {/* ================= 3 ================= */}
+          ) },
+          { id: "empresas", label: "Empresas vazias", node: (
       <Secao id="empresas" titulo="Empresas sem contato ou sem oportunidade" desc="Contas cadastradas que ainda não viraram relacionamento nem negócio — potencial não explorado.">
         <Tabela
           vazio="Todas as empresas têm contato e oportunidade."
@@ -285,8 +278,8 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
           nota={empresasVazias.length > 100 ? `Mostrando 100 de ${empresasVazias.length}.` : undefined}
         />
       </Secao>
-
-      {/* ================= 4 ================= */}
+          ) },
+          { id: "quentes", label: "Quentes sem ação", node: (
       <Secao id="quentes" titulo="Leads quentes sem ação" desc={`Score alto (≥${HOT_THRESHOLD}) mas frios há +${frio} dias — prioridade máxima: interesse quente esfriando.`}>
         <Tabela
           vazio="Nenhum lead quente esquecido. 👏"
@@ -303,8 +296,8 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
           }))}
         />
       </Secao>
-
-      {/* ================= 5 ================= */}
+          ) },
+          { id: "produtividade", label: "Produtividade", node: (
       <Secao id="produtividade" titulo="Produtividade por vendedor" desc={`Atividade nos últimos ${dias} dias: toques dados, respostas geradas, reuniões marcadas, oportunidades criadas e ganhas.`}>
         <Tabela
           vazio="Sem atividade no período."
@@ -322,8 +315,8 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
           }))}
         />
       </Secao>
-
-      {/* ================= 6 ================= */}
+          ) },
+          { id: "cobertura", label: "Cobertura", node: (
       <Secao id="cobertura" titulo="Cobertura da base" desc="A saúde da operação: quanto da base está sendo realmente trabalhada.">
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
           <Tile label="Contatos" value={String(totalContatos)} sub={`${comEmail} com e-mail (${pct(comEmail, totalContatos)}%)`} />
@@ -333,8 +326,8 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
           <Tile label="Empresas com oportunidade" value={`${pct(empresasComOpp, totalEmpresas)}%`} sub={`${totalEmpresas - empresasComOpp} sem nenhum negócio`} />
         </div>
       </Secao>
-
-      {/* ================= 7 ================= */}
+          ) },
+          { id: "cadencias", label: "Cadências", node: (
       <Secao id="cadencias" titulo="Desempenho de cadências" desc="Como cada sequência está convertendo: inscritos, ativos, respostas e taxa de resposta.">
         <Tabela
           vazio="Nenhuma cadência com inscritos ainda."
@@ -352,6 +345,9 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
           }))}
         />
       </Secao>
+          ) },
+        ]}
+      />
 
       <p className="mt-8 text-xs text-subtle">Os relatórios respeitam sua visibilidade: {gestor ? "gestor vê toda a equipe (filtre por vendedor acima)." : "você vê apenas a sua carteira."} Listas grandes mostram os itens mais críticos primeiro.</p>
     </div>
