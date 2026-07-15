@@ -112,10 +112,15 @@ export async function sendQuickWhatsApp(contactId: string, body: string) {
   if (!tenant_id) return { error: "Sem workspace." };
   if (!body.trim()) return { error: "Escreva a mensagem." };
 
-  const { data: contact } = await supabase.from("contacts").select("id, name, phone").eq("id", contactId).maybeSingle();
+  const { data: contact } = await supabase.from("contacts").select("id, name, phone, opted_out").eq("id", contactId).maybeSingle();
   if (!contact) return { error: "Contato não encontrado." };
+  if ((contact as any).opted_out) return { error: "Este contato pediu para não ser contatado (opt-out). Envio bloqueado." };
   const phone = (contact as any).phone as string | undefined;
   if (!phone) return { error: "Contato sem telefone." };
+
+  // supressão: número na blocklist de WhatsApp não recebe (avulso não fura a regra)
+  const { data: bloq } = await supabase.from("whatsapp_blocklist").select("id").eq("tenant_id", tenant_id).eq("phone", phone).maybeSingle();
+  if (bloq) return { error: "Este número está na lista de bloqueio (WhatsApp). Envio bloqueado." };
 
   const { data: tmode } = await supabase.from("tenants").select("whatsapp_mode").eq("id", tenant_id).maybeSingle();
   const mode = (tmode as any)?.whatsapp_mode || "assistido";

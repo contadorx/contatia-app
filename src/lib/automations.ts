@@ -48,6 +48,17 @@ export async function applyRule(
   db: DB,
   { tenantId, contactId, rule }: { tenantId: string; contactId: string; rule: any }
 ): Promise<boolean> {
+  // dedup 1x por contato: gatilhos de evento (link_clicked, doc_opened, replied…)
+  // recorrem — sem essa checagem a regra re-disparava a cada clique/abertura,
+  // re-somando score. O caminho de tempo (cron) já checava; agora vale para todos.
+  const { data: jaDisparou } = await db
+    .from("automation_logs")
+    .select("id")
+    .eq("automation_id", rule.id)
+    .eq("contact_id", contactId)
+    .maybeSingle();
+  if (jaDisparou) return false;
+
   const ok = await applyAction(db, { tenantId, contactId, rule });
   if (ok) {
     await db.from("automation_logs").insert({

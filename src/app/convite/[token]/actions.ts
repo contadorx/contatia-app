@@ -13,19 +13,23 @@ export async function acceptInvite(token: string) {
   if (data === "invalid") return { error: "Convite inválido ou expirado." };
   if (data === "email_mismatch") return { error: "Este convite foi enviado para outro e-mail. Entre com a conta do e-mail convidado." };
 
-  // aplica o papel escolhido no convite ao perfil recém-vinculado (AUT-03).
-  // team_role é coluna protegida (0068) → grava pelo admin client (service_role).
+  // aplica o papel escolhido no convite ao perfil recém-vinculado (AUT-03/AUT-04).
+  // IMPORTANTE: a RLS de tenant_invites só libera a linha para o DONO do tenant — o
+  // convidado (recém-vinculado) não consegue lê-la. Por isso lemos o papel TAMBÉM pelo
+  // admin client (service_role), senão o team_role vinha nulo e todo convite virava vendedor.
   try {
-    const { data: inv } = await supabase
-      .from("tenant_invites")
-      .select("team_role")
-      .eq("token", token)
-      .maybeSingle();
-    const papel = (inv as any)?.team_role;
-    if (["admin", "gestor", "sdr", "vendedor"].includes(papel || "")) {
-      const { createAdminClient } = await import("@/lib/supabaseAdmin");
-      const admin = createAdminClient();
-      if (admin) await admin.from("profiles").update({ team_role: papel }).eq("id", user.id);
+    const { createAdminClient } = await import("@/lib/supabaseAdmin");
+    const admin = createAdminClient();
+    if (admin) {
+      const { data: inv } = await admin
+        .from("tenant_invites")
+        .select("team_role")
+        .eq("token", token)
+        .maybeSingle();
+      const papel = (inv as any)?.team_role;
+      if (["admin", "gestor", "sdr", "vendedor"].includes(papel || "")) {
+        await admin.from("profiles").update({ team_role: papel }).eq("id", user.id);
+      }
     }
   } catch { /* papel pode ser ajustado depois em Equipe */ }
 

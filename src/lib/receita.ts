@@ -51,14 +51,10 @@ function cfg() {
   return { url, token };
 }
 
-async function comTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), ms);
-  try {
-    return await p;
-  } finally {
-    clearTimeout(t);
-  }
+// fetch com timeout REAL (aborta a conexão). Antes o AbortController não era ligado
+// ao fetch, então o "timeout" não cancelava nada e uma base travada penduraria a ação.
+function fetchTimeout(url: string, opts: RequestInit, ms: number): Promise<Response> {
+  return fetch(url, { ...opts, signal: AbortSignal.timeout(ms) });
 }
 
 // Autocomplete de atividade (texto → lista de CNAEs com descrição).
@@ -67,11 +63,9 @@ export async function buscarAtividades(q: string): Promise<{ atividades: { cnae:
   if (!url || !token) return { atividades: [], error: "Base da Receita não configurada." };
   if ((q || "").trim().length < 3) return { atividades: [] };
   try {
-    const res = await comTimeout(
-      fetch(`${url}/atividades?q=${encodeURIComponent(q.trim())}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
-      }),
+    const res = await fetchTimeout(
+      `${url}/atividades?q=${encodeURIComponent(q.trim())}`,
+      { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
       10_000
     );
     if (!res.ok) return { atividades: [], error: `Base respondeu ${res.status}` };
@@ -89,8 +83,9 @@ export async function buscarEmpresaPorCnpj(cnpj: string): Promise<{ empresa: Emp
   const d = (cnpj || "").replace(/\D/g, "");
   if (d.length !== 14) return { empresa: null, error: "CNPJ deve ter 14 dígitos." };
   try {
-    const res = await comTimeout(
-      fetch(`${url}/empresa/${d}`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
+    const res = await fetchTimeout(
+      `${url}/empresa/${d}`,
+      { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
       10_000
     );
     if (res.status === 404) return { empresa: null };
@@ -109,13 +104,14 @@ export async function buscarEmpresas(
   const { url, token } = cfg();
   if (!url || !token) return { rows: [], total: null, atividades: [], error: "Base da Receita não configurada." };
   try {
-    const res = await comTimeout(
-      fetch(`${url}/buscar`, {
+    const res = await fetchTimeout(
+      `${url}/buscar`,
+      {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(f),
         cache: "no-store",
-      }),
+      },
       25_000
     );
     const j = await res.json().catch(() => ({}));

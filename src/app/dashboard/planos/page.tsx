@@ -50,7 +50,7 @@ export default async function Planos() {
     .eq("id", tenantId ?? "")
     .maybeSingle();
 
-  const { count: seats } = await supabase.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId ?? "");
+  const { count: seats } = await supabase.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId ?? "").eq("is_active", true);
 
   // faturas do workspace (central de cobranças) — mais recentes primeiro
   const { data: invoices } = await supabase

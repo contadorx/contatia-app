@@ -48,7 +48,7 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
       supabase.from("pipeline_stages").select("id, name, position, is_won, is_lost").order("position", { ascending: true }),
       oppsQ,
       evsQ,
-      supabase.from("meetings").select("status, owner_id"),
+      supabase.from("meetings").select("status, assigned_to"),
       supabase.from("goals").select("mrr_target, touch_target").eq("user_id", vendedor || user?.id || "").eq("period", period).maybeSingle(),
       (vendedor
         ? supabase.from("opportunities").select("value_mrr").eq("status", "won").eq("owner_id", vendedor).gte("updated_at", monthStart)
@@ -65,7 +65,7 @@ export default async function Metricas({ searchParams }: { searchParams: { vende
   if (vendedor) {
     const ids = new Set(((assignedContacts as any[]) || []).map((c) => c.id));
     evs = evs.filter((e) => e.contact_id && ids.has(e.contact_id));
-    mtgs = mtgs.filter((m) => m.owner_id === vendedor);
+    mtgs = mtgs.filter((m) => m.assigned_to === vendedor);
   }
 
   const openOpps = oppList.filter((o) => o.status === "open");
