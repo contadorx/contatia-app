@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { scoreEvent } from "@/lib/scoring";
 import { renderTemplate } from "@/lib/cadence";
+import { buildEmailHtml } from "@/lib/richtext";
 
 async function ctx() {
   const supabase = createClient();
@@ -201,20 +202,11 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   const signature = (tnt as any)?.email_signature as string | undefined;
   const contact = (task as any).contacts || {};
   const sigRendered = signature?.trim() ? renderTemplate(signature, { name: contact.name, company: null, ...contact }) : "";
-  const sigIsHtml = /<[a-z][\s\S]*>/i.test(sigRendered); // tem tag HTML?
-
-  let html: string | undefined;
-  if (sigRendered) {
-    if (sigIsHtml) {
-      // corpo (texto) vira HTML simples + assinatura HTML abaixo
-      const bodyHtml = bodyText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
-      html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#16172A;line-height:1.5">${bodyHtml}<br><br>${sigRendered}</div>`;
-      // versão texto (fallback) sem as tags
-      bodyText = `${bodyText}\n\n${sigRendered.replace(/<[^>]+>/g, "").replace(/\s+\n/g, "\n").trim()}`;
-    } else {
-      bodyText = `${bodyText}\n\n${sigRendered}`;
-    }
-  }
+  // Monta o corpo final (corpo + assinatura), ciente de HTML: se o corpo OU a
+  // assinatura tiverem formatação, vai como HTML; senão, texto puro (legado).
+  const built = buildEmailHtml(bodyText, sigRendered);
+  const html = built.html;
+  bodyText = built.text;
 
   try {
     await sendEmail(acct as any, { to, subject: task.title || "", text: bodyText, html });

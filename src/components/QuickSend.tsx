@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { sendQuickEmail, sendQuickWhatsApp } from "@/app/dashboard/contatos/quick-send-actions";
+import RichTextEditor from "@/components/RichTextEditor";
 
 // Envio AVULSO (fora de cadência) direto da ficha do contato — ex.: mandar uma proposta
 // sem interromper/alterar a cadência ativa.
@@ -54,10 +55,14 @@ export default function QuickSend({ contactId, hasEmail, hasPhone }: { contactId
       </div>
 
       <div className="mt-3 space-y-2">
-        {canal === "email" && (
-          <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Assunto (ex.: Sua proposta)" />
+        {canal === "email" ? (
+          <>
+            <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Assunto (ex.: Sua proposta)" />
+            <RichTextEditor value={body} onChange={setBody} minHeight={120} placeholder="Escreva o e-mail…" />
+          </>
+        ) : (
+          <textarea className="input min-h-[110px]" value={body} onChange={(e) => setBody(e.target.value)} placeholder="Escreva a mensagem do WhatsApp…" />
         )}
-        <textarea className="input min-h-[110px]" value={body} onChange={(e) => setBody(e.target.value)} placeholder={canal === "email" ? "Escreva o e-mail…" : "Escreva a mensagem do WhatsApp…"} />
       </div>
 
       {msg && <p className={`mt-2 text-sm ${msg.t === "ok" ? "text-signal" : "text-danger"}`}>{msg.m}</p>}

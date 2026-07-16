@@ -1,8 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useRef, useTransition, type ChangeEvent } from "react";
 import { saveBusinessProfile } from "@/app/dashboard/config/actions";
+import { uploadBrandImage } from "@/app/dashboard/upload-actions";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
+
+const MAX_IMG = 512 * 1024; // 512 KB
 
 type Biz = {
   legal_name?: string | null;
@@ -42,10 +45,32 @@ export default function BusinessProfileForm({ biz, canEdit }: { biz: Biz; canEdi
   const [msg, setMsg] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
   const [pending, start] = useTransition();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [upBusy, setUpBusy] = useState(false);
+  const [upErr, setUpErr] = useState<string | null>(null);
 
   function up(k: string, v: string) {
     setF((s) => ({ ...s, [k]: v }));
     setOk(false);
+  }
+
+  async function onPickLogo(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUpErr(null);
+    if (file.size > MAX_IMG) {
+      setUpErr(`Imagem muito grande (${Math.round(file.size / 1024)} KB). O limite é 512 KB.`);
+      return;
+    }
+    setUpBusy(true);
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("kind", "logo");
+    const r = (await uploadBrandImage(fd)) as { url?: string; error?: string };
+    setUpBusy(false);
+    if (r?.error) return setUpErr(r.error);
+    if (r?.url) up("logo_url", r.url);
   }
   function save() {
     setMsg(null);
@@ -107,8 +132,24 @@ export default function BusinessProfileForm({ biz, canEdit }: { biz: Biz; canEdi
         <p className="mt-1 text-xs text-subtle">Aplicada na assinatura de e-mail e nos documentos/propostas que o cliente recebe.</p>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="label">URL do logotipo (PNG/SVG hospedado)</label>
-            <input className="input mt-1" value={f.logo_url} disabled={!canEdit} onChange={(e) => up("logo_url", e.target.value)} placeholder="https://empresa.com.br/logo.png" />
+            <label className="label">Logotipo</label>
+            <div className="mt-1 flex items-center gap-2">
+              <input className="input flex-1" value={f.logo_url} disabled={!canEdit} onChange={(e) => up("logo_url", e.target.value)} placeholder="Suba uma imagem ou cole uma URL" />
+              {canEdit && (
+                <button type="button" className="btn-ghost shrink-0 py-1.5 text-xs" disabled={upBusy} onClick={() => fileRef.current?.click()}>
+                  {upBusy ? "Enviando…" : "Enviar imagem"}
+                </button>
+              )}
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+              className="sr-only"
+              onChange={onPickLogo}
+            />
+            <p className="mt-1 text-[11px] text-subtle">PNG, JPG, SVG… até 512 KB. Fica hospedado numa URL pública (necessário para aparecer no e-mail).</p>
+            {upErr && <p className="mt-1 text-xs text-danger">{upErr}</p>}
           </div>
           <div>
             <label className="label">Cor da marca (hex)</label>

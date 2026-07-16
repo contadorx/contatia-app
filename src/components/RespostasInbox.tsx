@@ -13,6 +13,7 @@ import {
   fetchMedia,
 } from "@/app/dashboard/respostas/actions";
 import { waLink } from "@/lib/cadence";
+import RichTextEditor from "@/components/RichTextEditor";
 
 export type Thread = {
   key: string;
@@ -213,19 +214,18 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
               // e-mail: responder daqui sempre (usa a sua caixa; não depende do modo WhatsApp)
               <>
                 {active.subject && <p className="mb-1 text-[11px] text-subtle">Assunto: <b>Re: {active.subject.replace(/^re:\s*/i, "")}</b></p>}
-                <div className="flex items-end gap-2">
-                  <textarea
-                    className="input min-h-[44px] flex-1 text-sm"
-                    placeholder={active.contactId ? "Escreva sua resposta por e-mail…" : "Vincule o contato para responder…"}
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }}
-                  />
-                  <button className="btn-brand py-2 text-sm" disabled={pending || !text.trim() || !active.contactId} onClick={send}>
+                <RichTextEditor
+                  value={text}
+                  onChange={setText}
+                  minHeight={90}
+                  placeholder={active.contactId ? "Escreva sua resposta por e-mail…" : "Vincule o contato para responder…"}
+                />
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-subtle">Sai pela sua caixa (rotação/assinatura) e fica registrado aqui.</p>
+                  <button className="btn-brand shrink-0 py-1.5 text-sm" disabled={pending || !text.trim() || !active.contactId} onClick={send}>
                     {pending ? "…" : "Enviar"}
                   </button>
                 </div>
-                <p className="mt-1 text-[11px] text-subtle">Ctrl/⌘+Enter envia. Sai pela sua caixa (rotação/assinatura) e fica registrado aqui.</p>
               </>
             ) : canReply ? (
               <>

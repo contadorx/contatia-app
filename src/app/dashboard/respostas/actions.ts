@@ -159,7 +159,9 @@ export async function replyEmail(input: { contactId: string; subject: string; bo
   if (r?.error) return { error: r.error };
 
   const { data: c } = await supabase.from("contacts").select("email").eq("id", input.contactId).maybeSingle();
-  await supabase.from("email_messages").insert({ tenant_id, contact_id: input.contactId, email: (c as any)?.email || null, direction: "out", subject, text: body });
+  const { looksHtml, stripTags } = await import("@/lib/richtext");
+  const logText = looksHtml(body) ? stripTags(body) : body; // histórico legível, sem tags
+  await supabase.from("email_messages").insert({ tenant_id, contact_id: input.contactId, email: (c as any)?.email || null, direction: "out", subject, text: logText });
   await supabase.from("email_messages").update({ read_at: new Date().toISOString() }).eq("tenant_id", tenant_id).eq("contact_id", input.contactId).eq("direction", "in").is("read_at", null);
   revalidatePath("/dashboard/respostas");
   return { ok: true };

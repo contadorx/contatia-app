@@ -4,6 +4,7 @@ import { useState, useTransition, useEffect, useRef } from "react";
 import { createSequence, updateSequence, generateSequenceAI, loadAiContext, saveAiContext, opusRemaining, type StepInput } from "@/app/dashboard/cadencias/actions";
 import type { Channel } from "@/lib/cadence";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
+import RichTextEditor, { type RichTextHandle } from "@/components/RichTextEditor";
 
 const CHANNELS: { v: Channel; l: string }[] = [
   { v: "email", l: "E-mail" },
@@ -120,10 +121,16 @@ export default function SequenceBuilder({
     setSteps((s) => s.map((st, idx) => (idx === i ? { ...st, ...patch } : st)));
   }
 
-  // refs dos corpos + inserir variável no cursor
+  // refs dos corpos + inserir variável no cursor.
+  // E-mail usa o editor visual (RichTextHandle); os demais canais usam textarea.
   const bodyRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
+  const editorRefs = useRef<(RichTextHandle | null)[]>([]);
   function insertVar(i: number, v: string) {
     const token = `{{${v}}}`;
+    if (steps[i]?.channel === "email") {
+      editorRefs.current[i]?.insertText(token);
+      return;
+    }
     const el = bodyRefs.current[i];
     const cur = steps[i]?.body || "";
     if (!el) {
@@ -410,17 +417,46 @@ export default function SequenceBuilder({
             <p className="mt-1 text-[11px] text-subtle">
               Cada campo vira o dado do contato ao enviar. Os de <b>rapport</b> (Interesses, Contexto) personalizam sem custo de IA — use numa frase que também leia bem se estiver vazia.
             </p>
-            <textarea
-              ref={(el) => { bodyRefs.current[i] = el; }}
-              className="input mt-1 min-h-[150px] leading-relaxed"
-              value={s.body}
-              onChange={(e) => update(i, { body: e.target.value })}
-              placeholder="Mensagem. Use {{primeiro_nome}}, {{empresa}}..."
-            />
-            {s.body.trim() && (
-              <p className="mt-1 text-xs text-subtle">
-                Prévia: {s.body.replace(/\{\{\s*primeiro_nome\s*\}\}/g, "João").replace(/\{\{\s*empresa\s*\}\}/g, "Empresa X")}
-              </p>
+            {s.channel === "email" ? (
+              <>
+                <div className="mt-1">
+                  <RichTextEditor
+                    ref={(h) => { editorRefs.current[i] = h; }}
+                    value={s.body}
+                    onChange={(html) => update(i, { body: html })}
+                    minHeight={150}
+                    placeholder="Escreva o e-mail. Formate pelos botões e use {{primeiro_nome}}, {{empresa}}..."
+                  />
+                </div>
+                {s.body.trim() && (
+                  <div className="mt-2">
+                    <p className="label">Prévia (com dados de exemplo)</p>
+                    <div
+                      className="mt-1 rounded-lg border border-line bg-white p-3 text-sm"
+                      dangerouslySetInnerHTML={{
+                        __html: s.body
+                          .replace(/\{\{\s*primeiro_nome\s*\}\}/g, "João")
+                          .replace(/\{\{\s*empresa\s*\}\}/g, "Empresa X"),
+                      }}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <textarea
+                  ref={(el) => { bodyRefs.current[i] = el; }}
+                  className="input mt-1 min-h-[150px] leading-relaxed"
+                  value={s.body}
+                  onChange={(e) => update(i, { body: e.target.value })}
+                  placeholder="Mensagem. Use {{primeiro_nome}}, {{empresa}}..."
+                />
+                {s.body.trim() && (
+                  <p className="mt-1 text-xs text-subtle">
+                    Prévia: {s.body.replace(/\{\{\s*primeiro_nome\s*\}\}/g, "João").replace(/\{\{\s*empresa\s*\}\}/g, "Empresa X")}
+                  </p>
+                )}
+              </>
             )}
           </div>
         ))}

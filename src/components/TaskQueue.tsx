@@ -4,6 +4,7 @@ import { useTransition, useState, useEffect, useRef } from "react";
 import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask, sendAllEmailTasks, completeTasks } from "@/app/dashboard/task-actions";
 import { channelLabel, waLink, type Channel } from "@/lib/cadence";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
+import RichTextEditor from "@/components/RichTextEditor";
 
 type Task = {
   id: string;
@@ -372,11 +373,13 @@ export default function TaskQueue({
                   onChange={(e) => setEditing((s) => ({ ...s, [t.id]: { ...s[t.id], subject: e.target.value } }))}
                 />
                 <label className="label mt-2 block">Corpo</label>
-                <textarea
-                  className="input mt-1 min-h-[140px] text-sm"
-                  value={editing[t.id].body}
-                  onChange={(e) => setEditing((s) => ({ ...s, [t.id]: { ...s[t.id], body: e.target.value } }))}
-                />
+                <div className="mt-1">
+                  <RichTextEditor
+                    value={editing[t.id].body}
+                    onChange={(html) => setEditing((s) => ({ ...s, [t.id]: { ...s[t.id], body: html } }))}
+                    minHeight={140}
+                  />
+                </div>
                 <p className="mt-1 text-xs text-subtle">A assinatura do negócio é anexada automaticamente no envio. Variáveis como {"{{primeiro_nome}}"} são resolvidas.</p>
                 <div className="mt-2 flex gap-2">
                   <button className="btn-brand py-1.5 text-xs" disabled={pending} onClick={() => send(t.id, { subject: editing[t.id].subject, body: editing[t.id].body })}>
