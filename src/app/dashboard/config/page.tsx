@@ -67,11 +67,9 @@ export default async function Config() {
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("inbound_token, ai_model, ai_api_key, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature, whatsapp_mode, whatsapp_risk_ack_at, booking_enabled, booking_duration_min, booking_days, booking_start_hour, booking_end_hour, booking_title")
+    .select("inbound_token, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature, whatsapp_mode, whatsapp_risk_ack_at, booking_enabled, booking_duration_min, booking_days, booking_start_hour, booking_end_hour, booking_title")
     .maybeSingle();
   const inboundToken = (tenant as any)?.inbound_token as string | undefined;
-  const aiModel = ((tenant as any)?.ai_model as string) || "";
-  const aiHasKey = !!(tenant as any)?.ai_api_key;
 
   const { data: waAccounts } = await supabase
     .from("whatsapp_accounts")
@@ -97,7 +95,6 @@ export default async function Config() {
   // status de setup
   const idOk = !!(tenant as any)?.legal_name;
   const emailOk = rows.length > 0;
-  const aiOk = aiHasKey;
   const waLabel = waMode === "evolution" ? "automático" : waMode === "meta" ? "oficial" : "assistido";
 
   return (
@@ -115,7 +112,6 @@ export default async function Config() {
         <div className="mt-2 flex flex-wrap gap-2">
           <Chip ok={idOk} label="Identidade" />
           <Chip ok={emailOk} label="E-mail conectado" />
-          <Chip ok={aiOk} label="IA (chave)" />
           <span className="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-dark">WhatsApp: {waLabel}</span>
         </div>
       </div>
