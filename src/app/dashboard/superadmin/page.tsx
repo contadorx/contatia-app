@@ -94,6 +94,13 @@ export default async function Superadmin() {
     .eq("is_active", true)
     .order("sort", { ascending: true });
 
+  // escalonamentos da IA ainda não tratados (badge)
+  const { count: iaPend } = await supabase
+    .from("ai_conversations")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "escalated")
+    .eq("handled", false);
+
   // --- Engajamento: workspaces com atividade recente (exige service role) ---
   const now = Date.now();
   const d7 = new Date(now - 7 * 86400000).toISOString();
@@ -182,6 +189,10 @@ export default async function Superadmin() {
           <p className="mt-1 text-xs text-signal">✓ Régua de ciclo de vida ativa: boas-vindas, onboarding (D+1/D+3) e reengajamento (D+14) enviados automaticamente.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <a href="/dashboard/superadmin/ia" className="btn-ghost">
+            IA de atendimento →
+            {iaPend ? <span className="ml-1 rounded-full bg-danger px-1.5 text-[10px] font-bold text-white">{iaPend}</span> : null}
+          </a>
           <a href="/dashboard/superadmin/suporte" className="btn-ghost">Suporte →</a>
           <a href="/dashboard/superadmin/cobranca" className="btn-ghost">Cobrança →</a>
           <a href="/dashboard/superadmin/parceiros" className="btn-ghost">Parceiros & comissões →</a>
