@@ -3,44 +3,64 @@ import { createClient } from "@/lib/supabase/server";
 import AccountTools from "@/components/AccountTools";
 import AccountImport from "@/components/AccountImport";
 import AccountsCockpit from "@/components/AccountsCockpit";
+import { produtosPorContatos } from "@/lib/produtos";
 
 export const dynamic = "force-dynamic";
 
-export default async function Contas({ searchParams }: { searchParams: { tag?: string; q?: string } }) {
+export default async function Contas({ searchParams }: { searchParams: { tag?: string; q?: string; produto?: string } }) {
   const supabase = createClient();
   const q = (searchParams.q || "").trim();
   const qSafe = q.slice(0, 80).replace(/[,()%*]/g, " ").trim();
 
   let accountsQuery = supabase
     .from("accounts")
-    .select("id, name, uf, municipio, cnpj, domain, contacts(id, name, role_title, email, last_activity_at), opportunities(id, title, value_mrr, status), account_tags(tags(id, name, color))")
+    .select("id, name, uf, municipio, cnpj, domain, contacts(id, name, role_title, email, last_activity_at), opportunities(id, title, value_mrr, status, product_id, products(id, name)), account_tags(tags(id, name, color))")
     .order("created_at", { ascending: false })
     .limit(300);
   // busca por nome, CNPJ ou domínio
   if (qSafe) accountsQuery = accountsQuery.or(`name.ilike.%${qSafe}%,cnpj.ilike.%${qSafe}%,domain.ilike.%${qSafe}%`);
   const { data: accounts } = await accountsQuery;
 
-  const { data: allTags } = await supabase.from("tags").select("id, name, color").order("name", { ascending: true });
+  const [{ data: allTags }, { data: produtos }] = await Promise.all([
+    supabase.from("tags").select("id, name, color").order("name", { ascending: true }),
+    supabase.from("products").select("id, name").eq("active", true).order("name", { ascending: true }),
+  ]);
+  const produtoList = (produtos as { id: string; name: string }[]) || [];
 
-  let rows = ((accounts as any[]) || []).map((a) => ({
-    id: a.id,
-    name: a.name,
-    domain: a.domain,
-    cnpj: a.cnpj,
-    uf: a.uf,
-    municipio: a.municipio,
-    contacts: (a.contacts as any[]) || [],
-    opps: (a.opportunities as any[]) || [],
-    ultimo: (((a.contacts as any[]) || [])
-      .map((c) => c.last_activity_at)
-      .filter(Boolean)
-      .sort()
-      .pop()) || null,
-    tags: ((a.account_tags as any[]) || []).map((r) => r.tags).filter(Boolean),
-  }));
+  // produtos por contato (agregamos por empresa depois) — 2 queries no total
+  const todosContatoIds = ((accounts as any[]) || []).flatMap((a) => ((a.contacts as any[]) || []).map((c) => c.id));
+  const produtosPorId = await produtosPorContatos(supabase, todosContatoIds);
+
+  let rows = ((accounts as any[]) || []).map((a) => {
+    const contacts = (a.contacts as any[]) || [];
+    const opps = (a.opportunities as any[]) || [];
+    // produtos da empresa = união dos produtos dos contatos + produtos das oportunidades
+    const map = new Map<string, { id: string; name: string }>();
+    for (const c of contacts) for (const p of produtosPorId[c.id] || []) map.set(p.id, { id: p.id, name: p.name });
+    for (const o of opps) if (o.products?.id) map.set(o.products.id, { id: o.products.id, name: o.products.name });
+    return {
+      id: a.id,
+      name: a.name,
+      domain: a.domain,
+      cnpj: a.cnpj,
+      uf: a.uf,
+      municipio: a.municipio,
+      contacts,
+      opps,
+      produtos: Array.from(map.values()).sort((x, y) => x.name.localeCompare(y.name, "pt-BR")),
+      ultimo: (contacts
+        .map((c) => c.last_activity_at)
+        .filter(Boolean)
+        .sort()
+        .pop()) || null,
+      tags: ((a.account_tags as any[]) || []).map((r) => r.tags).filter(Boolean),
+    };
+  });
 
   const tagFilter = searchParams.tag || "";
   if (tagFilter) rows = rows.filter((a) => a.tags.some((t: any) => t.id === tagFilter));
+  const produtoFilter = searchParams.produto || "";
+  if (produtoFilter) rows = rows.filter((a) => a.produtos.some((p) => p.id === produtoFilter));
 
   return (
     <div>
@@ -75,13 +95,33 @@ export default async function Contas({ searchParams }: { searchParams: { tag?: s
           {((allTags as any[]) || []).map((t) => (
             <Link
               key={t.id}
-              href={`/dashboard/contas?tag=${t.id}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
+              href={`/dashboard/contas?tag=${t.id}${q ? `&q=${encodeURIComponent(q)}` : ""}${produtoFilter ? `&produto=${produtoFilter}` : ""}`}
               className="rounded-full px-2 py-0.5 text-xs font-medium"
               style={tagFilter === t.id ? { background: t.color, color: "#fff" } : { background: `${t.color}20`, color: t.color }}
             >
               {t.name}
             </Link>
           ))}
+        </div>
+      )}
+
+      {/* filtro por produto */}
+      {produtoList.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-subtle">Produto:</span>
+          {[{ id: "", name: "Todos" }, ...produtoList].map((p) => {
+            const params = new URLSearchParams();
+            if (q) params.set("q", q);
+            if (tagFilter) params.set("tag", tagFilter);
+            if (p.id) params.set("produto", p.id);
+            const href = `/dashboard/contas${params.toString() ? `?${params.toString()}` : ""}`;
+            const ativo = produtoFilter === p.id;
+            return (
+              <Link key={p.id || "todos"} href={href} className={`rounded-full px-2 py-0.5 text-xs font-medium ${ativo ? "bg-brand text-white" : "border border-brand/25 bg-brand/5 text-brand-dark hover:bg-brand/10"}`}>
+                {p.name}
+              </Link>
+            );
+          })}
         </div>
       )}
 

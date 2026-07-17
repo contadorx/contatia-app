@@ -32,11 +32,13 @@ export default function ContactsTable({
   sequences,
   members,
   tags = [],
+  products = {},
 }: {
   contacts: Contact[];
   sequences: Seq[];
   members: Member[];
   tags?: Tag[];
+  products?: Record<string, { id: string; name: string }[]>;
 }) {
   const router = useRouter();
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -263,6 +265,15 @@ export default function ContactsTable({
                             </span>
                           ) : null
                         )}
+                      </div>
+                    )}
+                    {(products[c.id]?.length ?? 0) > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {products[c.id].map((p) => (
+                          <span key={p.id} className="rounded-full border border-brand/25 bg-brand/5 px-1.5 py-0.5 text-[10px] font-medium text-brand-dark">
+                            {p.name}
+                          </span>
+                        ))}
                       </div>
                     )}
                   </td>

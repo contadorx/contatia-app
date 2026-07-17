@@ -8,6 +8,7 @@ import { UltimoToque } from "@/lib/lastTouch";
 type Tag = { id: string; name: string; color: string };
 type Contact = { id: string; name: string; role_title?: string | null; email?: string | null };
 type Opp = { id: string; title: string; value_mrr: number; status: string };
+type Produto = { id: string; name: string };
 type Row = {
   id: string;
   name: string;
@@ -17,6 +18,7 @@ type Row = {
   municipio?: string | null;
   contacts: Contact[];
   opps: Opp[];
+  produtos?: Produto[];
   ultimo?: string | null;
   tags: Tag[];
 };
@@ -57,6 +59,15 @@ export default function AccountsCockpit({ rows, allTags }: { rows: Row[]; allTag
                   <td className="px-4 py-3">
                     <Link href={`/dashboard/contas/${a.id}`} className="font-medium text-brand-dark hover:underline">{a.name}</Link>
                     <p className="text-xs text-subtle">{[a.cnpj, a.domain].filter(Boolean).join(" · ") || "—"}</p>
+                    {(a.produtos?.length ?? 0) > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {a.produtos!.map((p) => (
+                          <span key={p.id} className="rounded-full border border-brand/25 bg-brand/5 px-1.5 py-0.5 text-[10px] font-medium text-brand-dark">
+                            {p.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-subtle">{[a.municipio, a.uf].filter(Boolean).join("/") || "—"}</td>
                   <td className="px-4 py-3"><UltimoToque at={a.ultimo} titulo="Última atividade em algum contato desta empresa." /></td>

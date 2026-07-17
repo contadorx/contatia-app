@@ -3,12 +3,16 @@ import ContactTools from "@/components/ContactTools";
 import ContactsTable from "@/components/ContactsTable";
 import Link from "next/link";
 import { isManager } from "@/lib/permissions";
+import { produtosPorContatos, contatoIdsPorProduto } from "@/lib/produtos";
 
 export const dynamic = "force-dynamic";
 
-export default async function Contatos({ searchParams }: { searchParams: { tag?: string; q?: string; frio?: string } }) {
+const NENHUM = "00000000-0000-0000-0000-000000000000";
+
+export default async function Contatos({ searchParams }: { searchParams: { tag?: string; q?: string; frio?: string; produto?: string } }) {
   const supabase = createClient();
   const tagFilter = searchParams.tag;
+  const produtoFilter = searchParams.produto || "";
   const frio = searchParams.frio || ""; // "15" | "30" | "nunca"
   const q = (searchParams.q || "").trim();
   // sanitiza para o filtro .or() do PostgREST (vírgula/parênteses/% têm significado)
@@ -23,11 +27,18 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
   const { data: tags } = await supabase.from("tags").select("id, name, color").order("name", { ascending: true });
   const { count: suggestionCount } = await supabase.from("contact_suggestions").select("id", { count: "exact", head: true }).eq("status", "pending");
 
-  // se filtrando por tag, pega os contact_ids com aquela tag
-  let idsWithTag: string[] | null = null;
+  // Filtros que restringem por lista de IDs (tag e produto). Intersectamos.
+  const idConstraints: string[][] = [];
   if (tagFilter) {
     const { data: ct } = await supabase.from("contact_tags").select("contact_id").eq("tag_id", tagFilter);
-    idsWithTag = ((ct as any[]) || []).map((r) => r.contact_id);
+    idConstraints.push(((ct as any[]) || []).map((r) => r.contact_id));
+  }
+  if (produtoFilter) {
+    idConstraints.push(await contatoIdsPorProduto(supabase, produtoFilter));
+  }
+  let idsFiltro: string[] | null = null;
+  if (idConstraints.length) {
+    idsFiltro = idConstraints.reduce((acc, cur) => acc.filter((id) => cur.includes(id)));
   }
 
   let contactsQuery = supabase
@@ -36,7 +47,7 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
     .order("score", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(200);
-  if (idsWithTag) contactsQuery = contactsQuery.in("id", idsWithTag.length ? idsWithTag : ["00000000-0000-0000-0000-000000000000"]);
+  if (idsFiltro) contactsQuery = contactsQuery.in("id", idsFiltro.length ? idsFiltro : [NENHUM]);
   if (!gerente) contactsQuery = contactsQuery.eq("assigned_to", user?.id ?? "");
   // busca por nome, e-mail ou empresa
   if (qSafe) contactsQuery = contactsQuery.or(`name.ilike.%${qSafe}%,email.ilike.%${qSafe}%,company.ilike.%${qSafe}%`);
@@ -49,15 +60,23 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
     contactsQuery = contactsQuery.or(`last_activity_at.is.null,last_activity_at.lt.${corte.toISOString()}`);
   }
 
-  const [{ data: contacts }, { data: sequences }, { data: members }] = await Promise.all([
+  const [{ data: contacts }, { data: sequences }, { data: members }, { data: produtos }] = await Promise.all([
     contactsQuery,
     supabase.from("sequences").select("id, name").eq("is_active", true).order("created_at", { ascending: false }),
     supabase.from("profiles").select("id, full_name, email").eq("is_active", true),
+    supabase.from("products").select("id, name").eq("active", true).order("name", { ascending: true }),
   ]);
 
   const seqs = (sequences as { id: string; name: string }[]) || [];
   const memberList = (members as { id: string; full_name: string | null; email: string }[]) || [];
   const tagList = (tags as { id: string; name: string; color: string }[]) || [];
+  const produtoList = (produtos as { id: string; name: string }[]) || [];
+
+  // produtos por contato (para as etiquetas na lista) — 2 queries, não N
+  const contatoIds = ((contacts as any[]) || []).map((c) => c.id);
+  const produtosPorId = await produtosPorContatos(supabase, contatoIds);
+  const produtosContato: Record<string, { id: string; name: string }[]> = {};
+  for (const [cid, arr] of Object.entries(produtosPorId)) produtosContato[cid] = arr.map((p) => ({ id: p.id, name: p.name }));
 
   return (
     <div>
@@ -115,6 +134,27 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
         </div>
       )}
 
+      {/* Filtro por produto */}
+      {produtoList.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-subtle">Produto:</span>
+          {[{ id: "", name: "Todos" }, ...produtoList].map((p) => {
+            const params = new URLSearchParams();
+            if (q) params.set("q", q);
+            if (tagFilter) params.set("tag", tagFilter);
+            if (frio) params.set("frio", frio);
+            if (p.id) params.set("produto", p.id);
+            const href = `/dashboard/contatos${params.toString() ? `?${params.toString()}` : ""}`;
+            const ativo = produtoFilter === p.id;
+            return (
+              <Link key={p.id || "todos"} href={href} className={`rounded-full px-3 py-1 text-xs ${ativo ? "bg-brand text-white" : "border border-brand/25 bg-brand/5 text-brand-dark hover:bg-brand/10"}`}>
+                {p.name}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
       {/* Filtro por último toque (carteira fria) */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className="text-xs text-subtle">Último toque:</span>
@@ -127,6 +167,7 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
           const params = new URLSearchParams();
           if (q) params.set("q", q);
           if (tagFilter) params.set("tag", tagFilter);
+          if (produtoFilter) params.set("produto", produtoFilter);
           if (o.k) params.set("frio", o.k);
           const href = `/dashboard/contatos${params.toString() ? `?${params.toString()}` : ""}`;
           const ativo = frio === o.k;
@@ -139,7 +180,7 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
       </div>
 
       <div className="mt-4">
-        <ContactsTable contacts={(contacts as any[]) || []} sequences={seqs} members={memberList} tags={tagList} />
+        <ContactsTable contacts={(contacts as any[]) || []} sequences={seqs} members={memberList} tags={tagList} products={produtosContato} />
       </div>
     </div>
   );
