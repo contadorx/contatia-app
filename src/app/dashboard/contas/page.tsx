@@ -21,11 +21,13 @@ export default async function Contas({ searchParams }: { searchParams: { tag?: s
   if (qSafe) accountsQuery = accountsQuery.or(`name.ilike.%${qSafe}%,cnpj.ilike.%${qSafe}%,domain.ilike.%${qSafe}%`);
   const { data: accounts } = await accountsQuery;
 
-  const [{ data: allTags }, { data: produtos }] = await Promise.all([
+  const [{ data: allTags }, { data: produtos }, { data: members }] = await Promise.all([
     supabase.from("tags").select("id, name, color").order("name", { ascending: true }),
     supabase.from("products").select("id, name").eq("active", true).order("name", { ascending: true }),
+    supabase.from("profiles").select("id, full_name, email").eq("is_active", true),
   ]);
   const produtoList = (produtos as { id: string; name: string }[]) || [];
+  const memberList = (members as { id: string; full_name: string | null; email: string }[]) || [];
 
   // produtos por contato (agregamos por empresa depois) — 2 queries no total
   const todosContatoIds = ((accounts as any[]) || []).flatMap((a) => ((a.contacts as any[]) || []).map((c) => c.id));
@@ -126,7 +128,7 @@ export default async function Contas({ searchParams }: { searchParams: { tag?: s
       )}
 
       <div className="mt-6">
-        <AccountsCockpit rows={rows} allTags={(allTags as any[]) || []} />
+        <AccountsCockpit rows={rows} allTags={(allTags as any[]) || []} members={memberList} />
       </div>
     </div>
   );

@@ -191,6 +191,69 @@ export async function deleteAccountCompany(id: string) {
   return { ok: true };
 }
 
+// ============================================================
+// AÇÕES EM LOTE (seleção múltipla na lista de Empresas) — espelho do que
+// existe em Contatos: aplicar tags, atribuir responsável, excluir.
+// ============================================================
+
+// Aplica UMA ou VÁRIAS tags a várias empresas de uma vez.
+export async function bulkTagAccounts(accountIds: string[], tags: string | string[]) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const ids = (accountIds || []).filter(Boolean);
+  const tagIds = (Array.isArray(tags) ? tags : [tags]).filter(Boolean);
+  if (!ids.length || !tagIds.length) return { error: "Selecione empresas e ao menos uma tag." };
+  const rows = ids.flatMap((account_id) => tagIds.map((tag_id) => ({ tenant_id, account_id, tag_id })));
+  const { error } = await supabase.from("account_tags").upsert(rows, { onConflict: "account_id,tag_id", ignoreDuplicates: true });
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/contas");
+  return { ok: true, count: ids.length, tags: tagIds.length };
+}
+
+// Atribui responsável (owner) a várias empresas.
+export async function bulkAssignAccounts(accountIds: string[], userId: string | null) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const ids = (accountIds || []).filter(Boolean);
+  if (!ids.length) return { error: "Nenhuma empresa selecionada." };
+  const { error } = await supabase.from("accounts").update({ owner_id: userId }).eq("tenant_id", tenant_id).in("id", ids);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/contas");
+  revalidatePath("/dashboard/equipe");
+  return { ok: true, count: ids.length };
+}
+
+// Exclui várias empresas. Os contatos vinculados ficam órfãos (account_id → null), não são apagados.
+export async function bulkDeleteAccounts(accountIds: string[]) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const ids = (accountIds || []).filter(Boolean);
+  if (!ids.length) return { error: "Nenhuma empresa selecionada." };
+  const { error } = await supabase.from("accounts").delete().eq("tenant_id", tenant_id).in("id", ids);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/contas");
+  revalidatePath("/dashboard/contatos");
+  return { ok: true, count: ids.length };
+}
+
+// Cria uma tag (para o criador inline na lista de Empresas).
+export async function createTagAccounts(name: string, color?: string) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  if (!name.trim()) return { error: "Nome da tag vazio." };
+  const { data, error } = await supabase
+    .from("tags")
+    .insert({ tenant_id, name: name.trim(), color: color || "#4A3AFF" })
+    .select("id, name, color")
+    .single();
+  if (error) {
+    if (error.code === "23505") return { error: "Já existe uma tag com esse nome." };
+    return { error: error.message };
+  }
+  revalidatePath("/dashboard/contas");
+  return { ok: true, tag: data };
+}
+
 // Cria UM contato a partir de um sócio específico (botão por sócio, igual à ficha do contato).
 export async function criarContatoSocio(accountId: string, nomeSocio: string) {
   const { supabase, tenant_id, user_id } = await ctx();
