@@ -23,7 +23,7 @@ export default function FeedbackWidget() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-20 right-5 z-40 flex h-10 items-center gap-1.5 rounded-full border border-line bg-white px-3 text-xs font-medium text-subtle shadow-md hover:text-ink"
+        className="fixed bottom-6 right-20 z-40 flex h-10 items-center gap-1.5 rounded-full border border-line bg-white px-3 text-xs font-medium text-subtle shadow-md hover:text-ink"
         title="Deixar feedback"
       >
         ★ Feedback

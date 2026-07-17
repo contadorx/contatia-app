@@ -12,11 +12,38 @@ type Msg = { role: "user" | "assistant"; content: string };
 export function HelpWidget() {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"chat" | "ticket">("chat");
+  const [teaser, setTeaser] = useState(false);
+
+  // balão proativo (1x por sessão) para o cliente notar que a ajuda existe
+  useEffect(() => {
+    let seen = false;
+    try { seen = !!sessionStorage.getItem("ct_help_seen"); } catch {}
+    if (seen) return;
+    const t = setTimeout(() => setTeaser(true), 6000);
+    return () => clearTimeout(t);
+  }, []);
+  function markSeen() { try { sessionStorage.setItem("ct_help_seen", "1"); } catch {} }
+  function openHelp() { setOpen(true); setMode("chat"); setTeaser(false); markSeen(); }
 
   return (
     <>
+      {teaser && !open && (
+        <div
+          className="fixed bottom-20 right-5 z-40 max-w-[240px] cursor-pointer rounded-2xl rounded-br-sm border border-line bg-white p-3 pr-7 text-sm text-ink shadow-lg"
+          onClick={openHelp}
+        >
+          <button
+            className="absolute right-2 top-1.5 text-subtle hover:text-ink"
+            aria-label="Fechar"
+            onClick={(e) => { e.stopPropagation(); setTeaser(false); markSeen(); }}
+          >
+            ✕
+          </button>
+          👋 Precisa de ajuda? Posso responder na hora.
+        </div>
+      )}
       <button
-        onClick={() => { setOpen(true); setMode("chat"); }}
+        onClick={openHelp}
         className="fixed bottom-5 right-5 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-brand text-white shadow-lg hover:bg-brand-dark"
         aria-label="Ajuda"
         title="Ajuda"
