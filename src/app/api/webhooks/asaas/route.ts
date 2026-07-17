@@ -58,7 +58,7 @@ export async function POST(req: Request) {
         if ((tRow as any)?.asaas_subscription_id) {
           const base = dueDate ? new Date(dueDate) : new Date();
           base.setMonth(base.getMonth() + 1);
-          await admin.from("tenants").update({ subscription_status: "active", current_period_end: base.toISOString().slice(0, 10), ...(value ? { mrr: value } : {}) }).eq("id", (inv as any).tenant_id);
+          await admin.from("tenants").update({ subscription_status: "active", current_period_end: base.toISOString().slice(0, 10), suspended_at: null, archived_at: null, ...(value ? { mrr: value } : {}) }).eq("id", (inv as any).tenant_id);
           // reseta a régua de cobrança: pagou → pode disparar de novo num próximo atraso
           await admin.from("business_message_sends").delete().eq("tenant_id", (inv as any).tenant_id);
         }

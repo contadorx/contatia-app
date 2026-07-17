@@ -8,6 +8,7 @@ import { MobileNav } from "@/components/MobileNav";
 import { stopImpersonation } from "@/app/dashboard/superadmin/impersonate-actions";
 import { HelpWidget } from "@/components/HelpWidget";
 import FeedbackWidget from "@/components/FeedbackWidget";
+import SuspendedGate from "@/components/SuspendedGate";
 import CreateWorkspace from "@/components/CreateWorkspace";
 
 export const dynamic = "force-dynamic";
@@ -82,6 +83,32 @@ export default async function DashboardLayout({
     subStatus = (t as any)?.subscription_status;
   }
   const showSubBanner = !isSuperadmin && (!subStatus || ["trialing", "pending", "past_due", "canceled"].includes(subStatus));
+
+  // CONTA SUSPENSA (D+10 da régua de cobrança): no lugar do app, uma tela de REATIVAÇÃO
+  // com caminho de volta (pagar e reativar, já paguei, falar com a gente). Recupera churn.
+  // Superadmin (inclusive em modo suporte) não é bloqueado.
+  if (!isSuperadmin && (subStatus === "suspended" || subStatus === "archived") && profile?.tenant_id) {
+    const { data: inv } = await supabase
+      .from("platform_invoices")
+      .select("amount, payment_link")
+      .eq("tenant_id", profile.tenant_id)
+      .in("status", ["pending", "overdue"])
+      .order("due_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+    return (
+      <>
+        <SuspendedGate
+          amount={(inv as any)?.amount ?? null}
+          paymentLink={(inv as any)?.payment_link ?? null}
+          planosUrl={`${appUrl}/dashboard/planos`}
+          archived={subStatus === "archived"}
+        />
+        <HelpWidget />
+      </>
+    );
+  }
 
   // uso × limites (avisa a partir de 80%, bloqueia no limite)
   const usos = profile?.tenant_id && !isSuperadmin ? await getUsage() : [];

@@ -131,7 +131,7 @@ export async function runBilling(admin: any): Promise<{ sent: number; suspended:
       if (step.key !== CREATED_KEY && (Number(step.trigger_days) || 0) >= maxTrigger) {
         const { data: tt } = await admin.from("tenants").select("subscription_status").eq("id", inv.tenant_id).maybeSingle();
         if ((tt as any)?.subscription_status !== "suspended") {
-          await admin.from("tenants").update({ subscription_status: "suspended" }).eq("id", inv.tenant_id);
+          await admin.from("tenants").update({ subscription_status: "suspended", suspended_at: new Date().toISOString() }).eq("id", inv.tenant_id);
           suspended++;
         }
       }

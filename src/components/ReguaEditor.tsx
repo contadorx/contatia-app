@@ -3,9 +3,10 @@
 import { useState, useTransition } from "react";
 import { saveBusinessMessage } from "@/app/dashboard/superadmin/comunicacao/actions";
 
+type Track = "comunicacao" | "cobranca" | "retencao";
 type Msg = {
   key: string;
-  track: "comunicacao" | "cobranca";
+  track: Track;
   label: string;
   enabled: boolean;
   trigger_days: number;
@@ -14,19 +15,24 @@ type Msg = {
 };
 
 export default function ReguaEditor({ messages }: { messages: Msg[] }) {
-  const [track, setTrack] = useState<"comunicacao" | "cobranca">("comunicacao");
+  const [track, setTrack] = useState<Track>("comunicacao");
   const list = messages.filter((m) => m.track === track);
+  const labels: Record<Track, string> = {
+    comunicacao: "Ciclo de vida",
+    cobranca: "Cobrança",
+    retencao: "Retenção",
+  };
 
   return (
     <div>
       <div className="mb-4 flex gap-2">
-        {(["comunicacao", "cobranca"] as const).map((t) => (
+        {(["comunicacao", "cobranca", "retencao"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTrack(t)}
             className={`rounded-full px-3 py-1 text-xs font-medium ${track === t ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}
           >
-            {t === "comunicacao" ? "Ciclo de vida" : "Cobrança (vencidos)"}
+            {labels[t]}
           </button>
         ))}
       </div>
@@ -36,6 +42,13 @@ export default function ReguaEditor({ messages }: { messages: Msg[] }) {
           Régua pró-ativa por fatura: avisa a <b>criação da fatura</b>, manda <b>preventivos antes de vencer</b> (D-3, D-1)
           e cobra <b>após o vencimento</b> (D+1, D+5, D+10). Na última etapa a conta é <b>suspensa automaticamente</b>.
           Use os tokens <code>{"{{link}}"}</code> (pagamento), <code>{"{{valor}}"}</code> e <code>{"{{venc}}"}</code>.
+        </p>
+      )}
+      {track === "retencao" && (
+        <p className="mb-3 rounded-lg bg-warn/10 p-3 text-xs text-warn">
+          Depois da suspensão: aos <b>30 dias</b> um e-mail de <b>última chance</b>; aos <b>60 dias</b> a conta é
+          <b> arquivada</b> e os <b>dados dos leads são apagados</b> (LGPD) — a conta e as faturas são mantidas, e o
+          cliente pode reativar e reimportar. Contagem a partir da suspensão.
         </p>
       )}
 
@@ -49,6 +62,7 @@ export default function ReguaEditor({ messages }: { messages: Msg[] }) {
 }
 
 function quando(track: string, key: string, n: number): string {
+  if (track === "retencao") return `${n} dia(s) após a suspensão`;
   if (track !== "cobranca") return `a partir de ${n} dia(s)`;
   if (key === "bill_created") return "ao criar a fatura";
   if (n < 0) return `${-n} dia(s) antes de vencer`;

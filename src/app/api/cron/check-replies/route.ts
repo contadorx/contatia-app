@@ -270,6 +270,17 @@ export async function GET(req: Request) {
     errors.push(`cobranca: ${e?.message || "erro"}`);
   }
 
+  // régua de retenção (30d última chance; 60d arquiva + apaga dados dos leads)
+  let retention = { warned: 0, archived: 0 };
+  try {
+    const { runRetention } = await import("@/lib/retention");
+    const rt = await runRetention(admin);
+    retention = { warned: rt.warned, archived: rt.archived };
+    if (rt.errors.length) errors.push(...rt.errors);
+  } catch (e: any) {
+    errors.push(`retencao: ${e?.message || "erro"}`);
+  }
+
   // sincronia com CRMs (push de leads quentes; pull de ganhos/perdas)
   let crm = { pushed: 0, failed: 0, pulled: 0 };
   try {
@@ -288,5 +299,5 @@ export async function GET(req: Request) {
     errors.push(`discovery: ${e?.message || "erro"}`);
   }
 
-  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, autoRan, purged, reminders, seatsSynced, lifecycle, dunning, crm, discovery, errors });
+  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, autoRan, purged, reminders, seatsSynced, lifecycle, dunning, retention, crm, discovery, errors });
 }
