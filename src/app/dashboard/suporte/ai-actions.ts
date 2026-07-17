@@ -8,11 +8,16 @@ import { notifyEscalation } from "@/lib/aiNotify";
 const MAX_USER_MSGS = 40;
 
 // Config da IA de suporte para inicializar o widget (saudação editável + on/off).
-export async function supportGreeting(): Promise<{ enabled: boolean; greeting: string }> {
+// Retorna "reason" quando indisponível — ajuda a diagnosticar (migration/env).
+export async function supportGreeting(): Promise<{ enabled: boolean; greeting: string; reason?: string }> {
   const admin = createAdminClient();
-  if (!admin) return { enabled: false, greeting: "" };
-  const { data } = await admin.from("ai_assistants").select("enabled, greeting").eq("kind", "support").maybeSingle();
-  return { enabled: !!(data as any)?.enabled, greeting: (data as any)?.greeting || "Como posso ajudar?" };
+  if (!admin) return { enabled: false, greeting: "", reason: "Falta SUPABASE_SERVICE_ROLE_KEY no ambiente." };
+  const { data, error } = await admin.from("ai_assistants").select("enabled, greeting").eq("kind", "support").maybeSingle();
+  if (error) return { enabled: false, greeting: "", reason: "Rode a migration 0080 (tabelas da IA não existem)." };
+  if (!data) return { enabled: false, greeting: "", reason: "Migration 0080 rodou, mas o assistente de suporte não foi semeado." };
+  if (!process.env.ANTHROPIC_API_KEY) return { enabled: false, greeting: "", reason: "Falta ANTHROPIC_API_KEY no ambiente." };
+  if (!(data as any).enabled) return { enabled: false, greeting: "", reason: "A IA de suporte está desligada no painel." };
+  return { enabled: true, greeting: (data as any).greeting || "Como posso ajudar?" };
 }
 
 // Chat de SUPORTE (cliente logado). A IA responde com base na KB; quando não

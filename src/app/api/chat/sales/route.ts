@@ -31,16 +31,23 @@ export async function OPTIONS(req: NextRequest) {
   return new NextResponse(null, { status: 204, headers: cors(req.headers.get("origin")) });
 }
 
-// GET → o widget do site inicializa com a saudação editável + on/off.
+// GET → o widget inicializa com a saudação (on/off). Também serve de DIAGNÓSTICO:
+// abra a URL no navegador — o campo "reason" diz exatamente o que falta configurar.
 export async function GET(req: NextRequest) {
   const headers = cors(req.headers.get("origin"));
   const admin = createAdminClient();
-  if (!admin) return NextResponse.json({ enabled: false }, { headers });
-  const { data } = await admin.from("ai_assistants").select("enabled, greeting").eq("kind", "sales").maybeSingle();
-  return NextResponse.json(
-    { enabled: !!(data as any)?.enabled, greeting: (data as any)?.greeting || "Oi! Como posso ajudar?" },
-    { headers }
-  );
+  if (!admin)
+    return NextResponse.json({ enabled: false, reason: "Falta SUPABASE_SERVICE_ROLE_KEY no ambiente (Vercel)." }, { headers });
+  const { data, error } = await admin.from("ai_assistants").select("enabled, greeting").eq("kind", "sales").maybeSingle();
+  if (error)
+    return NextResponse.json({ enabled: false, reason: "Rode a migration 0080 — a tabela ai_assistants não existe.", detail: error.message }, { headers });
+  if (!data)
+    return NextResponse.json({ enabled: false, reason: "A migration 0080 rodou, mas o assistente de vendas não foi semeado." }, { headers });
+  if (!process.env.ANTHROPIC_API_KEY)
+    return NextResponse.json({ enabled: !!(data as any).enabled, reason: "Falta ANTHROPIC_API_KEY no ambiente (Vercel).", greeting: (data as any).greeting }, { headers });
+  if (!(data as any).enabled)
+    return NextResponse.json({ enabled: false, reason: "A IA de vendas está desligada no painel (superadmin → IA)." }, { headers });
+  return NextResponse.json({ enabled: true, greeting: (data as any).greeting || "Oi! Como posso ajudar?" }, { headers });
 }
 
 export async function POST(req: NextRequest) {
@@ -55,9 +62,12 @@ export async function POST(req: NextRequest) {
   const message = (body?.message || "").toString().slice(0, 2000).trim();
   if (!message) return NextResponse.json({ error: "mensagem vazia" }, { status: 400, headers });
 
-  const { data: asst } = await admin.from("ai_assistants").select("*").eq("kind", "sales").maybeSingle();
+  const { data: asst, error: asstErr } = await admin.from("ai_assistants").select("*").eq("kind", "sales").maybeSingle();
+  if (asstErr) return NextResponse.json({ reply: "Atendimento fora do ar no momento.", debug: "migration 0080 não rodou: " + asstErr.message }, { headers });
   if (!asst || !(asst as any).enabled)
-    return NextResponse.json({ error: "indisponível" }, { status: 403, headers });
+    return NextResponse.json({ reply: "Nosso atendimento por aqui está fora do ar. Escreva para suporte@contatia.com.br 🙂", debug: "assistant ausente ou desligado" }, { headers });
+  if (!process.env.ANTHROPIC_API_KEY)
+    return NextResponse.json({ reply: "Atendimento fora do ar no momento.", debug: "falta ANTHROPIC_API_KEY" }, { headers });
 
   // circuit-breaker global do dia
   const since = new Date();
@@ -101,7 +111,7 @@ export async function POST(req: NextRequest) {
   const system = buildSystem((asst as any).brain);
   const r = await assistantReply({ system, messages: msgs, model: (asst as any).model || undefined });
   if (r.error)
-    return NextResponse.json({ conversationId: convId, reply: "Ops, tive um problema aqui. Pode tentar de novo?", escalated: false }, { headers });
+    return NextResponse.json({ conversationId: convId, reply: "Ops, tive um problema aqui. Pode tentar de novo?", escalated: false, debug: r.error }, { headers });
   const reply = r.text || "Pode reformular?";
 
   await admin.from("ai_messages").insert([

@@ -52,12 +52,13 @@ function SupportChat({ onOpenTicket }: { onOpenTicket: () => void }) {
   const [convId, setConvId] = useState<string | undefined>();
   const [escalated, setEscalated] = useState(false);
   const [disabled, setDisabled] = useState(false);
+  const [reason, setReason] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     supportGreeting().then((g) => {
-      if (!g.enabled) { setDisabled(true); return; }
+      if (!g.enabled) { setDisabled(true); setReason(g.reason || null); return; }
       setMsgs([{ role: "assistant", content: g.greeting }]);
     });
   }, []);
@@ -83,6 +84,7 @@ function SupportChat({ onOpenTicket }: { onOpenTicket: () => void }) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
         <p className="text-sm text-subtle">O atendimento por IA está indisponível no momento.</p>
+        {reason && <p className="rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">Config: {reason}</p>}
         <button className="btn-brand py-1.5 text-sm" onClick={onOpenTicket}>Abrir um chamado</button>
       </div>
     );

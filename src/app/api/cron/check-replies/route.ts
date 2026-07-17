@@ -259,6 +259,17 @@ export async function GET(req: Request) {
     errors.push(`lifecycle: ${e?.message || "erro"}`);
   }
 
+  // régua de cobrança (dunning: lembrete D+1, aviso D+5, suspensão D+10)
+  let dunning = { sent: 0, suspended: 0 };
+  try {
+    const { runDunning } = await import("@/lib/dunning");
+    const dn = await runDunning(admin);
+    dunning = { sent: dn.sent, suspended: dn.suspended };
+    if (dn.errors.length) errors.push(...dn.errors);
+  } catch (e: any) {
+    errors.push(`dunning: ${e?.message || "erro"}`);
+  }
+
   // sincronia com CRMs (push de leads quentes; pull de ganhos/perdas)
   let crm = { pushed: 0, failed: 0, pulled: 0 };
   try {
@@ -277,5 +288,5 @@ export async function GET(req: Request) {
     errors.push(`discovery: ${e?.message || "erro"}`);
   }
 
-  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, autoRan, purged, reminders, seatsSynced, lifecycle, crm, discovery, errors });
+  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, autoRan, purged, reminders, seatsSynced, lifecycle, dunning, crm, discovery, errors });
 }

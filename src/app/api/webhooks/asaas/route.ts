@@ -57,6 +57,8 @@ export async function POST(req: Request) {
           const base = dueDate ? new Date(dueDate) : new Date();
           base.setMonth(base.getMonth() + 1);
           await admin.from("tenants").update({ subscription_status: "active", current_period_end: base.toISOString().slice(0, 10), ...(value ? { mrr: value } : {}) }).eq("id", (inv as any).tenant_id);
+          // reseta a régua de cobrança: pagou → pode disparar de novo num próximo atraso
+          await admin.from("business_message_sends").delete().eq("tenant_id", (inv as any).tenant_id);
         }
       } else if (event === "PAYMENT_OVERDUE") {
         await admin.from("platform_invoices").update({ status: "overdue" }).eq("id", (inv as any).id);

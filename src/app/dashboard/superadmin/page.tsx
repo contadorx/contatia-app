@@ -194,7 +194,10 @@ export default async function Superadmin() {
             {iaPend ? <span className="ml-1 rounded-full bg-danger px-1.5 text-[10px] font-bold text-white">{iaPend}</span> : null}
           </a>
           <a href="/dashboard/superadmin/suporte" className="btn-ghost">Suporte →</a>
+          <a href="/dashboard/superadmin/comunicacao" className="btn-ghost">Comunicação →</a>
           <a href="/dashboard/superadmin/cobranca" className="btn-ghost">Cobrança →</a>
+          <a href="/dashboard/superadmin/emails" className="btn-ghost">E-mails →</a>
+          <a href="/dashboard/superadmin/feedbacks" className="btn-ghost">Feedbacks →</a>
           <a href="/dashboard/superadmin/parceiros" className="btn-ghost">Parceiros & comissões →</a>
         </div>
       </div>

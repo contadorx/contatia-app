@@ -7,6 +7,7 @@ import DashboardNav from "@/components/DashboardNav";
 import { MobileNav } from "@/components/MobileNav";
 import { stopImpersonation } from "@/app/dashboard/superadmin/impersonate-actions";
 import { HelpWidget } from "@/components/HelpWidget";
+import FeedbackWidget from "@/components/FeedbackWidget";
 import CreateWorkspace from "@/components/CreateWorkspace";
 
 export const dynamic = "force-dynamic";
@@ -191,6 +192,7 @@ export default async function DashboardLayout({
       </main>
       </div>
       <HelpWidget />
+      <FeedbackWidget />
     </div>
   );
 }
