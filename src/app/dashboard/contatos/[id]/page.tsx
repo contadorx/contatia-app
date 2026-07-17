@@ -14,8 +14,10 @@ import ContactCadences from "@/components/ContactCadences";
 import EditContactButton from "@/components/EditContactButton";
 import DeleteContactButton from "@/components/DeleteContactButton";
 import ContactExtras from "@/components/ContactExtras";
+import ProdutoBadges from "@/components/ProdutoBadges";
 import { EmailVerifyBadge, DecisorFinder, TestEmailBox } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
+import { produtosDoContato } from "@/lib/produtos";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +71,8 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
       supabase.from("meetings").select("id, title, datetime, status").eq("contact_id", params.id).order("datetime", { ascending: false }),
       supabase.from("opportunities").select("id, title, value_mrr, status").eq("primary_contact_id", params.id).order("created_at", { ascending: false }),
     ]);
+
+  const produtos = await produtosDoContato(supabase, params.id);
 
   const c = contact as any;
   const score = c.score ?? 0;
@@ -174,6 +178,8 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
             )}
           </div>
         </div>
+
+        <ProdutoBadges produtos={produtos} />
       </div>
 
       {/* Empresa (Receita Federal) + Rapport */}

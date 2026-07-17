@@ -9,6 +9,8 @@ import EditAccountButton from "@/components/EditAccountButton";
 import EnrichAccountButton from "@/components/EnrichAccountButton";
 import DeleteAccountButton from "@/components/DeleteAccountButton";
 import AccountTags from "@/components/AccountTags";
+import ProdutoBadges from "@/components/ProdutoBadges";
+import { produtosDaEmpresa } from "@/lib/produtos";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +59,7 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
   const cs = (contacts as any[]) || [];
   const os = (opps as any[]) || [];
   const myTags = ((accountTags as any[]) || []).map((r) => r.tags).filter(Boolean);
+  const produtos = await produtosDaEmpresa(supabase, params.id, cs.map((c) => c.id));
 
   return (
     <div>
@@ -79,6 +82,10 @@ export default async function ContaDetalhe({ params }: { params: { id: string } 
           <EditAccountButton account={account as any} />
           <DeleteAccountButton accountId={account.id} name={account.name} />
         </div>
+      </div>
+
+      <div className="card mt-4 p-4">
+        <ProdutoBadges produtos={produtos} divider={false} vazio="Nenhum contato desta empresa está inscrito em um produto ainda." />
       </div>
 
       {hasDetails && (
