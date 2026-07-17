@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { canCreate, mensagemLimite } from "@/lib/plan";
 import { buscarAtividades, buscarEmpresas, buscarEmpresaPorCnpj, receitaConfigurada, type FiltroReceita } from "@/lib/receita";
+import { nomeProprio } from "@/lib/cnpj";
 
 async function ctx() {
   const supabase = createClient();
@@ -144,7 +145,7 @@ export async function enviarParaCadastro(empresas: any[]) {
     if (vistos.has(cnpj)) { pulados++; continue; }
     vistos.add(cnpj);
 
-    const nomeEmpresa = (e.nome_fantasia || e.razao_social || "").trim() || cnpj;
+    const nomeEmpresa = nomeProprio((e.nome_fantasia || e.razao_social || "").trim()) || cnpj;
     const email = (e.email || "").trim().toLowerCase() || null;
     const dominio = email && email.includes("@") ? email.split("@")[1] : null;
 
@@ -160,7 +161,7 @@ export async function enviarParaCadastro(empresas: any[]) {
           cnpj,
           cnae: e.cnae ? (e.cnae_descricao ? `${e.cnae} — ${e.cnae_descricao}` : e.cnae) : null,
           uf: e.uf || null,
-          municipio: e.municipio || null,
+          municipio: nomeProprio(e.municipio) || null,
           domain: dominio,
           phone: e.telefone || null,
         })
@@ -185,7 +186,7 @@ export async function enviarParaCadastro(empresas: any[]) {
       tenant_id,
       assigned_to: user_id ?? null,
       name: nomeEmpresa,
-      company: e.razao_social || e.nome_fantasia || null,
+      company: nomeProprio(e.razao_social || e.nome_fantasia) || null,
       account_id,
       cnpj,
       email,

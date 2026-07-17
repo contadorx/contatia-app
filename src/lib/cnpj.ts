@@ -27,6 +27,33 @@ function onlyDigits(s: string) {
   return (s || "").replace(/\D/g, "");
 }
 
+// Nome próprio PT-BR: "JOÃO DA SILVA" → "João da Silva"; "METALÚRGICA ZENIT LTDA" →
+// "Metalúrgica Zenit LTDA". Conectores minúsculos (da/de/do/e...), siglas em caixa alta.
+// Usado no enriquecimento para não jogar CAIXA ALTA nas fichas e nas variáveis do e-mail.
+const NOME_MINUSC = new Set(["de", "da", "do", "das", "dos", "e", "di", "du", "del", "la", "y"]);
+const NOME_SIGLAS = new Set(["ltda", "me", "epp", "eireli", "mei", "sa", "s/a", "s.a", "cia", "ss", "eic"]);
+function capPalavra(w: string): string {
+  return w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+}
+export function nomeProprio(raw?: string | null): string | undefined {
+  const s = (raw || "").trim().replace(/\s+/g, " ");
+  if (!s) return undefined;
+  // se já tem mistura de maiúsc/minúsc (provavelmente bem digitado), não mexe
+  const temMinuscula = /[a-zà-ÿ]/.test(s);
+  const temMaiuscula = /[A-ZÀ-Þ]/.test(s);
+  if (temMinuscula && temMaiuscula) return s;
+  return s
+    .toLowerCase()
+    .split(" ")
+    .map((w, i) => {
+      const bare = w.replace(/[.,]/g, "");
+      if (NOME_SIGLAS.has(w) || NOME_SIGLAS.has(bare)) return w.toUpperCase();
+      if (i > 0 && NOME_MINUSC.has(w)) return w;
+      return w.split("-").map(capPalavra).join("-").split("/").map(capPalavra).join("/");
+    })
+    .join(" ");
+}
+
 // User-Agent explícito: a BrasilAPI fica atrás de Cloudflare, que responde 403 a
 // requisições sem User-Agent. Um UA identificável resolve.
 const UA = "Contatia/1.0 (+https://contatia.com.br)";
@@ -152,27 +179,28 @@ export async function enrichCnpj(cnpjRaw: string): Promise<{ data?: CnpjData; er
   if (!base && !externo) return { error: ext.error || "Não foi possível enriquecer." };
 
   // merge: base ganha no núcleo; o externo preenche o que a base não tem
+  const sociosRaw = externo?.socios?.length ? externo.socios : base?.socios;
   const data: CnpjData = {
-    razao_social: pref(base?.razao_social, externo?.razao_social),
-    nome_fantasia: pref(base?.nome_fantasia, externo?.nome_fantasia),
+    razao_social: nomeProprio(pref(base?.razao_social, externo?.razao_social)),
+    nome_fantasia: nomeProprio(pref(base?.nome_fantasia, externo?.nome_fantasia)),
     cnae: pref(base?.cnae, externo?.cnae),
     cnae_descricao: pref(base?.cnae_descricao, externo?.cnae_descricao),
     uf: pref(base?.uf, externo?.uf),
-    municipio: pref(base?.municipio, externo?.municipio),
+    municipio: nomeProprio(pref(base?.municipio, externo?.municipio)),
     situacao: pref(base?.situacao, externo?.situacao),
     porte: pref(base?.porte, externo?.porte),
     email: pref(base?.email, externo?.email),
     telefone: pref(base?.telefone, externo?.telefone),
     telefone2: pref(base?.telefone2, externo?.telefone2),
-    bairro: pref(base?.bairro, externo?.bairro),
+    bairro: nomeProprio(pref(base?.bairro, externo?.bairro)),
     cep: pref(base?.cep, externo?.cep),
     // só o externo costuma ter estes:
-    logradouro: pref(externo?.logradouro, base?.logradouro),
+    logradouro: nomeProprio(pref(externo?.logradouro, base?.logradouro)),
     numero: pref(externo?.numero, base?.numero),
     complemento: pref(externo?.complemento, base?.complemento),
-    socios: externo?.socios?.length ? externo.socios : base?.socios,
+    socios: sociosRaw?.map((s) => nomeProprio(s) || s).filter(Boolean),
     capital_social: pref(externo?.capital_social, base?.capital_social),
-    natureza_juridica: pref(externo?.natureza_juridica, base?.natureza_juridica),
+    natureza_juridica: nomeProprio(pref(externo?.natureza_juridica, base?.natureza_juridica)),
     abertura: pref(externo?.abertura, base?.abertura),
   };
 

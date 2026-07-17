@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { canCreate, mensagemLimite } from "@/lib/plan";
+import { nomeProprio } from "@/lib/cnpj";
 
 const soDig = (s: any) => String(s || "").replace(/\D/g, "");
 const normNome = (s: any) =>
@@ -194,7 +195,7 @@ export async function deleteAccountCompany(id: string) {
 export async function criarContatoSocio(accountId: string, nomeSocio: string) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
-  const nome = (nomeSocio || "").trim();
+  const nome = nomeProprio(nomeSocio) || "";
   if (!nome) return { error: "Nome do sócio vazio." };
 
   const lim = await canCreate("contatos");
@@ -243,7 +244,7 @@ export async function criarContatosDosSocios(accountId: string) {
   let criados = 0;
   let pulados = 0;
   for (const nomeRaw of socios) {
-    const nome = String(nomeRaw || "").trim();
+    const nome = nomeProprio(nomeRaw) || "";
     if (!nome || jaTem.has(normNome(nome))) { pulados++; continue; }
     const { error } = await supabase.from("contacts").insert({
       tenant_id,
@@ -365,11 +366,11 @@ export async function importEmpresasCsv(csv: string) {
     const c = lines[i].split(delim);
     const get = (k: number) => (k >= 0 ? (c[k] || "").trim() : "");
     const cnpj = soDig(get(col.cnpj));
-    const nome = get(col.fantasia) || get(col.razao) || (cnpj ? cnpj : "");
+    const nome = nomeProprio(get(col.fantasia) || get(col.razao)) || (cnpj ? cnpj : "");
     if (!nome) continue;
     const email = get(col.email).toLowerCase() || null;
     const telefone = get(col.telefone) || null;
-    const contatoNome = get(col.contato) || null;
+    const contatoNome = nomeProprio(get(col.contato)) || null;
     const dominio = get(col.domain) || (email && email.includes("@") ? email.split("@")[1] : "") || null;
 
     const chave = cnpj || normNome(nome);
@@ -389,7 +390,7 @@ export async function importEmpresasCsv(csv: string) {
           cnpj: cnpj.length === 14 ? cnpj : null,
           cnae: get(col.cnae) || null,
           uf: get(col.uf).toUpperCase() || null,
-          municipio: get(col.municipio) || null,
+          municipio: nomeProprio(get(col.municipio)) || null,
           domain: dominio,
           phone: telefone,
         })
