@@ -259,15 +259,15 @@ export async function GET(req: Request) {
     errors.push(`lifecycle: ${e?.message || "erro"}`);
   }
 
-  // régua de cobrança (dunning: lembrete D+1, aviso D+5, suspensão D+10)
+  // régua de cobrança pró-ativa (fatura criada, preventivos D-3/D-1, dunning D+1/D+5/D+10)
   let dunning = { sent: 0, suspended: 0 };
   try {
-    const { runDunning } = await import("@/lib/dunning");
-    const dn = await runDunning(admin);
+    const { runBilling } = await import("@/lib/dunning");
+    const dn = await runBilling(admin);
     dunning = { sent: dn.sent, suspended: dn.suspended };
     if (dn.errors.length) errors.push(...dn.errors);
   } catch (e: any) {
-    errors.push(`dunning: ${e?.message || "erro"}`);
+    errors.push(`cobranca: ${e?.message || "erro"}`);
   }
 
   // sincronia com CRMs (push de leads quentes; pull de ganhos/perdas)

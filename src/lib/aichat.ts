@@ -43,7 +43,9 @@ export async function assistantReply(input: {
 }): Promise<{ text?: string; escalate?: boolean; error?: string }> {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return { error: "IA indisponível (configuração do servidor)." };
-  const model = input.model || process.env.ANTHROPIC_CHAT_MODEL || process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
+  // Haiku por padrão (barato e confirmado na conta). Para trocar, defina
+  // ANTHROPIC_CHAT_MODEL no ambiente (ex.: claude-sonnet-4-5).
+  const model = input.model || process.env.ANTHROPIC_CHAT_MODEL || "claude-haiku-4-5";
 
   // manda só as últimas mensagens (janela) para conter custo/contexto
   const msgs = input.messages.slice(-14).map((m) => ({ role: m.role, content: m.content }));
@@ -56,7 +58,7 @@ export async function assistantReply(input: {
     });
     if (!res.ok) {
       const t = await res.text();
-      return { error: `IA ${res.status}: ${t.slice(0, 160)}` };
+      return { error: `IA ${res.status} (modelo ${model}): ${t.slice(0, 160)}` };
     }
     const data = await res.json();
     let text = (data.content || [])

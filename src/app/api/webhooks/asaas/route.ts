@@ -46,6 +46,8 @@ export async function POST(req: Request) {
         if (invoiceUrl && !(inv as any).payment_link) {
           await admin.from("platform_invoices").update({ payment_link: invoiceUrl }).eq("id", (inv as any).id);
         }
+        // régua pró-ativa: avisa o cliente que a fatura foi criada (com o link)
+        await import("@/lib/dunning").then((m) => m.sendInvoiceCreated(admin, (inv as any).id)).catch(() => {});
         return NextResponse.json({ ok: true, event, invoice: (inv as any).id, note: "link garantido" });
       }
       if (event === "PAYMENT_CONFIRMED" || event === "PAYMENT_RECEIVED") {
@@ -83,6 +85,9 @@ export async function POST(req: Request) {
           asaas_subscription_id: subId || null,
           status: "pending",
         }, { onConflict: "asaas_payment_id", ignoreDuplicates: true });
+        // régua pró-ativa: avisa o cliente que a fatura foi criada (com o link)
+        const { data: created } = await admin.from("platform_invoices").select("id").eq("asaas_payment_id", payId).maybeSingle();
+        if (created) await import("@/lib/dunning").then((m) => m.sendInvoiceCreated(admin, (created as any).id)).catch(() => {});
         return NextResponse.json({ ok: true, event, note: "fatura criada a partir do Asaas" });
       }
     }

@@ -33,8 +33,9 @@ export default function ReguaEditor({ messages }: { messages: Msg[] }) {
 
       {track === "cobranca" && (
         <p className="mb-3 rounded-lg bg-warn/10 p-3 text-xs text-warn">
-          A régua de cobrança dispara para assinantes em atraso, uma etapa por dia. Na etapa de maior
-          atraso (suspensão), a conta é <b>suspensa automaticamente</b>. Ao pagar, a régua reseta sozinha.
+          Régua pró-ativa por fatura: avisa a <b>criação da fatura</b>, manda <b>preventivos antes de vencer</b> (D-3, D-1)
+          e cobra <b>após o vencimento</b> (D+1, D+5, D+10). Na última etapa a conta é <b>suspensa automaticamente</b>.
+          Use os tokens <code>{"{{link}}"}</code> (pagamento), <code>{"{{valor}}"}</code> e <code>{"{{venc}}"}</code>.
         </p>
       )}
 
@@ -45,6 +46,14 @@ export default function ReguaEditor({ messages }: { messages: Msg[] }) {
       </div>
     </div>
   );
+}
+
+function quando(track: string, key: string, n: number): string {
+  if (track !== "cobranca") return `a partir de ${n} dia(s)`;
+  if (key === "bill_created") return "ao criar a fatura";
+  if (n < 0) return `${-n} dia(s) antes de vencer`;
+  if (n === 0) return "no dia do vencimento";
+  return `${n} dia(s) de atraso`;
 }
 
 function MsgCard({ m }: { m: Msg }) {
@@ -75,7 +84,7 @@ function MsgCard({ m }: { m: Msg }) {
         <div className="min-w-0">
           <p className="text-sm font-semibold">{m.label}</p>
           <p className="text-xs text-subtle">
-            {m.track === "cobranca" ? `dispara com ${days} dia(s) de atraso` : `a partir de ${days} dia(s)`} ·{" "}
+            {quando(m.track, m.key, Number(days) || 0)} ·{" "}
             <span className={enabled ? "text-signal" : "text-subtle"}>{enabled ? "ativa" : "desligada"}</span>
           </p>
         </div>
@@ -101,9 +110,14 @@ function MsgCard({ m }: { m: Msg }) {
       {open && (
         <div className="mt-3 space-y-2 border-t border-line pt-3">
           <div className="flex items-center gap-2">
-            <label className="label">{m.track === "cobranca" ? "Dias de atraso" : "A partir de (dias)"}</label>
-            <input className="input w-24 text-sm" type="number" min={0} value={days} onChange={(e) => setDays(e.target.value)} />
+            <label className="label">
+              {m.track === "cobranca" ? "Gatilho (negativo = antes de vencer; positivo = após)" : "A partir de (dias)"}
+            </label>
+            <input className="input w-24 text-sm" type="number" value={days} onChange={(e) => setDays(e.target.value)} />
           </div>
+          {m.track === "cobranca" && m.key !== "bill_created" && (
+            <p className="text-[11px] text-subtle">Ex.: <b>-3</b> = 3 dias antes de vencer · <b>1</b> = 1 dia após vencer.</p>
+          )}
           <div>
             <label className="label block">Assunto</label>
             <input className="input mt-1 text-sm" value={subject} onChange={(e) => setSubject(e.target.value)} />
