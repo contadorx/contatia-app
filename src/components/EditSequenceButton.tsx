@@ -55,12 +55,23 @@ export default function EditSequenceButton({ sequenceId, products = [], accounts
         disabled={pending}
         title="Excluir esta cadência"
         onClick={() => {
-          if (!confirm("Excluir esta cadência? (bloqueado se houver contatos ativos nela)")) return;
+          if (!confirm("Excluir esta cadência?")) return;
           start(async () => {
             setMsg(null);
             const r = (await deleteSequence(sequenceId)) as any;
+            if (r?.ok) return router.refresh();
+            if (r?.needsConfirm) {
+              // Há contatos ativos/pausados: confirma remover e excluir mesmo assim.
+              const ok = confirm(
+                `${r.error} Ao excluir, esses contatos saem da cadência e da fila de toques. Excluir mesmo assim?`
+              );
+              if (!ok) { setMsg("Exclusão cancelada."); return; }
+              const r2 = (await deleteSequence(sequenceId, true)) as any;
+              if (r2?.error) setMsg(r2.error);
+              else router.refresh();
+              return;
+            }
             if (r?.error) setMsg(r.error);
-            else router.refresh();
           });
         }}
       >

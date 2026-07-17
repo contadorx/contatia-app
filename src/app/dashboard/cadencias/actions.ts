@@ -454,13 +454,21 @@ export async function resumeEnrollment(enrollmentId: string) {
 }
 
 // Exclui uma cadência. Bloqueia se houver inscrições ativas/pausadas (evita perder trabalho).
-export async function deleteSequence(id: string) {
+export async function deleteSequence(id: string, force = false) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const { count } = await supabase.from("enrollments").select("id", { count: "exact", head: true }).eq("sequence_id", id).in("status", ["active", "paused"]);
-  if ((count ?? 0) > 0) return { error: `Há ${count} contato(s) ativo(s)/pausado(s) nesta cadência. Pause ou conclua antes de excluir.` };
+  const ativos = count ?? 0;
+  // Sem force: bloqueia e avisa (para o usuário confirmar). Devolve o total para a UI.
+  if (ativos > 0 && !force) {
+    return { needsConfirm: true, active: ativos, error: `Há ${ativos} contato(s) ativo(s)/pausado(s) nesta cadência.` };
+  }
+  // Com force: apaga a cadência mesmo com contatos dentro. Os enrollments desses contatos
+  // (e as tasks pendentes deles) são removidos em cascata pelo banco (FK on delete cascade),
+  // ou seja, esses contatos saem da cadência e da fila de toques automaticamente.
   const { error } = await supabase.from("sequences").delete().eq("id", id).eq("tenant_id", tenant_id);
   if (error) return { error: error.message };
   revalidatePath("/dashboard/cadencias");
-  return { ok: true };
+  revalidatePath("/dashboard");
+  return { ok: true, removed: ativos };
 }
