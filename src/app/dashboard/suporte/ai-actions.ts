@@ -113,16 +113,22 @@ export async function supportChat(input: {
       .map((m) => `${m.role === "user" ? "Cliente" : "IA"}: ${m.content}`)
       .join("\n");
 
+    // cria o chamado no suporte SE a tabela existir (migration 0027); se não, segue
+    // só com o e-mail + registro da conversa — o escalonamento nunca se perde.
     let ticketId: string | undefined;
     if (tenant_id) {
-      const { data: t } = await admin
-        .from("support_tickets")
-        .insert({ tenant_id, opened_by: user.id, subject: "Atendimento via IA (encaminhado)", priority: "normal", status: "open" })
-        .select("id")
-        .single();
-      ticketId = (t as any)?.id;
-      if (ticketId)
-        await admin.from("support_messages").insert({ ticket_id: ticketId, author_id: user.id, from_staff: false, body: transcript });
+      try {
+        const { data: t, error: te } = await admin
+          .from("support_tickets")
+          .insert({ tenant_id, opened_by: user.id, subject: "Atendimento via IA (encaminhado)", priority: "normal", status: "open" })
+          .select("id")
+          .single();
+        if (!te) {
+          ticketId = (t as any)?.id;
+          if (ticketId)
+            await admin.from("support_messages").insert({ ticket_id: ticketId, author_id: user.id, from_staff: false, body: transcript });
+        }
+      } catch { /* sem support_tickets no banco: segue sem chamado */ }
     }
     await admin
       .from("ai_conversations")

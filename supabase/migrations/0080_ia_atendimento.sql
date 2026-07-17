@@ -32,7 +32,7 @@ create table if not exists public.ai_conversations (
   status        text not null default 'active' check (status in ('active','escalated','resolved')),
   handled       boolean not null default false,   -- você já deu o retorno?
   source        text,                              -- 'app' | 'site'
-  ticket_id     uuid references public.support_tickets(id) on delete set null,
+  ticket_id     uuid,                              -- id do support_ticket gerado (sem FK: não depende da 0027)
   msg_count     int not null default 0,
   created_at    timestamptz not null default now(),
   last_at       timestamptz not null default now()
