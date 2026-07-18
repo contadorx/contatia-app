@@ -10,6 +10,7 @@ import {
   createContactFromThread,
   blockThread,
   deleteThread,
+  deleteThreadsBulk,
   fetchMedia,
 } from "@/app/dashboard/respostas/actions";
 import { waLink } from "@/lib/cadence";
@@ -48,11 +49,39 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
   const [err, setErr] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<"block" | "delete" | null>(null);
   const [pending, start] = useTransition();
+  // seleção múltipla (só WhatsApp — é o canal com exclusão)
+  const [selMode, setSelMode] = useState(false);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
 
   const active = threads.find((t) => t.key === sel) || null;
   const visibleThreads = busca
     ? threads.filter((t) => `${t.name} ${t.phone} ${snippet(t)}`.toLowerCase().includes(busca.toLowerCase()))
     : threads;
+  const visibleWa = visibleThreads.filter((t) => t.channel === "whatsapp");
+
+  function toggleCheck(key: string) {
+    setChecked((s) => {
+      const n = new Set(s);
+      n.has(key) ? n.delete(key) : n.add(key);
+      return n;
+    });
+    setErr(null);
+  }
+  function toggleAllWa() {
+    setChecked((s) => (visibleWa.every((t) => s.has(t.key)) ? new Set() : new Set(visibleWa.map((t) => t.key))));
+    setErr(null);
+  }
+  function sairSelecao() {
+    setSelMode(false);
+    setChecked(new Set());
+    setErr(null);
+  }
+  function excluirSelecionadas() {
+    const alvos = threads.filter((t) => t.channel === "whatsapp" && checked.has(t.key)).map((t) => ({ phone: t.phone, contactId: t.contactId }));
+    if (!alvos.length) return;
+    if (!window.confirm(`Excluir ${alvos.length} conversa(s) de WhatsApp? As mensagens desses números são apagadas da caixa. Isso não pode ser desfeito.`)) return;
+    act(() => deleteThreadsBulk(alvos), () => { sairSelecao(); setSel(null); });
+  }
 
   useEffect(() => {
     setConfirm(null);
@@ -100,17 +129,54 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
             placeholder="Buscar conversa…"
             className="input py-1.5 text-sm"
           />
+          {/* barra de seleção múltipla (WhatsApp) */}
+          <div className="mt-2 flex items-center justify-between gap-2 px-1 text-xs">
+            {!selMode ? (
+              <button className="font-medium text-subtle hover:text-brand" onClick={() => setSelMode(true)} disabled={!visibleWa.length}>
+                Selecionar conversas
+              </button>
+            ) : (
+              <>
+                <label className="flex items-center gap-1.5 text-subtle">
+                  <input
+                    type="checkbox"
+                    checked={visibleWa.length > 0 && visibleWa.every((t) => checked.has(t.key))}
+                    onChange={toggleAllWa}
+                  />
+                  {checked.size > 0 ? `${checked.size} selecionada(s)` : "Selecionar todas (WhatsApp)"}
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="rounded-lg bg-danger px-2 py-1 font-bold text-white disabled:opacity-40"
+                    disabled={pending || checked.size === 0}
+                    onClick={excluirSelecionadas}
+                  >
+                    Excluir
+                  </button>
+                  <button className="text-subtle hover:text-ink" onClick={sairSelecao}>Cancelar</button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
         <div className="divide-y divide-line">
         {visibleThreads.length === 0 && (
           <p className="p-4 text-sm text-subtle">Nenhuma conversa para “{busca}”.</p>
         )}
-        {visibleThreads.map((t) => (
+        {visibleThreads.map((t) => {
+          const selectable = selMode && t.channel === "whatsapp";
+          const isChecked = checked.has(t.key);
+          return (
           <button
             key={t.key}
-            onClick={() => setSel(t.key)}
-            className={`flex w-full items-start gap-2 p-3 text-left transition ${sel === t.key ? "bg-brand-soft/50" : "hover:bg-muted"}`}
+            onClick={() => (selectable ? toggleCheck(t.key) : setSel(t.key))}
+            className={`flex w-full items-start gap-2 p-3 text-left transition ${
+              selectable && isChecked ? "bg-brand-soft/60" : sel === t.key && !selMode ? "bg-brand-soft/50" : "hover:bg-muted"
+            } ${selMode && t.channel === "email" ? "opacity-50" : ""}`}
           >
+            {selectable && (
+              <input type="checkbox" checked={isChecked} readOnly className="mt-0.5 shrink-0" aria-label={`Selecionar ${t.name}`} />
+            )}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <span className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase ${t.channel === "email" ? "bg-brand-soft text-brand-dark" : "bg-signal/15 text-signal"}`}>
@@ -123,7 +189,8 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
             </div>
             <span className="shrink-0 text-[10px] text-subtle">{fmt(t.lastAt).split(" ")[0]}</span>
           </button>
-        ))}
+          );
+        })}
         </div>
       </div>
 

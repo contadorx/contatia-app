@@ -289,10 +289,17 @@ async function candidatosCadenciaTerminada(admin: DB, rule: any, cutoff: string)
   // contatos que já estão ativos no escopo → não recuperar
   const ativos = await contatosAtivosNoProduto(admin, rule.tenant_id, rule.product_id || null);
 
+  // quem RESPONDEU no escopo (cadência de origem / produto) fica FORA da recuperação:
+  // respondeu = engajou, não é um lead "esfriado". Vale para qualquer enrollment do
+  // escopo cujo status seja 'replied'.
+  const repliers = new Set<string>();
+  for (const e of list) if (e.status === "replied") repliers.add(e.contact_id);
+
   const out = new Set<string>();
   for (const e of list) {
     if (pend.get(e.id)) continue;               // ainda tem toque pendente → não terminou
     if (ativos.has(e.contact_id)) continue;      // já sendo trabalhado
+    if (repliers.has(e.contact_id)) continue;    // respondeu → engajou, não recupera
     const fim = ultimaTask.get(e.id) || e.started_at; // "fim" = última ação (ou início se sem tarefas)
     if (fim && fim < cutoff) out.add(e.contact_id);
   }

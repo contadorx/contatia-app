@@ -62,6 +62,29 @@ export async function deleteThread(input: { phone: string; contactId?: string | 
   return { ok: true };
 }
 
+// Exclui VÁRIAS conversas de WhatsApp de uma vez (apaga as mensagens de cada número/contato).
+export async function deleteThreadsBulk(threads: { phone: string; contactId?: string | null }[]) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const list = (threads || []).filter((t) => t && (t.contactId || t.phone));
+  if (!list.length) return { error: "Nenhuma conversa selecionada." };
+
+  // Separa em dois lotes: por contato (com contact_id) e por telefone solto (sem contato).
+  const contactIds = Array.from(new Set(list.map((t) => t.contactId).filter(Boolean))) as string[];
+  const phones = Array.from(new Set(list.filter((t) => !t.contactId).map((t) => (t.phone || "").trim()).filter(Boolean)));
+
+  if (contactIds.length) {
+    const { error } = await supabase.from("whatsapp_messages").delete().eq("tenant_id", tenant_id).in("contact_id", contactIds);
+    if (error) return { error: error.message };
+  }
+  if (phones.length) {
+    const { error } = await supabase.from("whatsapp_messages").delete().eq("tenant_id", tenant_id).in("phone", phones).is("contact_id", null);
+    if (error) return { error: error.message };
+  }
+  revalidatePath("/dashboard/respostas");
+  return { ok: true, count: list.length };
+}
+
 // Busca a mídia de uma mensagem sob demanda (não armazena nada).
 export async function fetchMedia(messageId: string): Promise<{ dataUrl?: string; error?: string }> {
   const { supabase, tenant_id } = await ctx();
