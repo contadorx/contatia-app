@@ -87,10 +87,10 @@ export async function buscarNaBase(input: any, offset = 0) {
     return { ok: true, total: rows.length, atividades: [], rows, offset: 0 };
   }
   if (busca.length >= 3) {
-    // texto → procura em razão social + nome fantasia; não força "só com e-mail"
+    // texto → procura em razão social + nome fantasia. RESPEITA os checkboxes de
+    // e-mail marcados na tela (com_email / email_corporativo vêm de montarFiltro):
+    // se o usuário pediu "só e-mail empresarial", o termo NÃO deve furar esse filtro.
     f.termo = busca;
-    f.com_email = false;
-    f.email_corporativo = false;
   }
 
   if (!f.atividade && !f.cnae && !f.uf && !f.termo) {
