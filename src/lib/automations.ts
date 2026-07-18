@@ -94,6 +94,14 @@ async function applyAction(
       await db.from("opportunities").update({ stage_id: rule.action_stage }).eq("contact_id", contactId).eq("status", "open");
       return true;
     }
+    case "add_tag": {
+      if (!rule.action_tag) return false;
+      await db.from("contact_tags").upsert(
+        { tenant_id: tenantId, contact_id: contactId, tag_id: rule.action_tag },
+        { onConflict: "contact_id,tag_id", ignoreDuplicates: true }
+      );
+      return true;
+    }
     case "enroll": {
       if (!rule.action_seq) return false;
       // evita duplicar: só inscreve se não houver enrollment ativo nessa sequência
@@ -111,6 +119,200 @@ async function applyAction(
     default:
       return false;
   }
+}
+
+// ============================================================
+// AUTOMAÇÕES POR TEMPO (rodam 1x/dia no cron). Cobrem os gatilhos que dependem
+// de "há X dias": no_activity_days, cadence_completed, opportunity_lost/won.
+// Todas respeitam o escopo por PRODUTO (rule.product_id) quando definido, para
+// que "sem atividade" signifique "sem atividade NAQUELE produto".
+// ============================================================
+const TIME_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won"];
+
+export async function runTimeAutomations(admin: DB): Promise<{ ran: number }> {
+  let ran = 0;
+  const { data: rules } = await admin
+    .from("automations")
+    .select("id, tenant_id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, product_id, source_seq")
+    .eq("is_active", true)
+    .in("trigger_type", TIME_TRIGGERS);
+
+  for (const rule of (rules as any[]) || []) {
+    const days = Number(rule.trigger_value) || 0;
+    if (rule.trigger_type !== "cadence_completed" && !days) continue; // dias obrigatórios (cadence_completed aceita 0 = na hora)
+    const cutoff = new Date(Date.now() - days * 86400 * 1000).toISOString();
+
+    let contactIds: string[] = [];
+    try {
+      if (rule.trigger_type === "no_activity_days") contactIds = await candidatosSemAtividade(admin, rule, cutoff);
+      else if (rule.trigger_type === "cadence_completed") contactIds = await candidatosCadenciaTerminada(admin, rule, cutoff);
+      else if (rule.trigger_type === "opportunity_lost") contactIds = await candidatosOportunidade(admin, rule, cutoff, "lost");
+      else if (rule.trigger_type === "opportunity_won") contactIds = await candidatosOportunidade(admin, rule, cutoff, "won");
+    } catch {
+      contactIds = [];
+    }
+
+    for (const cid of contactIds) {
+      // dedupe: uma vez por (regra, contato)
+      const { data: fired } = await admin.from("automation_logs").select("id").eq("automation_id", rule.id).eq("contact_id", cid).maybeSingle();
+      if (fired) continue;
+      const ok = await applyRule(admin, { tenantId: rule.tenant_id, contactId: cid, rule });
+      if (ok) ran++;
+    }
+  }
+  return { ran };
+}
+
+// contatos ligados a um produto (via cadência OU oportunidade) — para escopo por produto
+async function contatosDoProduto(admin: DB, tenantId: string, productId: string): Promise<Set<string>> {
+  const [{ data: enr }, { data: opps }] = await Promise.all([
+    admin.from("enrollments").select("contact_id, sequences!inner(product_id)").eq("tenant_id", tenantId).eq("sequences.product_id", productId),
+    admin.from("opportunities").select("primary_contact_id").eq("tenant_id", tenantId).eq("product_id", productId).not("primary_contact_id", "is", null),
+  ]);
+  const set = new Set<string>();
+  for (const e of (enr as any[]) || []) if (e?.contact_id) set.add(e.contact_id);
+  for (const o of (opps as any[]) || []) if (o?.primary_contact_id) set.add(o.primary_contact_id);
+  return set;
+}
+
+// contatos com uma cadência ATIVA no produto (para NÃO recuperar quem já está sendo trabalhado)
+async function contatosAtivosNoProduto(admin: DB, tenantId: string, productId: string | null): Promise<Set<string>> {
+  let q = admin.from("enrollments").select("contact_id, sequences!inner(product_id)").eq("tenant_id", tenantId).eq("status", "active");
+  if (productId) q = q.eq("sequences.product_id", productId);
+  const { data } = await q;
+  const set = new Set<string>();
+  for (const e of (data as any[]) || []) if (e?.contact_id) set.add(e.contact_id);
+  return set;
+}
+
+// GATILHO no_activity_days (com escopo por produto opcional)
+async function candidatosSemAtividade(admin: DB, rule: any, cutoff: string): Promise<string[]> {
+  // Sem produto: comportamento global antigo (last_activity_at do contato).
+  if (!rule.product_id) {
+    const { data } = await admin.from("contacts").select("id").eq("tenant_id", rule.tenant_id).lt("last_activity_at", cutoff).limit(500);
+    return ((data as any[]) || []).map((c) => c.id);
+  }
+  // Com produto: "sem atividade NAQUELE produto há X dias" e sem cadência ativa nele.
+  const doProduto = await contatosDoProduto(admin, rule.tenant_id, rule.product_id);
+  if (!doProduto.size) return [];
+  const ids = Array.from(doProduto);
+  const ativos = await contatosAtivosNoProduto(admin, rule.tenant_id, rule.product_id);
+
+  // última atividade no produto = mais recente entre: tarefa concluída de cadência do
+  // produto, e atualização de oportunidade do produto.
+  const ultima = new Map<string, string>(); // contact_id -> ISO
+  const bump = (cid: string, ts?: string | null) => {
+    if (!cid || !ts) return;
+    const cur = ultima.get(cid);
+    if (!cur || ts > cur) ultima.set(cid, ts);
+  };
+
+  // tarefas concluídas em enrollments de cadências do produto
+  const { data: enr } = await admin
+    .from("enrollments")
+    .select("id, contact_id, started_at, sequences!inner(product_id)")
+    .eq("tenant_id", rule.tenant_id)
+    .eq("sequences.product_id", rule.product_id)
+    .in("contact_id", ids);
+  const enrByContact = new Map<string, string[]>();
+  for (const e of (enr as any[]) || []) {
+    bump(e.contact_id, e.started_at);
+    const arr = enrByContact.get(e.contact_id) || [];
+    arr.push(e.id);
+    enrByContact.set(e.contact_id, arr);
+  }
+  const enrIds = ((enr as any[]) || []).map((e) => e.id);
+  for (let i = 0; i < enrIds.length; i += 300) {
+    const { data: tks } = await admin
+      .from("tasks")
+      .select("enrollment_id, completed_at")
+      .in("enrollment_id", enrIds.slice(i, i + 300))
+      .not("completed_at", "is", null);
+    // mapa enrollment→contato
+    const enrToContact = new Map<string, string>();
+    for (const [cid, arr] of enrByContact) for (const eid of arr) enrToContact.set(eid, cid);
+    for (const t of (tks as any[]) || []) bump(enrToContact.get(t.enrollment_id) || "", t.completed_at);
+  }
+
+  // oportunidades do produto
+  const { data: opps } = await admin
+    .from("opportunities")
+    .select("primary_contact_id, updated_at")
+    .eq("tenant_id", rule.tenant_id)
+    .eq("product_id", rule.product_id)
+    .in("primary_contact_id", ids);
+  for (const o of (opps as any[]) || []) bump(o.primary_contact_id, o.updated_at);
+
+  const out: string[] = [];
+  for (const cid of ids) {
+    if (ativos.has(cid)) continue; // já sendo trabalhado no produto
+    const ts = ultima.get(cid);
+    if (!ts || ts < cutoff) out.push(cid); // sem atividade no produto há >= X dias
+  }
+  return out;
+}
+
+// GATILHO cadence_completed: terminou a cadência (sem toques pendentes) e ficou X dias parado.
+async function candidatosCadenciaTerminada(admin: DB, rule: any, cutoff: string): Promise<string[]> {
+  // enrollments candidatos: da cadência de origem (source_seq) OU de qualquer cadência
+  // do produto (product_id) OU quaisquer. Não pegamos os 'active' (ainda rodando).
+  let q = admin
+    .from("enrollments")
+    .select("id, contact_id, started_at, status, sequences!inner(product_id)")
+    .eq("tenant_id", rule.tenant_id)
+    .neq("status", "active");
+  if (rule.source_seq) q = q.eq("sequence_id", rule.source_seq);
+  else if (rule.product_id) q = q.eq("sequences.product_id", rule.product_id);
+  const { data: enr } = await q.limit(2000);
+  const list = (enr as any[]) || [];
+  if (!list.length) return [];
+
+  const enrIds = list.map((e) => e.id);
+  // tarefas dos enrollments: para saber se sobra alguma pendente e a última concluída
+  const pend = new Map<string, boolean>();
+  const ultimaTask = new Map<string, string>();
+  for (let i = 0; i < enrIds.length; i += 300) {
+    const { data: tks } = await admin
+      .from("tasks")
+      .select("enrollment_id, status, completed_at, due_date")
+      .in("enrollment_id", enrIds.slice(i, i + 300));
+    for (const t of (tks as any[]) || []) {
+      if (t.status === "pending") pend.set(t.enrollment_id, true);
+      const ts = t.completed_at || (t.due_date ? `${t.due_date}T00:00:00.000Z` : null);
+      if (ts) {
+        const cur = ultimaTask.get(t.enrollment_id);
+        if (!cur || ts > cur) ultimaTask.set(t.enrollment_id, ts);
+      }
+    }
+  }
+
+  // contatos que já estão ativos no escopo → não recuperar
+  const ativos = await contatosAtivosNoProduto(admin, rule.tenant_id, rule.product_id || null);
+
+  const out = new Set<string>();
+  for (const e of list) {
+    if (pend.get(e.id)) continue;               // ainda tem toque pendente → não terminou
+    if (ativos.has(e.contact_id)) continue;      // já sendo trabalhado
+    const fim = ultimaTask.get(e.id) || e.started_at; // "fim" = última ação (ou início se sem tarefas)
+    if (fim && fim < cutoff) out.add(e.contact_id);
+  }
+  return Array.from(out);
+}
+
+// GATILHO opportunity_lost / opportunity_won: oportunidade [do produto] nesse status há X dias.
+async function candidatosOportunidade(admin: DB, rule: any, cutoff: string, status: "lost" | "won"): Promise<string[]> {
+  let q = admin
+    .from("opportunities")
+    .select("primary_contact_id, updated_at")
+    .eq("tenant_id", rule.tenant_id)
+    .eq("status", status)
+    .lt("updated_at", cutoff)
+    .not("primary_contact_id", "is", null);
+  if (rule.product_id) q = q.eq("product_id", rule.product_id);
+  const { data } = await q.limit(500);
+  const set = new Set<string>();
+  for (const o of (data as any[]) || []) if (o?.primary_contact_id) set.add(o.primary_contact_id);
+  return Array.from(set);
 }
 
 // Inscreve o contato e gera as tarefas — versão neutra de client (não usa auth).

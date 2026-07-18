@@ -134,40 +134,14 @@ export async function GET(req: Request) {
     await admin.from("email_accounts").update({ last_reply_check_at: new Date().toISOString() }).eq("id", acc.id);
   }
 
-  // ---- Automações por TEMPO (ex.: 120 dias sem atividade → cadência de recuperação) ----
+  // ---- Automações por TEMPO (sem atividade / fim de cadência / oportunidade
+  // perdida ou ganha → recuperação, cross-sell etc). Todas respeitam o escopo por
+  // produto. Lógica centralizada em runTimeAutomations. ----
   let autoRan = 0;
   try {
-    const { applyRule } = await import("@/lib/automations");
-    const { data: timeRules } = await admin
-      .from("automations")
-      .select("id, tenant_id, trigger_type, trigger_value, action_type, action_seq, action_stage")
-      .eq("is_active", true)
-      .eq("trigger_type", "no_activity_days");
-
-    for (const rule of (timeRules as any[]) || []) {
-      const days = Number(rule.trigger_value) || 0;
-      if (!days) continue;
-      const cutoff = new Date(Date.now() - days * 86400 * 1000).toISOString();
-      const { data: cands } = await admin
-        .from("contacts")
-        .select("id")
-        .eq("tenant_id", rule.tenant_id)
-        .lt("last_activity_at", cutoff)
-        .limit(500);
-
-      for (const c of (cands as any[]) || []) {
-        // dedupe: essa regra já disparou para esse contato? (uma vez por contato)
-        const { data: fired } = await admin
-          .from("automation_logs")
-          .select("id")
-          .eq("automation_id", rule.id)
-          .eq("contact_id", c.id)
-          .maybeSingle();
-        if (fired) continue;
-        const ok = await applyRule(admin, { tenantId: rule.tenant_id, contactId: c.id, rule });
-        if (ok) autoRan++;
-      }
-    }
+    const { runTimeAutomations } = await import("@/lib/automations");
+    const res = await runTimeAutomations(admin);
+    autoRan = res.ran;
   } catch {
     /* automações de tempo não devem quebrar o cron de respostas */
   }

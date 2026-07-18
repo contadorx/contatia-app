@@ -11,24 +11,31 @@ const TRIGGER_LABEL: Record<string, string> = {
   score_gte: "Score ≥",
   no_activity_days: "Sem atividade há",
   tag_added: "Recebeu tag",
+  cadence_completed: "Terminou cadência +",
+  opportunity_lost: "Oportunidade perdida +",
+  opportunity_won: "Oportunidade ganha +",
 };
+// gatilhos cujo trigger_value é "X dias"
+const DIAS_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won"];
 const ACTION_LABEL: Record<string, string> = {
   enroll: "inscrever na cadência",
   pause_all: "pausar cadências",
   move_stage: "mover de estágio",
   mark_hot: "marcar quente",
+  add_tag: "aplicar tag",
 };
 
 export default async function Automacoes() {
   // Automações incluídas em TODOS os planos (Individual e Equipes) — sem gate.
   const supabase = createClient();
 
-  const [{ data: automations }, { data: sequences }, { data: stages }, { data: logs }, { data: tags }] = await Promise.all([
-    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, sequences(name), pipeline_stages(name)").order("created_at", { ascending: false }),
+  const [{ data: automations }, { data: sequences }, { data: stages }, { data: logs }, { data: tags }, { data: products }] = await Promise.all([
+    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, product_id, sequences(name), pipeline_stages(name), products(name)").order("created_at", { ascending: false }),
     supabase.from("sequences").select("id, name").eq("is_active", true),
     supabase.from("pipeline_stages").select("id, name").order("position", { ascending: true }),
     supabase.from("automation_logs").select("detail, created_at, contacts(name)").order("created_at", { ascending: false }).limit(15),
     supabase.from("tags").select("id, name").order("name", { ascending: true }),
+    supabase.from("products").select("id, name").eq("active", true).order("name", { ascending: true }),
   ]);
 
   const rules = (automations as any[]) || [];
@@ -40,7 +47,7 @@ export default async function Automacoes() {
       <p className="mt-1 text-sm text-subtle">Regras &ldquo;quando isso acontecer, faça aquilo&rdquo; — o contato reage sozinho ao comportamento.</p>
 
       <div className="mt-6">
-        <AutomationBuilder sequences={(sequences as any[]) || []} stages={(stages as any[]) || []} tags={(tags as any[]) || []} />
+        <AutomationBuilder sequences={(sequences as any[]) || []} stages={(stages as any[]) || []} tags={(tags as any[]) || []} products={(products as any[]) || []} />
       </div>
 
       <div className="mt-6 space-y-2">
@@ -50,7 +57,8 @@ export default async function Automacoes() {
               <div>
                 <p className="text-sm font-semibold">{r.name}</p>
                 <p className="text-xs text-subtle">
-                  Quando <b>{TRIGGER_LABEL[r.trigger_type] || r.trigger_type}{r.trigger_value ? ` ${r.trigger_value}${r.trigger_type === "no_activity_days" ? " dias" : ""}` : ""}</b>
+                  Quando <b>{TRIGGER_LABEL[r.trigger_type] || r.trigger_type}{r.trigger_value ? ` ${r.trigger_value}${DIAS_TRIGGERS.includes(r.trigger_type) ? " dias" : ""}` : ""}</b>
+                  {r.products?.name ? <> no produto <b>{r.products.name}</b></> : null}
                   {" → "}
                   {ACTION_LABEL[r.action_type] || r.action_type}
                   {r.sequences?.name ? ` "${r.sequences.name}"` : ""}
