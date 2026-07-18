@@ -29,6 +29,7 @@ function montarFiltro(input: any): FiltroReceita {
     municipio: typeof input?.municipio === "string" && input.municipio.trim() ? input.municipio.trim() : undefined,
     porte: ["ME", "EPP", "Demais"].includes(input?.porte) ? input.porte : undefined,
     com_email: input?.com_email === true,
+    email_corporativo: input?.email_corporativo === true,
     com_telefone: input?.com_telefone === true,
   };
 }
@@ -89,6 +90,7 @@ export async function buscarNaBase(input: any, offset = 0) {
     // texto → procura em razão social + nome fantasia; não força "só com e-mail"
     f.termo = busca;
     f.com_email = false;
+    f.email_corporativo = false;
   }
 
   if (!f.atividade && !f.cnae && !f.uf && !f.termo) {

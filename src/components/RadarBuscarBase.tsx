@@ -25,6 +25,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   const [municipio, setMunicipio] = useState("");
   const [porte, setPorte] = useState("");
   const [comEmail, setComEmail] = useState(true);
+  const [emailCorp, setEmailCorp] = useState(false);
   const [busca, setBusca] = useState("");
 
   // resultados
@@ -75,6 +76,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       municipio: municipio.trim() || undefined,
       porte: porte || undefined,
       com_email: comEmail,
+      email_corporativo: comEmail && emailCorp,
     };
   }
   const buscaDigitos = busca.replace(/\D/g, "");
@@ -208,8 +210,16 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
 
         <div className="mt-3 flex flex-wrap items-center gap-4">
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={comEmail} onChange={(e) => setComEmail(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={comEmail}
+              onChange={(e) => { setComEmail(e.target.checked); if (!e.target.checked) setEmailCorp(false); }}
+            />
             Só empresas com e-mail
+          </label>
+          <label className={`flex items-center gap-2 text-sm ${comEmail ? "" : "opacity-40"}`} title="Descarta e-mails gratuitos (gmail, hotmail, outlook, yahoo, uol, bol…), deixando só domínios empresariais.">
+            <input type="checkbox" checked={emailCorp} disabled={!comEmail} onChange={(e) => setEmailCorp(e.target.checked)} />
+            Só e-mail empresarial <span className="text-subtle">(sem gmail/hotmail…)</span>
           </label>
           <input className="input w-full sm:w-56" placeholder="ou CNAE (código, opcional)" value={cnaeManual} onChange={(e) => setCnaeManual(e.target.value)} />
           <div className="ml-auto flex items-center gap-2">

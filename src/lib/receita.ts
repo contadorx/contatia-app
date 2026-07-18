@@ -34,6 +34,7 @@ export type FiltroReceita = {
   porte?: "ME" | "EPP" | "Demais";
   matriz?: boolean;
   com_email?: boolean;
+  email_corporativo?: boolean;
   com_telefone?: boolean;
   termo?: string;
   limit?: number;
