@@ -33,19 +33,27 @@ export default async function Automacoes() {
   // Automações incluídas em TODOS os planos (Individual e Equipes) — sem gate.
   const supabase = createClient();
 
-  const [{ data: automations }, { data: sequences }, { data: stages }, { data: logs }, { data: tags }, { data: products }] = await Promise.all([
-    // sequences!action_seq: automations tem DUAS FKs para sequences (action_seq e source_seq);
-    // sem desambiguar, o embed "sequences(name)" fica ambíguo e a consulta inteira falha (lista vazia).
-    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, product_id, cond_state, set_state, sequences!action_seq(name), pipeline_stages(name), products(name)").order("created_at", { ascending: false }),
+  const [{ data: automations }, { data: sequences }, { data: allSeqs }, { data: stages }, { data: logs }, { data: tags }, { data: products }, { data: allProducts }] = await Promise.all([
+    // SEM embeds: automations tem DUAS FKs para sequences (action_seq e source_seq), o que
+    // torna qualquer embed "sequences(...)" ambíguo e quebra a consulta inteira (lista vazia).
+    // Buscamos só as colunas cruas e resolvemos os nomes com os mapas abaixo — à prova de embed.
+    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, product_id, cond_state, set_state, action_seq, action_stage, source_seq, action_tag").order("created_at", { ascending: false }),
     supabase.from("sequences").select("id, name").eq("is_active", true),
+    supabase.from("sequences").select("id, name"),
     supabase.from("pipeline_stages").select("id, name").order("position", { ascending: true }),
     supabase.from("automation_logs").select("detail, created_at, contacts(name)").order("created_at", { ascending: false }).limit(15),
     supabase.from("tags").select("id, name").order("name", { ascending: true }),
     supabase.from("products").select("id, name").eq("active", true).order("name", { ascending: true }),
+    supabase.from("products").select("id, name"),
   ]);
 
   const rules = (automations as any[]) || [];
   const logList = (logs as any[]) || [];
+
+  // mapas id → nome (resolvem os nomes sem embed)
+  const seqName = new Map(((allSeqs as any[]) || []).map((s) => [s.id, s.name]));
+  const stageName = new Map(((stages as any[]) || []).map((s) => [s.id, s.name]));
+  const prodName = new Map(((allProducts as any[]) || []).map((p) => [p.id, p.name]));
 
   return (
     <div>
@@ -64,11 +72,12 @@ export default async function Automacoes() {
                 <p className="text-sm font-semibold">{r.name}</p>
                 <p className="text-xs text-subtle">
                   Quando <b>{TRIGGER_LABEL[r.trigger_type] || r.trigger_type}{r.cond_state ? ` "${r.cond_state}"` : ""}{r.trigger_value ? ` ${r.trigger_value}${DIAS_TRIGGERS.includes(r.trigger_type) ? " dias" : ""}` : ""}</b>
-                  {r.products?.name ? <> no produto <b>{r.products.name}</b></> : null}
+                  {r.source_seq && seqName.get(r.source_seq) ? <> na cadência <b>{seqName.get(r.source_seq)}</b></> : null}
+                  {r.product_id && prodName.get(r.product_id) ? <> no produto <b>{prodName.get(r.product_id)}</b></> : null}
                   {" → "}
                   {ACTION_LABEL[r.action_type] || r.action_type}
-                  {r.sequences?.name ? ` "${r.sequences.name}"` : ""}
-                  {r.pipeline_stages?.name ? ` "${r.pipeline_stages.name}"` : ""}
+                  {r.action_seq && seqName.get(r.action_seq) ? ` "${seqName.get(r.action_seq)}"` : ""}
+                  {r.action_stage && stageName.get(r.action_stage) ? ` "${stageName.get(r.action_stage)}"` : ""}
                   {r.action_type === "mark_state" && r.set_state ? ` "${r.set_state}"` : ""}
                 </p>
               </div>
