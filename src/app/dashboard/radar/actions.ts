@@ -75,6 +75,8 @@ export async function buscarNaBase(input: any, offset = 0) {
   if (!receitaConfigurada()) return { error: "Base da Receita não configurada (defina RECEITA_API_URL e RECEITA_API_TOKEN)." };
 
   const f = montarFiltro(input);
+  // "ocultar as empresas que já estão no meu cadastro" (dedup por CNPJ contra Empresas)
+  const ocultar = input?.ocultarJaTem === true;
 
   // Busca por NOME ou CNPJ (razão social / nome fantasia / CNPJ).
   const busca = typeof input?.busca === "string" ? input.busca.trim() : "";
@@ -83,8 +85,9 @@ export async function buscarNaBase(input: any, offset = 0) {
     // CNPJ completo → busca exata (traz mesmo se não tiver e-mail)
     const r = await buscarEmpresaPorCnpj(digitos);
     if (r.error) return { error: r.error };
-    const rows = await marcarJaTem(r.empresa ? [r.empresa] : []);
-    return { ok: true, total: rows.length, atividades: [], rows, offset: 0 };
+    let rows = await marcarJaTem(r.empresa ? [r.empresa] : []);
+    if (ocultar) rows = rows.filter((x) => !x.jaTem);
+    return { ok: true, total: rows.length, atividades: [], rows, offset: 0, nextOffset: 0, temMais: false };
   }
   if (busca.length >= 3) {
     // texto → procura em razão social + nome fantasia. RESPEITA os checkboxes de
@@ -97,10 +100,37 @@ export async function buscarNaBase(input: any, offset = 0) {
     return { error: "Escolha uma atividade/UF, ou digite um nome ou CNPJ para buscar." };
   }
   const off = Math.max(Number(offset) || 0, 0);
-  const r = await buscarEmpresas({ ...f, limit: 100, offset: off, contar: off === 0 });
-  if (r.error) return { error: r.error };
-  const rows = await marcarJaTem(r.rows);
-  return { ok: true, total: r.total, atividades: r.atividades, rows, offset: off };
+
+  // Caminho normal (sem ocultar): uma página de 100 direto da base.
+  if (!ocultar) {
+    const r = await buscarEmpresas({ ...f, limit: 100, offset: off, contar: off === 0 });
+    if (r.error) return { error: r.error };
+    const rows = await marcarJaTem(r.rows);
+    return { ok: true, total: r.total, atividades: r.atividades, rows, offset: off, nextOffset: off + r.rows.length, temMais: r.rows.length === 100 };
+  }
+
+  // Ocultar já cadastradas: a base não sabe do seu cadastro, então filtramos aqui.
+  // Como isso "fura" a página (100 podem virar 60), buscamos páginas seguidas até
+  // juntar ~100 NOVAS ou acabar a base (teto de 6 páginas por clique). O offset é
+  // sempre o BRUTO consumido da base (nextOffset), para "carregar mais" não repetir.
+  let cursor = off;
+  let total: number | null = null;
+  let atividades: any[] = [];
+  const acumulado: any[] = [];
+  let temMais = false;
+  for (let i = 0; i < 6; i++) {
+    const contar = off === 0 && i === 0;
+    const r = await buscarEmpresas({ ...f, limit: 100, offset: cursor, contar });
+    if (r.error) return { error: r.error };
+    if (contar) { total = r.total; atividades = r.atividades || []; }
+    const marc = await marcarJaTem(r.rows);
+    for (const x of marc) if (!x.jaTem) acumulado.push(x);
+    cursor += r.rows.length;
+    if (r.rows.length < 100) { temMais = false; break; } // fim da base
+    temMais = true;
+    if (acumulado.length >= 100) break; // já juntamos uma página cheia de novas
+  }
+  return { ok: true, total, atividades, rows: acumulado, offset: off, nextOffset: cursor, temMais };
 }
 
 // ============================================================
