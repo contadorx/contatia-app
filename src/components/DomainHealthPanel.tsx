@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { checkMyDomain } from "@/app/dashboard/config/domain-actions";
+import { checkMyDomain, checkSpamContent } from "@/app/dashboard/config/domain-actions";
+import SpamScore, { type SpamResultView } from "@/components/SpamScore";
 
 type Health = {
   domain: string;
@@ -32,12 +33,29 @@ export function DomainHealthPanel() {
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
+  // Teste de spam do conteúdo (SpamAssassin via Postmark)
+  const [subj, setSubj] = useState("");
+  const [body, setBody] = useState("");
+  const [spam, setSpam] = useState<SpamResultView | null>(null);
+  const [spamErr, setSpamErr] = useState<string | null>(null);
+  const [spamPending, startSpam] = useTransition();
+
   function run() {
     setErr(null);
     start(async () => {
       const r = (await checkMyDomain(manual || undefined)) as any;
       if (r?.error) setErr(r.error);
       else setRes(r.result);
+    });
+  }
+
+  function runSpam() {
+    setSpamErr(null);
+    setSpam(null);
+    startSpam(async () => {
+      const r = (await checkSpamContent(subj, body)) as any;
+      if (r?.error) setSpamErr(r.error);
+      else setSpam(r.result);
     });
   }
 
@@ -73,6 +91,33 @@ export function DomainHealthPanel() {
           </p>
         </div>
       )}
+
+      {/* Teste de spam do CONTEÚDO — complementa o DNS acima. */}
+      <div className="mt-5 border-t border-line pt-4">
+        <p className="text-sm font-semibold">Teste de spam do conteúdo</p>
+        <p className="mt-0.5 text-xs text-subtle">
+          O de cima checa se o <b>domínio</b> está configurado. Este roda o <b>texto do e-mail</b> pelo SpamAssassin
+          (a mesma engine dos provedores) e aponta o que aumenta o risco de spam. Grátis, sem enviar nada a ninguém.
+        </p>
+        <div className="mt-3">
+          <label className="label">Assunto</label>
+          <input className="input mt-1" value={subj} onChange={(e) => setSubj(e.target.value)} placeholder="Cole aqui o assunto do e-mail" />
+        </div>
+        <div className="mt-3">
+          <label className="label">Corpo do e-mail</label>
+          <textarea
+            className="input mt-1 min-h-[120px] leading-relaxed"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="Cole aqui o corpo do e-mail (pode ser com texto ou HTML)."
+          />
+        </div>
+        <button className="btn-brand mt-3" disabled={spamPending} onClick={runSpam}>
+          {spamPending ? "Testando..." : "Testar conteúdo"}
+        </button>
+        {spamErr && <p className="mt-3 text-sm text-danger">{spamErr}</p>}
+        {spam && <SpamScore result={spam} />}
+      </div>
     </div>
   );
 }

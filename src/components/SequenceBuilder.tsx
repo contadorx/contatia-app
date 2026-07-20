@@ -2,9 +2,11 @@
 
 import { useState, useTransition, useEffect, useRef } from "react";
 import { createSequence, updateSequence, generateSequenceAI, loadAiContext, saveAiContext, opusRemaining, type StepInput } from "@/app/dashboard/cadencias/actions";
+import { checkSpamContent } from "@/app/dashboard/config/domain-actions";
 import type { Channel } from "@/lib/cadence";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import RichTextEditor, { type RichTextHandle } from "@/components/RichTextEditor";
+import SpamScore, { type SpamResultView } from "@/components/SpamScore";
 
 const CHANNELS: { v: Channel; l: string }[] = [
   { v: "email", l: "E-mail" },
@@ -51,6 +53,24 @@ export default function SequenceBuilder({
   const [steps, setSteps] = useState<StepInput[]>(initialSteps?.length ? initialSteps : [emptyStep()]);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
+
+  // Teste de spam por passo (SpamAssassin via Postmark)
+  const [spamRes, setSpamRes] = useState<Record<number, SpamResultView>>({});
+  const [spamErr, setSpamErr] = useState<Record<number, string>>({});
+  const [spamIdx, setSpamIdx] = useState<number | null>(null);
+  const [spamPending, startSpam] = useTransition();
+
+  function testSpam(i: number) {
+    const st = steps[i];
+    setSpamErr((m) => ({ ...m, [i]: "" }));
+    setSpamIdx(i);
+    startSpam(async () => {
+      const r = (await checkSpamContent(st?.subject || "", st?.body || "")) as any;
+      if (r?.error) setSpamErr((m) => ({ ...m, [i]: r.error }));
+      else setSpamRes((m) => ({ ...m, [i]: r.result }));
+      setSpamIdx(null);
+    });
+  }
 
   // IA — briefing rico
   const [aiOpen, setAiOpen] = useState(autoAi);
@@ -439,6 +459,21 @@ export default function SequenceBuilder({
                           .replace(/\{\{\s*empresa\s*\}\}/g, "Empresa X"),
                       }}
                     />
+                  </div>
+                )}
+                {(s.subject.trim() || s.body.trim()) && (
+                  <div className="mt-2">
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-brand hover:underline disabled:opacity-50"
+                      disabled={spamPending && spamIdx === i}
+                      onClick={() => testSpam(i)}
+                      title="Roda o conteúdo pelo SpamAssassin e mostra o que aumenta o risco de spam"
+                    >
+                      {spamPending && spamIdx === i ? "Testando spam..." : "🛡️ Testar spam"}
+                    </button>
+                    {spamErr[i] && <p className="mt-1 text-xs text-danger">{spamErr[i]}</p>}
+                    {spamRes[i] && <SpamScore result={spamRes[i]} />}
                   </div>
                 )}
               </>
