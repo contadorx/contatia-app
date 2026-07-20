@@ -128,7 +128,7 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   // (cap efetivo do dia − enviados hoje). Distribui a carga e protege cada domínio.
   const { data: accts } = await supabase
     .from("email_accounts")
-    .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage")
+    .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage, signature")
     .eq("is_active", true)
     .order("created_at", { ascending: true });
   if (!accts || !accts.length) return { error: "Nenhuma caixa de e-mail conectada. Configure em Config." };
@@ -199,7 +199,9 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
 
   // assinatura do negócio (renderiza {{primeiro_nome}}/{{empresa}} com os dados do contato)
   const { data: tnt } = await supabase.from("tenants").select("email_signature").maybeSingle();
-  const signature = (tnt as any)?.email_signature as string | undefined;
+  // assinatura DA CAIXA que enviou; se vazia, cai na assinatura geral do workspace
+  const boxSig = (acct as any)?.signature as string | undefined;
+  const signature = (boxSig && boxSig.trim()) ? boxSig : ((tnt as any)?.email_signature as string | undefined);
   const contact = (task as any).contacts || {};
   const sigRendered = signature?.trim() ? renderTemplate(signature, { name: contact.name, company: null, ...contact }) : "";
   // Monta o corpo final (corpo + assinatura), ciente de HTML: se o corpo OU a

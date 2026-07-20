@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { CrmIntegrations } from "@/components/CrmIntegrations";
 import { createClient } from "@/lib/supabase/server";
 import SmtpForm from "@/components/SmtpForm";
+import BoxSignatureForm from "@/components/BoxSignatureForm";
 import { DomainHealthPanel } from "@/components/DomainHealthPanel";
 import { BookingSettings } from "@/components/BookingSettings";
 import AccountRowActions from "@/components/AccountRowActions";
@@ -56,7 +57,7 @@ export default async function Config() {
   const supabase = createClient();
   const { data: accounts } = await supabase
     .from("email_accounts")
-    .select("id, provider, from_email, display_name, is_active, daily_cap, warmup_stage, created_at, verified, verified_at, smtp_host, smtp_port, smtp_secure, smtp_user, detect_replies, imap_host")
+    .select("id, provider, from_email, display_name, is_active, daily_cap, warmup_stage, created_at, verified, verified_at, smtp_host, smtp_port, smtp_secure, smtp_user, detect_replies, imap_host, signature")
     .order("created_at", { ascending: false });
 
   const {
@@ -172,6 +173,7 @@ export default async function Config() {
                           {a.provider !== "gmail" && (
                             <div className="mt-2"><SmtpForm editAccount={a} /></div>
                           )}
+                          <BoxSignatureForm accountId={a.id} initial={(a.signature as string) || ""} />
                         </div>
                         <AccountRowActions id={a.id} active={a.is_active} />
                       </div>

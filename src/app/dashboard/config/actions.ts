@@ -249,6 +249,20 @@ export async function saveSignature(signature: string) {
   return { ok: true };
 }
 
+// Salva a assinatura de UMA caixa. Vazia = usa a assinatura geral no envio.
+export async function saveBoxSignature(accountId: string, signature: string) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { error } = await supabase
+    .from("email_accounts")
+    .update({ signature: signature.trim() || null })
+    .eq("id", accountId)
+    .eq("tenant_id", tenant_id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/config");
+  return { ok: true };
+}
+
 export async function saveBookingSettings(input: {
   enabled: boolean; duration: number; days: string; startHour: number; endHour: number; title: string;
 }) {

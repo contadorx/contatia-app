@@ -43,7 +43,7 @@ export async function sendQuickEmail(contactId: string, subject: string, body: s
   // rotação de caixas + cap diário (mesma lógica da fila)
   const { data: accts } = await supabase
     .from("email_accounts")
-    .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage")
+    .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage, signature")
     .eq("is_active", true)
     .order("created_at", { ascending: true });
   if (!accts || !accts.length) return { error: "Nenhuma caixa de e-mail conectada. Configure em Config." };
@@ -82,7 +82,9 @@ export async function sendQuickEmail(contactId: string, subject: string, body: s
 
   // assinatura do negócio
   const { data: tnt } = await supabase.from("tenants").select("email_signature").maybeSingle();
-  const signature = (tnt as any)?.email_signature as string | undefined;
+  // assinatura da caixa que enviou; se vazia, usa a geral do workspace
+  const boxSig = (acct as any)?.signature as string | undefined;
+  const signature = (boxSig && boxSig.trim()) ? boxSig : ((tnt as any)?.email_signature as string | undefined);
   const sigRendered = signature?.trim() ? renderTemplate(signature, { name: (contact as any).name, company: null, ...(contact as any) }) : "";
   // corpo + assinatura, ciente de HTML (ver task-actions / lib/richtext)
   const built = buildEmailHtml(bodyText, sigRendered);

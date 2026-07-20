@@ -169,6 +169,23 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
     return { id: s.id, name: s.name, total, ativos, respondidos, concluidos, taxa: pct(respondidos, total) };
   }).sort((a, b) => b.total - a.total);
 
+  // ---- Cliques em links (tenant-wide) ----
+  const { data: linkRows } = await supabase
+    .from("link_clicks")
+    .select("id, url, clicks, first_click_at, created_at, contacts(name)")
+    .order("first_click_at", { ascending: false, nullsFirst: false })
+    .limit(5000);
+  const links = (linkRows as any[]) || [];
+  const clicados = links.filter((l) => (l.clicks || 0) > 0);
+  const totalCliques = clicados.reduce((s, l) => s + (l.clicks || 0), 0);
+  const cliquesPeriodo = clicados.filter((l) => l.first_click_at && l.first_click_at >= sinceISO).reduce((s, l) => s + (l.clicks || 0), 0);
+  // top links por total de cliques (agrega por URL)
+  const porUrl = new Map<string, number>();
+  for (const l of clicados) porUrl.set(l.url, (porUrl.get(l.url) || 0) + (l.clicks || 0));
+  const topLinks = Array.from(porUrl.entries()).map(([url, n]) => ({ url, n })).sort((a, b) => b.n - a.n).slice(0, 15);
+  const ultimosCliques = clicados.slice(0, 30);
+  const taxaClique = pct(clicados.length, links.length);
+
   // filtro (form GET)
   const memberOpts = ((members as any[]) || []);
 
@@ -344,6 +361,47 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
             ],
           }))}
         />
+      </Secao>
+          ) },
+          { id: "cliques", label: "Cliques em links", node: (
+      <Secao id="cliques" titulo="Cliques em links" desc="Comportamento de clique nos e-mails: quanto engaja, quais links puxam mais e quem clicou. (Visão de todo o workspace.)">
+        <div className="grid gap-3 sm:grid-cols-4">
+          <Tile label="Links rastreados" value={String(links.length)} sub={links.length >= 5000 ? "amostra (5.000 mais recentes)" : undefined} />
+          <Tile label="Links clicados" value={String(clicados.length)} sub={`${taxaClique}% dos rastreados`} />
+          <Tile label="Cliques totais" value={String(totalCliques)} />
+          <Tile label={`Cliques (${dias}d)`} value={String(cliquesPeriodo)} />
+        </div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div>
+            <p className="label mb-1">Links mais clicados</p>
+            <Tabela
+              vazio="Nenhum clique ainda."
+              head={["Link", "Cliques"]}
+              rows={topLinks.map((l, i) => ({
+                key: String(i),
+                cells: [
+                  <a href={l.url} target="_blank" rel="noreferrer" className="block max-w-[360px] truncate text-brand-dark hover:underline" title={l.url}>{l.url}</a>,
+                  <span className="font-semibold">{l.n}</span>,
+                ],
+              }))}
+            />
+          </div>
+          <div>
+            <p className="label mb-1">Últimos cliques</p>
+            <Tabela
+              vazio="Nenhum clique ainda."
+              head={["Contato", "Link", "Quando"]}
+              rows={ultimosCliques.map((l) => ({
+                key: l.id,
+                cells: [
+                  <span className="font-medium">{l.contacts?.name || "—"}</span>,
+                  <a href={l.url} target="_blank" rel="noreferrer" className="block max-w-[220px] truncate text-brand-dark hover:underline" title={l.url}>{l.url}</a>,
+                  <span className="text-subtle">{l.first_click_at ? new Date(l.first_click_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—"}</span>,
+                ],
+              }))}
+            />
+          </div>
+        </div>
       </Secao>
           ) },
         ]}

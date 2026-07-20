@@ -280,6 +280,11 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
                         {e.type === "replied" ? `"${e.meta.text}"` : e.meta.text}
                       </p>
                     )}
+                    {(e.type === "link_clicked" || e.type === "doc_opened") && e.meta?.url && (
+                      <a href={e.meta.url} target="_blank" rel="noreferrer" className="mt-0.5 block truncate text-xs text-brand-dark hover:underline" title={e.meta.url}>
+                        {e.meta.url}
+                      </a>
+                    )}
                     <p className="text-xs text-subtle">{fmt(e.created_at)}</p>
                   </div>
                 ))}
