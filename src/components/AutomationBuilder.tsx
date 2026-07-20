@@ -87,19 +87,23 @@ export default function AutomationBuilder({
   }
   function save() {
     setMsg(null);
+    if (!f.name.trim()) { setMsg("Dê um nome à automação."); return; }
     start(async () => {
-      const res = await createAutomation({
-        ...f,
-        priority: Number(f.priority) || 100,
-        stop_on_match: stopOnMatch,
-        end_current: endCurrent,
-      });
-      if (res?.error) setMsg(res.error);
-      else {
+      try {
+        const res = await createAutomation({
+          ...f,
+          priority: Number(f.priority) || 100,
+          stop_on_match: stopOnMatch,
+          end_current: endCurrent,
+        });
+        if (res?.error) { setMsg(res.error); return; }
         setF({ name: "", trigger_type: "doc_opened", trigger_value: "", action_type: "enroll", action_seq: "", action_stage: "", action_tag: "", product_id: "", source_seq: "", priority: "100", set_state: "", cond_state: "" });
         setStopOnMatch(false); setEndCurrent(false);
         setOpen(false);
         router.refresh(); // garante que a nova automação aparece na lista na hora
+      } catch (e: any) {
+        // se a server action lançar, mostra em vez de sumir silenciosamente
+        setMsg("Erro ao criar: " + (e?.message || "falha desconhecida"));
       }
     });
   }

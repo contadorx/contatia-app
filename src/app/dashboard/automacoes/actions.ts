@@ -41,30 +41,38 @@ export async function createAutomation(input: {
   if (DIAS_TRIGGERS.includes(input.trigger_type) && !input.trigger_value) return { error: "Informe a quantidade de dias." };
   if (input.trigger_type === "state_days" && !(input.cond_state || "").trim()) return { error: "Informe o estado do gatilho (ex.: dormente)." };
 
-  const { error } = await supabase.from("automations").insert({
-    tenant_id,
-    name: input.name.trim(),
-    trigger_type: input.trigger_type,
-    trigger_value: input.trigger_value || null,
-    action_type: input.action_type,
-    action_seq: input.action_type === "enroll" ? input.action_seq : null,
-    action_stage: input.action_type === "move_stage" ? input.action_stage : null,
-    action_tag: (input.action_type === "add_tag" || input.action_type === "suppress") ? input.action_tag || null : null,
-    // escopo por produto (opcional) para gatilhos que dependem de "no produto"
-    product_id: input.product_id || null,
-    // cadência de origem do gatilho "terminou a cadência"
-    source_seq: input.trigger_type === "cadence_completed" ? input.source_seq || null : null,
-    // máquina de estados (Fase 1): ordem, parar-no-match, transição limpa, estado-destino
-    priority: Number.isFinite(input.priority as number) ? (input.priority as number) : 100,
-    stop_on_match: input.stop_on_match === true,
-    end_current: input.action_type === "enroll" ? input.end_current === true : false,
-    set_state: (input.set_state || "").trim() || null,
-    cond_state: input.trigger_type === "state_days" ? (input.cond_state || "").trim() || null : null,
-    created_by: user_id,
-  });
-  if (error) return { error: error.message };
-  revalidatePath("/dashboard/automacoes");
-  return { ok: true };
+  try {
+    const { error } = await supabase.from("automations").insert({
+      tenant_id,
+      name: input.name.trim(),
+      trigger_type: input.trigger_type,
+      trigger_value: input.trigger_value || null,
+      action_type: input.action_type,
+      action_seq: input.action_type === "enroll" ? input.action_seq : null,
+      action_stage: input.action_type === "move_stage" ? input.action_stage : null,
+      action_tag: (input.action_type === "add_tag" || input.action_type === "suppress") ? input.action_tag || null : null,
+      // escopo por produto (opcional) para gatilhos que dependem de "no produto"
+      product_id: input.product_id || null,
+      // cadência de origem do gatilho "terminou a cadência"
+      source_seq: input.trigger_type === "cadence_completed" ? input.source_seq || null : null,
+      // máquina de estados (Fase 1): ordem, parar-no-match, transição limpa, estado-destino
+      priority: Number.isFinite(input.priority as number) ? (input.priority as number) : 100,
+      stop_on_match: input.stop_on_match === true,
+      end_current: input.action_type === "enroll" ? input.end_current === true : false,
+      set_state: (input.set_state || "").trim() || null,
+      cond_state: input.trigger_type === "state_days" ? (input.cond_state || "").trim() || null : null,
+      created_by: user_id,
+    });
+    if (error) {
+      // devolve o máximo de detalhe para diagnóstico (código/dica do Postgres/RLS)
+      const parts = [error.message, error.code ? `código ${error.code}` : "", error.details || "", error.hint || ""].filter(Boolean);
+      return { error: parts.join(" · ") };
+    }
+    revalidatePath("/dashboard/automacoes");
+    return { ok: true };
+  } catch (e: any) {
+    return { error: "Falha ao salvar: " + (e?.message || String(e)) };
+  }
 }
 
 export async function toggleAutomation(id: string, active: boolean) {
