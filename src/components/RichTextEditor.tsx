@@ -73,6 +73,10 @@ const RichTextEditor = forwardRef<RichTextHandle, Props>(function RichTextEditor
   const edRef = useRef<EditableHandle>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // HTML inicial FIXO (capturado na montagem). O campo visual usa SEMPRE este valor
+  // no dangerouslySetInnerHTML, então o React nunca o reescreve em re-render — é isso
+  // que impedia a digitação (cada tecla reaplicava o innerHTML e apagava o resto).
+  const first = useRef(toEditorHtml(value));
   const lastValue = useRef(value);       // último HTML que ESTE editor emitiu (evita eco)
   const onChangeRef = useRef(onChange);  // sempre a versão atual de onChange
   onChangeRef.current = onChange;
@@ -84,7 +88,17 @@ const RichTextEditor = forwardRef<RichTextHandle, Props>(function RichTextEditor
     onChangeRef.current(h);
   }, []);
 
-  // Mudança EXTERNA de value (usar modelo/IA; ou voltar do HTML) → reflete no editor.
+  // Ao ENTRAR no modo visual (montagem e ao voltar do HTML): joga o valor atual no
+  // campo, imperativamente (não por re-render).
+  useEffect(() => {
+    if (mode === "visual") {
+      edRef.current?.setHtml(toEditorHtml(value));
+      lastValue.current = value;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  // Mudança EXTERNA de value (usar modelo/IA) → reflete no editor, imperativamente.
   // Ignora o eco da própria digitação (value === lastValue).
   useEffect(() => {
     if (mode !== "visual") return;
@@ -92,7 +106,7 @@ const RichTextEditor = forwardRef<RichTextHandle, Props>(function RichTextEditor
     edRef.current?.setHtml(toEditorHtml(value));
     lastValue.current = value;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, mode]);
+  }, [value]);
 
   function exec(cmd: string, arg?: string) {
     edRef.current?.focus();
@@ -204,7 +218,7 @@ const RichTextEditor = forwardRef<RichTextHandle, Props>(function RichTextEditor
       <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" className="sr-only" onChange={onPickImage} />
 
       {mode === "visual" ? (
-        <Editable ref={edRef} initialHtml={toEditorHtml(value)} onInput={emit} minHeight={minHeight} placeholder={placeholder} />
+        <Editable ref={edRef} initialHtml={first.current} onInput={emit} minHeight={minHeight} placeholder={placeholder} />
       ) : (
         <textarea
           ref={taRef}

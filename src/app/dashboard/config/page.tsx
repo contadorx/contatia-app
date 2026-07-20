@@ -3,6 +3,7 @@ import { CrmIntegrations } from "@/components/CrmIntegrations";
 import { createClient } from "@/lib/supabase/server";
 import SmtpForm from "@/components/SmtpForm";
 import BoxSignatureForm from "@/components/BoxSignatureForm";
+import BoxCapForm from "@/components/BoxCapForm";
 import { DomainHealthPanel } from "@/components/DomainHealthPanel";
 import { BookingSettings } from "@/components/BookingSettings";
 import AccountRowActions from "@/components/AccountRowActions";
@@ -173,7 +174,10 @@ export default async function Config() {
                           {a.provider !== "gmail" && (
                             <div className="mt-2"><SmtpForm editAccount={a} /></div>
                           )}
-                          <BoxSignatureForm accountId={a.id} initial={(a.signature as string) || ""} />
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            <BoxSignatureForm accountId={a.id} initial={(a.signature as string) || ""} />
+                            <BoxCapForm accountId={a.id} initialCap={Number(a.daily_cap) || 40} initialWarmup={(a.warmup_stage ?? 0) !== -1} />
+                          </div>
                         </div>
                         <AccountRowActions id={a.id} active={a.is_active} />
                       </div>

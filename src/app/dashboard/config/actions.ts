@@ -249,6 +249,22 @@ export async function saveSignature(signature: string) {
   return { ok: true };
 }
 
+// Define o LIMITE DIÁRIO alvo de uma caixa (o aquecimento sobe gradual até ele) e
+// liga/desliga o aquecimento. Clampa entre 10 e 500 por segurança.
+export async function saveDailyCap(accountId: string, cap: number, warmup: boolean) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const c = Math.max(10, Math.min(500, Math.round(Number(cap) || 40)));
+  const { error } = await supabase
+    .from("email_accounts")
+    .update({ daily_cap: c, warmup_stage: warmup ? 0 : -1 })
+    .eq("id", accountId)
+    .eq("tenant_id", tenant_id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/config");
+  return { ok: true };
+}
+
 // Salva a assinatura de UMA caixa. Vazia = usa a assinatura geral no envio.
 export async function saveBoxSignature(accountId: string, signature: string) {
   const { supabase, tenant_id } = await ctx();
