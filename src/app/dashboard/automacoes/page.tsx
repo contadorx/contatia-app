@@ -14,15 +14,18 @@ const TRIGGER_LABEL: Record<string, string> = {
   cadence_completed: "Terminou cadência +",
   opportunity_lost: "Oportunidade perdida +",
   opportunity_won: "Oportunidade ganha +",
+  state_days: "No estado há",
+  date_reached: "Chegou a data de retomada",
 };
 // gatilhos cujo trigger_value é "X dias"
-const DIAS_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won"];
+const DIAS_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won", "state_days"];
 const ACTION_LABEL: Record<string, string> = {
   enroll: "inscrever na cadência",
   pause_all: "pausar cadências",
   move_stage: "mover de estágio",
   mark_hot: "marcar quente",
   add_tag: "aplicar tag",
+  mark_state: "marcar estado",
   suppress: "suprimir (parar definitivo)",
 };
 
@@ -31,7 +34,7 @@ export default async function Automacoes() {
   const supabase = createClient();
 
   const [{ data: automations }, { data: sequences }, { data: stages }, { data: logs }, { data: tags }, { data: products }] = await Promise.all([
-    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, product_id, sequences(name), pipeline_stages(name), products(name)").order("created_at", { ascending: false }),
+    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, product_id, cond_state, set_state, sequences(name), pipeline_stages(name), products(name)").order("created_at", { ascending: false }),
     supabase.from("sequences").select("id, name").eq("is_active", true),
     supabase.from("pipeline_stages").select("id, name").order("position", { ascending: true }),
     supabase.from("automation_logs").select("detail, created_at, contacts(name)").order("created_at", { ascending: false }).limit(15),
@@ -58,12 +61,13 @@ export default async function Automacoes() {
               <div>
                 <p className="text-sm font-semibold">{r.name}</p>
                 <p className="text-xs text-subtle">
-                  Quando <b>{TRIGGER_LABEL[r.trigger_type] || r.trigger_type}{r.trigger_value ? ` ${r.trigger_value}${DIAS_TRIGGERS.includes(r.trigger_type) ? " dias" : ""}` : ""}</b>
+                  Quando <b>{TRIGGER_LABEL[r.trigger_type] || r.trigger_type}{r.cond_state ? ` "${r.cond_state}"` : ""}{r.trigger_value ? ` ${r.trigger_value}${DIAS_TRIGGERS.includes(r.trigger_type) ? " dias" : ""}` : ""}</b>
                   {r.products?.name ? <> no produto <b>{r.products.name}</b></> : null}
                   {" → "}
                   {ACTION_LABEL[r.action_type] || r.action_type}
                   {r.sequences?.name ? ` "${r.sequences.name}"` : ""}
                   {r.pipeline_stages?.name ? ` "${r.pipeline_stages.name}"` : ""}
+                  {r.action_type === "mark_state" && r.set_state ? ` "${r.set_state}"` : ""}
                 </p>
               </div>
               <AutomationRow id={r.id} active={r.is_active} />

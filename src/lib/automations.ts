@@ -57,7 +57,8 @@ export async function runAutomations(
 /** Aplica UMA regra a um contato (ação + log). Reutilizado pelo cron (gatilhos de tempo). */
 export async function applyRule(
   db: DB,
-  { tenantId, contactId, rule }: { tenantId: string; contactId: string; rule: any }
+  { tenantId, contactId, rule }: { tenantId: string; contactId: string; rule: any },
+  opts?: { skipDedup?: boolean }
 ): Promise<boolean> {
   // gate de supressão também aqui (vale para o caminho de TEMPO/cron): contato
   // suprimido nunca é tocado por automação.
@@ -67,13 +68,16 @@ export async function applyRule(
   // dedup 1x por contato: gatilhos de evento (link_clicked, doc_opened, replied…)
   // recorrem — sem essa checagem a regra re-disparava a cada clique/abertura,
   // re-somando score. O caminho de tempo (cron) já checava; agora vale para todos.
-  const { data: jaDisparou } = await db
-    .from("automation_logs")
-    .select("id")
-    .eq("automation_id", rule.id)
-    .eq("contact_id", contactId)
-    .maybeSingle();
-  if (jaDisparou) return false;
+  // (skipDedup: gatilhos que PODEM repetir, como 'date_reached' de retomada.)
+  if (!opts?.skipDedup) {
+    const { data: jaDisparou } = await db
+      .from("automation_logs")
+      .select("id")
+      .eq("automation_id", rule.id)
+      .eq("contact_id", contactId)
+      .maybeSingle();
+    if (jaDisparou) return false;
+  }
 
   const ok = await applyAction(db, { tenantId, contactId, rule });
   if (ok) {
@@ -147,6 +151,11 @@ async function applyAction(
       );
       return true;
     }
+    // Só carimba o estado (ex.: 'dormente' ao fim de uma cadência). set_state é aplicado
+    // no applyRule; aqui garantimos que a ação "conta como executada".
+    case "mark_state": {
+      return !!(rule.set_state && String(rule.set_state).trim());
+    }
     case "enroll": {
       if (!rule.action_seq) return false;
       // evita duplicar: só inscreve se não houver enrollment ativo nessa sequência
@@ -175,20 +184,23 @@ async function applyAction(
 // Todas respeitam o escopo por PRODUTO (rule.product_id) quando definido, para
 // que "sem atividade" signifique "sem atividade NAQUELE produto".
 // ============================================================
-const TIME_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won"];
+const TIME_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won", "state_days", "date_reached"];
+// gatilhos que NÃO exigem "X dias" preenchido
+const SEM_DIAS = ["cadence_completed", "date_reached"];
 
 export async function runTimeAutomations(admin: DB): Promise<{ ran: number }> {
   let ran = 0;
   const { data: rules } = await admin
     .from("automations")
-    .select("id, tenant_id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, product_id, source_seq, end_current, set_state")
+    .select("id, tenant_id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, product_id, source_seq, end_current, set_state, cond_state")
     .eq("is_active", true)
     .in("trigger_type", TIME_TRIGGERS);
 
   for (const rule of (rules as any[]) || []) {
     const days = Number(rule.trigger_value) || 0;
-    if (rule.trigger_type !== "cadence_completed" && !days) continue; // dias obrigatórios (cadence_completed aceita 0 = na hora)
+    if (!SEM_DIAS.includes(rule.trigger_type) && !days) continue; // dias obrigatórios (exceto os de SEM_DIAS)
     const cutoff = new Date(Date.now() - days * 86400 * 1000).toISOString();
+    const skipDedup = rule.trigger_type === "date_reached"; // retomada pode repetir
 
     let contactIds: string[] = [];
     try {
@@ -196,19 +208,54 @@ export async function runTimeAutomations(admin: DB): Promise<{ ran: number }> {
       else if (rule.trigger_type === "cadence_completed") contactIds = await candidatosCadenciaTerminada(admin, rule, cutoff);
       else if (rule.trigger_type === "opportunity_lost") contactIds = await candidatosOportunidade(admin, rule, cutoff, "lost");
       else if (rule.trigger_type === "opportunity_won") contactIds = await candidatosOportunidade(admin, rule, cutoff, "won");
+      else if (rule.trigger_type === "state_days") contactIds = await candidatosEstadoDias(admin, rule, cutoff);
+      else if (rule.trigger_type === "date_reached") contactIds = await candidatosDataRetomada(admin, rule);
     } catch {
       contactIds = [];
     }
 
     for (const cid of contactIds) {
-      // dedupe: uma vez por (regra, contato)
-      const { data: fired } = await admin.from("automation_logs").select("id").eq("automation_id", rule.id).eq("contact_id", cid).maybeSingle();
-      if (fired) continue;
-      const ok = await applyRule(admin, { tenantId: rule.tenant_id, contactId: cid, rule });
-      if (ok) ran++;
+      if (!skipDedup) {
+        // dedupe: uma vez por (regra, contato)
+        const { data: fired } = await admin.from("automation_logs").select("id").eq("automation_id", rule.id).eq("contact_id", cid).maybeSingle();
+        if (fired) continue;
+      }
+      const ok = await applyRule(admin, { tenantId: rule.tenant_id, contactId: cid, rule }, { skipDedup });
+      if (ok) {
+        ran++;
+        // ao disparar a retomada, limpa a data para não repetir até um novo adiamento
+        if (rule.trigger_type === "date_reached") await admin.from("contacts").update({ retomar_em: null }).eq("id", cid);
+      }
     }
   }
   return { ran };
+}
+
+// GATILHO state_days: contatos no estado X (cond_state) há >= N dias (auto_state_at antigo).
+async function candidatosEstadoDias(admin: DB, rule: any, cutoff: string): Promise<string[]> {
+  const st = (rule.cond_state || "").trim();
+  if (!st) return [];
+  const { data } = await admin
+    .from("contacts")
+    .select("id")
+    .eq("tenant_id", rule.tenant_id)
+    .eq("auto_state", st)
+    .lt("auto_state_at", cutoff)
+    .limit(500);
+  return ((data as any[]) || []).map((c) => c.id);
+}
+
+// GATILHO date_reached: contatos cuja data de retomada (retomar_em) já chegou.
+async function candidatosDataRetomada(admin: DB, rule: any): Promise<string[]> {
+  const hoje = new Date().toISOString().slice(0, 10);
+  const { data } = await admin
+    .from("contacts")
+    .select("id")
+    .eq("tenant_id", rule.tenant_id)
+    .not("retomar_em", "is", null)
+    .lte("retomar_em", hoje)
+    .limit(500);
+  return ((data as any[]) || []).map((c) => c.id);
 }
 
 // contatos ligados a um produto (via cadência OU oportunidade) — para escopo por produto

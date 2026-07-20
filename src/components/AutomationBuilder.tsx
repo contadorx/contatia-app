@@ -19,6 +19,8 @@ const TRIGGERS = [
   { v: "cadence_completed", l: "Terminou uma cadência (+ X dias)" },
   { v: "opportunity_lost", l: "Oportunidade perdida (+ X dias)" },
   { v: "opportunity_won", l: "Oportunidade ganha (+ X dias)" },
+  { v: "state_days", l: "Está num estado há X dias" },
+  { v: "date_reached", l: "Chegou a data de retomada" },
 ];
 const ACTIONS = [
   { v: "enroll", l: "Inscrever numa cadência" },
@@ -26,11 +28,12 @@ const ACTIONS = [
   { v: "move_stage", l: "Mover para um estágio" },
   { v: "mark_hot", l: "Marcar como quente" },
   { v: "add_tag", l: "Aplicar uma tag" },
+  { v: "mark_state", l: "Marcar estado (ex.: dormente)" },
   { v: "suppress", l: "Suprimir (parar definitivo)" },
 ];
 
 // gatilhos cujo valor é "quantidade de dias"
-const DIAS_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won"];
+const DIAS_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won", "state_days"];
 // gatilhos que fazem sentido escopar por produto
 const PRODUTO_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won"];
 
@@ -58,6 +61,7 @@ export default function AutomationBuilder({
     source_seq: "",
     priority: "100",
     set_state: "",
+    cond_state: "",
   });
   const [stopOnMatch, setStopOnMatch] = useState(false);
   const [endCurrent, setEndCurrent] = useState(false);
@@ -78,7 +82,7 @@ export default function AutomationBuilder({
       });
       if (res?.error) setMsg(res.error);
       else {
-        setF({ name: "", trigger_type: "doc_opened", trigger_value: "", action_type: "enroll", action_seq: "", action_stage: "", action_tag: "", product_id: "", source_seq: "", priority: "100", set_state: "" });
+        setF({ name: "", trigger_type: "doc_opened", trigger_value: "", action_type: "enroll", action_seq: "", action_stage: "", action_tag: "", product_id: "", source_seq: "", priority: "100", set_state: "", cond_state: "" });
         setStopOnMatch(false); setEndCurrent(false);
         setOpen(false);
       }
@@ -100,6 +104,8 @@ export default function AutomationBuilder({
       ? "Dias sem atividade (ex.: 90)"
       : f.trigger_type === "cadence_completed"
       ? "Dias após terminar (ex.: 90)"
+      : f.trigger_type === "state_days"
+      ? "Dias no estado (ex.: 90)"
       : "Dias após (ex.: 30)";
 
   return (
@@ -133,6 +139,17 @@ export default function AutomationBuilder({
               onValueChange={(v) => up("trigger_value", v)}
               options={(tags || []).map((t): SmartOption => ({ value: t.id, label: t.name }))}
             />
+          )}
+          {f.trigger_type === "state_days" && (
+            <input
+              className="input mt-2"
+              value={f.cond_state}
+              onChange={(e) => up("cond_state", e.target.value)}
+              placeholder="Estado (ex.: dormente)"
+            />
+          )}
+          {f.trigger_type === "date_reached" && (
+            <p className="mt-2 text-[11px] text-subtle">Dispara quando a data de retomada anotada (na triagem) chega. Combine com &ldquo;inscrever, encerrando a atual&rdquo; na cadência de retomada.</p>
           )}
           {f.trigger_type === "cadence_completed" && (
             <SmartSelect

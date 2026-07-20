@@ -12,7 +12,7 @@ async function ctx() {
   return { supabase, tenant_id: (data?.tenant_id as string) || null, user_id: user?.id };
 }
 
-const DIAS_TRIGGERS = ["no_activity_days", "opportunity_lost", "opportunity_won"];
+const DIAS_TRIGGERS = ["no_activity_days", "opportunity_lost", "opportunity_won", "state_days"];
 
 export async function createAutomation(input: {
   name: string;
@@ -28,6 +28,7 @@ export async function createAutomation(input: {
   stop_on_match?: boolean;
   end_current?: boolean;
   set_state?: string;
+  cond_state?: string;
 }) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
@@ -35,8 +36,10 @@ export async function createAutomation(input: {
   if (input.action_type === "enroll" && !input.action_seq) return { error: "Escolha a cadência para inscrever." };
   if (input.action_type === "move_stage" && !input.action_stage) return { error: "Escolha o estágio de destino." };
   if (input.action_type === "add_tag" && !input.action_tag) return { error: "Escolha a tag a aplicar." };
+  if ((input.action_type === "mark_state") && !(input.set_state || "").trim()) return { error: "Informe o estado a marcar (ex.: dormente)." };
   if (input.trigger_type === "score_gte" && !input.trigger_value) return { error: "Informe o score mínimo." };
   if (DIAS_TRIGGERS.includes(input.trigger_type) && !input.trigger_value) return { error: "Informe a quantidade de dias." };
+  if (input.trigger_type === "state_days" && !(input.cond_state || "").trim()) return { error: "Informe o estado do gatilho (ex.: dormente)." };
 
   const { error } = await supabase.from("automations").insert({
     tenant_id,
@@ -56,6 +59,7 @@ export async function createAutomation(input: {
     stop_on_match: input.stop_on_match === true,
     end_current: input.action_type === "enroll" ? input.end_current === true : false,
     set_state: (input.set_state || "").trim() || null,
+    cond_state: input.trigger_type === "state_days" ? (input.cond_state || "").trim() || null : null,
     created_by: user_id,
   });
   if (error) return { error: error.message };
