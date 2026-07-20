@@ -34,7 +34,9 @@ export default async function Automacoes() {
   const supabase = createClient();
 
   const [{ data: automations }, { data: sequences }, { data: stages }, { data: logs }, { data: tags }, { data: products }] = await Promise.all([
-    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, product_id, cond_state, set_state, sequences(name), pipeline_stages(name), products(name)").order("created_at", { ascending: false }),
+    // sequences!action_seq: automations tem DUAS FKs para sequences (action_seq e source_seq);
+    // sem desambiguar, o embed "sequences(name)" fica ambíguo e a consulta inteira falha (lista vazia).
+    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, product_id, cond_state, set_state, sequences!action_seq(name), pipeline_stages(name), products(name)").order("created_at", { ascending: false }),
     supabase.from("sequences").select("id, name").eq("is_active", true),
     supabase.from("pipeline_stages").select("id, name").order("position", { ascending: true }),
     supabase.from("automation_logs").select("detail, created_at, contacts(name)").order("created_at", { ascending: false }).limit(15),

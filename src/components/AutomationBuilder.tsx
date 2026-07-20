@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { createAutomation } from "@/app/dashboard/automacoes/actions";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
@@ -37,17 +38,30 @@ const DIAS_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_los
 // gatilhos que fazem sentido escopar por produto
 const PRODUTO_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won"];
 
+type Template = { id: string; name: string; description?: string | null; category: string; config: any; is_global: boolean };
+
+const CATEGORY_LABEL: Record<string, string> = {
+  sinais: "Sinais quentes",
+  reciclagem: "Reciclagem / reengajamento",
+  posvenda: "Pós-venda / expansão",
+  higiene: "Higiene",
+  geral: "Outros",
+};
+
 export default function AutomationBuilder({
   sequences,
   stages,
   tags,
   products,
+  templates = [],
 }: {
   sequences: Seq[];
   stages: Stage[];
   tags?: Tag[];
   products?: Product[];
+  templates?: Template[];
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({
     name: "",
@@ -85,6 +99,7 @@ export default function AutomationBuilder({
         setF({ name: "", trigger_type: "doc_opened", trigger_value: "", action_type: "enroll", action_seq: "", action_stage: "", action_tag: "", product_id: "", source_seq: "", priority: "100", set_state: "", cond_state: "" });
         setStopOnMatch(false); setEndCurrent(false);
         setOpen(false);
+        router.refresh(); // garante que a nova automação aparece na lista na hora
       }
     });
   }

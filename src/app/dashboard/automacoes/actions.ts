@@ -82,3 +82,111 @@ export async function deleteAutomation(id: string) {
   revalidatePath("/dashboard/automacoes");
   return { ok: true };
 }
+
+// ============================================================
+// TEMPLATES DE AUTOMAÇÃO (biblioteca de sugestões)
+// ============================================================
+
+// Lista os modelos: globais (curados) + os do próprio tenant.
+export async function listAutomationTemplates() {
+  const { supabase } = await ctx();
+  const { data } = await supabase
+    .from("automation_templates")
+    .select("id, tenant_id, name, description, category, config, is_global, sort")
+    .order("is_global", { ascending: false })
+    .order("category", { ascending: true })
+    .order("sort", { ascending: true });
+  return { templates: (data as any[]) || [] };
+}
+
+// Salva uma automação existente como modelo. Superadmin pode publicar como GLOBAL.
+export async function saveAutomationAsTemplate(automationId: string, opts?: { description?: string; global?: boolean; category?: string }) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { data: a } = await supabase
+    .from("automations")
+    .select("name, trigger_type, trigger_value, action_type, priority, stop_on_match, end_current, set_state, cond_state")
+    .eq("id", automationId)
+    .maybeSingle();
+  if (!a) return { error: "Automação não encontrada." };
+  const r = a as any;
+  // guarda só o "esqueleto" (sem cadência/estágio/tag/produto — são do workspace)
+  const config = {
+    trigger_type: r.trigger_type,
+    trigger_value: r.trigger_value || undefined,
+    action_type: r.action_type,
+    priority: r.priority ?? 100,
+    stop_on_match: !!r.stop_on_match,
+    end_current: !!r.end_current,
+    set_state: r.set_state || undefined,
+    cond_state: r.cond_state || undefined,
+  };
+  const isGlobal = opts?.global === true;
+  // só superadmin publica global
+  let superadmin = false;
+  if (isGlobal) {
+    const { data: me } = await supabase.from("profiles").select("is_superadmin").eq("id", user_id ?? "").maybeSingle();
+    superadmin = !!(me as any)?.is_superadmin;
+    if (!superadmin) return { error: "Só o superadmin publica modelo global." };
+  }
+  const { error } = await supabase.from("automation_templates").insert({
+    tenant_id: isGlobal ? null : tenant_id,
+    name: r.name,
+    description: opts?.description || null,
+    category: opts?.category || "geral",
+    config,
+    is_global: isGlobal,
+    created_by: user_id,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/automacoes");
+  return { ok: true };
+}
+
+export async function deleteAutomationTemplate(id: string) {
+  const { supabase } = await ctx();
+  // a RLS já restringe: tenant só apaga os seus; superadmin apaga globais
+  const { error } = await supabase.from("automation_templates").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/automacoes");
+  return { ok: true };
+}
+
+// Pré-instala as automações padrão (só as autocontidas: pontuar/marcar estado — sem
+// alvo de cadência/estágio/tag) em workspace novo. Roda uma vez por tenant (flag).
+export async function ensureDefaultAutomations() {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return;
+  const { data: t } = await supabase.from("tenants").select("automations_seeded").eq("id", tenant_id).maybeSingle();
+  if ((t as any)?.automations_seeded) return;
+
+  // modelos globais marcados como install_default E sem "needs" (não exigem escolha)
+  const { data: tpls } = await supabase
+    .from("automation_templates")
+    .select("name, config")
+    .eq("is_global", true)
+    .eq("install_default", true);
+
+  const rows = ((tpls as any[]) || [])
+    .filter((tp) => !(tp.config?.needs && tp.config.needs.length))
+    .map((tp) => {
+      const c = tp.config || {};
+      return {
+        tenant_id,
+        name: tp.name,
+        trigger_type: c.trigger_type,
+        trigger_value: c.trigger_value || null,
+        action_type: c.action_type,
+        priority: c.priority ?? 100,
+        stop_on_match: !!c.stop_on_match,
+        end_current: !!c.end_current,
+        set_state: c.set_state || null,
+        cond_state: c.cond_state || null,
+        created_by: user_id,
+      };
+    });
+
+  if (rows.length) await supabase.from("automations").insert(rows);
+  await supabase.from("tenants").update({ automations_seeded: true }).eq("id", tenant_id);
+  revalidatePath("/dashboard/automacoes");
+}
