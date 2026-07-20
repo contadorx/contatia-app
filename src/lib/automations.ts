@@ -14,12 +14,19 @@ export async function runAutomations(
 ) {
   const { tenantId, contactId, trigger } = params;
 
+  // GATE DE SUPRESSÃO: contato suprimido (opted_out) não é tocado por NENHUMA
+  // automação — é a regra de higiene mais importante (LGPD + domínio).
+  const { data: cSup } = await db.from("contacts").select("opted_out").eq("id", contactId).maybeSingle();
+  if ((cSup as any)?.opted_out) return { ran: 0, suppressed: true };
+
   const { data: rules } = await db
     .from("automations")
-    .select("id, trigger_type, trigger_value, action_type, action_seq, action_stage")
+    .select("id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, product_id, source_seq, priority, stop_on_match, end_current, set_state")
     .eq("tenant_id", tenantId)
     .eq("is_active", true)
-    .eq("trigger_type", trigger);
+    .eq("trigger_type", trigger)
+    .order("priority", { ascending: true })
+    .order("created_at", { ascending: true });
 
   const list = (rules as any[]) || [];
   if (!list.length) return { ran: 0 };
@@ -38,7 +45,11 @@ export async function runAutomations(
       if (score < threshold) continue;
     }
     const ok = await applyRule(db, { tenantId, contactId, rule: r });
-    if (ok) ran++;
+    if (ok) {
+      ran++;
+      // "para no 1º match": regra ordenada por prioridade encerra a avaliação.
+      if (r.stop_on_match) break;
+    }
   }
   return { ran };
 }
@@ -48,6 +59,11 @@ export async function applyRule(
   db: DB,
   { tenantId, contactId, rule }: { tenantId: string; contactId: string; rule: any }
 ): Promise<boolean> {
+  // gate de supressão também aqui (vale para o caminho de TEMPO/cron): contato
+  // suprimido nunca é tocado por automação.
+  const { data: cSup } = await db.from("contacts").select("opted_out").eq("id", contactId).maybeSingle();
+  if ((cSup as any)?.opted_out) return false;
+
   // dedup 1x por contato: gatilhos de evento (link_clicked, doc_opened, replied…)
   // recorrem — sem essa checagem a regra re-disparava a cada clique/abertura,
   // re-somando score. O caminho de tempo (cron) já checava; agora vale para todos.
@@ -61,6 +77,8 @@ export async function applyRule(
 
   const ok = await applyAction(db, { tenantId, contactId, rule });
   if (ok) {
+    // grava o estado-destino, se a regra definir um (suppress já grava o seu próprio)
+    if (rule.set_state && rule.action_type !== "suppress") await setContactState(db, contactId, rule.set_state);
     await db.from("automation_logs").insert({
       tenant_id: tenantId,
       automation_id: rule.id,
@@ -71,6 +89,20 @@ export async function applyRule(
   return ok;
 }
 
+// Encerra as cadências ATIVAS do contato (transição limpa): enrollments ativos →
+// 'stopped' e toques pendentes → 'skipped'. Usado por enroll com end_current e por suppress.
+async function endActiveCadences(db: DB, contactId: string) {
+  await db.from("enrollments").update({ status: "stopped" }).eq("contact_id", contactId).eq("status", "active");
+  await db.from("tasks").update({ status: "skipped" }).eq("contact_id", contactId).eq("status", "pending");
+}
+
+// Grava o estado da máquina no contato (rótulo + carimbo), se a regra pedir.
+async function setContactState(db: DB, contactId: string, state?: string | null) {
+  const s = (state || "").trim();
+  if (!s) return;
+  await db.from("contacts").update({ auto_state: s, auto_state_at: new Date().toISOString() }).eq("id", contactId);
+}
+
 async function applyAction(
   db: DB,
   { tenantId, contactId, rule }: { tenantId: string; contactId: string; rule: any }
@@ -79,6 +111,19 @@ async function applyAction(
     case "pause_all": {
       await db.from("enrollments").update({ status: "paused" }).eq("contact_id", contactId).eq("status", "active");
       await db.from("tasks").update({ status: "skipped" }).eq("contact_id", contactId).eq("status", "pending");
+      return true;
+    }
+    // SUPRESSÃO PERMANENTE: encerra tudo, marca opted_out (bloqueio duro em todas as
+    // portas de inscrição) e rotula o estado. Nunca reentra.
+    case "suppress": {
+      await endActiveCadences(db, contactId);
+      await db.from("contacts").update({ opted_out: true, auto_state: "suprimido", auto_state_at: new Date().toISOString() }).eq("id", contactId);
+      if (rule.action_tag) {
+        await db.from("contact_tags").upsert(
+          { tenant_id: tenantId, contact_id: contactId, tag_id: rule.action_tag },
+          { onConflict: "contact_id,tag_id", ignoreDuplicates: true }
+        );
+      }
       return true;
     }
     case "mark_hot": {
@@ -113,6 +158,9 @@ async function applyAction(
         .eq("status", "active")
         .maybeSingle();
       if (existing) return false;
+      // TRANSIÇÃO LIMPA: se a regra pede, encerra a cadência atual antes de inscrever
+      // (a regra de ouro: nunca duas cadências ao mesmo tempo).
+      if (rule.end_current) await endActiveCadences(db, contactId);
       await enrollViaEngine(db, { tenantId, contactId, sequenceId: rule.action_seq });
       return true;
     }
@@ -133,7 +181,7 @@ export async function runTimeAutomations(admin: DB): Promise<{ ran: number }> {
   let ran = 0;
   const { data: rules } = await admin
     .from("automations")
-    .select("id, tenant_id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, product_id, source_seq")
+    .select("id, tenant_id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, product_id, source_seq, end_current, set_state")
     .eq("is_active", true)
     .in("trigger_type", TIME_TRIGGERS);
 

@@ -174,6 +174,11 @@ export async function POST(req: Request, { params }: { params: { token: string }
         .update({ score: (contact.score || 0) + (POINTS["replied"] || 30), last_activity_at: new Date().toISOString() })
         .eq("id", contact.id);
     }
+    // Triagem: classifica a resposta e joga na fila de decisão (mesmo sem cadência ativa).
+    try {
+      const { upsertReplyTriage } = await import("@/lib/triage");
+      await upsertReplyTriage(admin, { tenantId: tenant_id, contactId: contact.id, channel: "whatsapp", text });
+    } catch { /* não bloqueia o webhook */ }
   }
 
   return NextResponse.json({ ok: true, stored: true, matched: !!contact, marked });

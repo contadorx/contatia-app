@@ -107,6 +107,11 @@ export async function GET(req: Request) {
           .from("contacts")
           .update({ score: (c?.score || 0) + (POINTS["replied"] || 30), last_activity_at: new Date().toISOString() })
           .eq("id", e.contact_id);
+        // Triagem: classifica a resposta (por assunto/corpo) e joga na fila de decisão.
+        try {
+          const { upsertReplyTriage } = await import("@/lib/triage");
+          await upsertReplyTriage(admin, { tenantId: acc.tenant_id, contactId: e.contact_id, channel: "email", text: subjectByEmail[email] || "" });
+        } catch { /* não bloqueia o cron */ }
         marked++;
       }
 

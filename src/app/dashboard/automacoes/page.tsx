@@ -23,6 +23,7 @@ const ACTION_LABEL: Record<string, string> = {
   move_stage: "mover de estágio",
   mark_hot: "marcar quente",
   add_tag: "aplicar tag",
+  suppress: "suprimir (parar definitivo)",
 };
 
 export default async function Automacoes() {

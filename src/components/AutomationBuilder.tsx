@@ -26,6 +26,7 @@ const ACTIONS = [
   { v: "move_stage", l: "Mover para um estágio" },
   { v: "mark_hot", l: "Marcar como quente" },
   { v: "add_tag", l: "Aplicar uma tag" },
+  { v: "suppress", l: "Suprimir (parar definitivo)" },
 ];
 
 // gatilhos cujo valor é "quantidade de dias"
@@ -55,7 +56,11 @@ export default function AutomationBuilder({
     action_tag: "",
     product_id: "",
     source_seq: "",
+    priority: "100",
+    set_state: "",
   });
+  const [stopOnMatch, setStopOnMatch] = useState(false);
+  const [endCurrent, setEndCurrent] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -65,10 +70,16 @@ export default function AutomationBuilder({
   function save() {
     setMsg(null);
     start(async () => {
-      const res = await createAutomation(f);
+      const res = await createAutomation({
+        ...f,
+        priority: Number(f.priority) || 100,
+        stop_on_match: stopOnMatch,
+        end_current: endCurrent,
+      });
       if (res?.error) setMsg(res.error);
       else {
-        setF({ name: "", trigger_type: "doc_opened", trigger_value: "", action_type: "enroll", action_seq: "", action_stage: "", action_tag: "", product_id: "", source_seq: "" });
+        setF({ name: "", trigger_type: "doc_opened", trigger_value: "", action_type: "enroll", action_seq: "", action_stage: "", action_tag: "", product_id: "", source_seq: "", priority: "100", set_state: "" });
+        setStopOnMatch(false); setEndCurrent(false);
         setOpen(false);
       }
     });
@@ -185,6 +196,42 @@ export default function AutomationBuilder({
               options={(tags || []).map((t): SmartOption => ({ value: t.id, label: t.name }))}
             />
           )}
+          {f.action_type === "enroll" && (
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={endCurrent} onChange={(e) => setEndCurrent(e.target.checked)} />
+              Encerrar a cadência atual antes (transição limpa)
+            </label>
+          )}
+          {f.action_type === "suppress" && (
+            <>
+              <SmartSelect
+                className="mt-2"
+                placeholder="Tag ao suprimir (opcional)"
+                clearable
+                value={f.action_tag}
+                onValueChange={(v) => up("action_tag", v)}
+                options={(tags || []).map((t): SmartOption => ({ value: t.id, label: t.name }))}
+              />
+              <p className="mt-1 text-[11px] text-subtle">Encerra tudo e marca o contato como &ldquo;parar&rdquo; — nenhuma automação volta a tocá-lo.</p>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Avançado: ordem de avaliação e estado (máquina de estados) */}
+      <div className="mt-3 grid gap-3 rounded-xl border border-line p-3 sm:grid-cols-3">
+        <div>
+          <label className="label">Prioridade</label>
+          <input className="input mt-1" type="number" value={f.priority} onChange={(e) => up("priority", e.target.value)} placeholder="100" />
+          <p className="mt-1 text-[11px] text-subtle">Menor = avaliada antes.</p>
+        </div>
+        <label className="flex items-center gap-2 self-end pb-2 text-sm">
+          <input type="checkbox" checked={stopOnMatch} onChange={(e) => setStopOnMatch(e.target.checked)} />
+          Parar nas demais regras se esta disparar
+        </label>
+        <div>
+          <label className="label">Marcar estado (opcional)</label>
+          <input className="input mt-1" value={f.set_state} onChange={(e) => up("set_state", e.target.value)} placeholder="ex.: em_A, dormente" />
         </div>
       </div>
 

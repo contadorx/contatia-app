@@ -24,6 +24,10 @@ export async function createAutomation(input: {
   action_tag?: string;
   product_id?: string;
   source_seq?: string;
+  priority?: number;
+  stop_on_match?: boolean;
+  end_current?: boolean;
+  set_state?: string;
 }) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
@@ -42,11 +46,16 @@ export async function createAutomation(input: {
     action_type: input.action_type,
     action_seq: input.action_type === "enroll" ? input.action_seq : null,
     action_stage: input.action_type === "move_stage" ? input.action_stage : null,
-    action_tag: input.action_type === "add_tag" ? input.action_tag : null,
+    action_tag: (input.action_type === "add_tag" || input.action_type === "suppress") ? input.action_tag || null : null,
     // escopo por produto (opcional) para gatilhos que dependem de "no produto"
     product_id: input.product_id || null,
     // cadência de origem do gatilho "terminou a cadência"
     source_seq: input.trigger_type === "cadence_completed" ? input.source_seq || null : null,
+    // máquina de estados (Fase 1): ordem, parar-no-match, transição limpa, estado-destino
+    priority: Number.isFinite(input.priority as number) ? (input.priority as number) : 100,
+    stop_on_match: input.stop_on_match === true,
+    end_current: input.action_type === "enroll" ? input.end_current === true : false,
+    set_state: (input.set_state || "").trim() || null,
     created_by: user_id,
   });
   if (error) return { error: error.message };

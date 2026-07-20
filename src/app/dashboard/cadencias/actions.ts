@@ -164,10 +164,12 @@ export async function enrollContact(contactId: string, sequenceId: string) {
 
   const { data: contact } = await supabase
     .from("contacts")
-    .select("id, name, email, company, phone, role_title, cnpj, custom, assigned_to")
+    .select("id, name, email, company, phone, role_title, cnpj, custom, assigned_to, opted_out")
     .eq("id", contactId)
     .single();
   if (!contact) return { error: "Contato não encontrado." };
+  // GATE DE SUPRESSÃO: contato que pediu "parar" (opted_out) nunca é reinscrito.
+  if ((contact as any).opted_out) return { error: "Contato suprimido (pediu para parar). Não pode ser reinscrito.", suppressed: true };
 
   // M1: não inscreve de novo quem já está ATIVO/PAUSADO nesta cadência (senão gera um
   // 2º jogo de tarefas → o lead recebe cada e-mail duas vezes). O índice único 0070 é o

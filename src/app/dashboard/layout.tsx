@@ -123,6 +123,16 @@ export default async function DashboardLayout({
       .is("read_at", null);
     unreadReplies = count ?? 0;
   }
+
+  // itens de triagem pendentes → badge no menu
+  let triageCount = 0;
+  if (profile?.tenant_id) {
+    const { count } = await supabase
+      .from("reply_triage")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending");
+    triageCount = count ?? 0;
+  }
   const bannerText: Record<string, string> = {
     past_due: "Seu pagamento está em atraso. Regularize para não perder o acesso.",
     pending: "Falta o pagamento para ativar sua assinatura.",
@@ -152,7 +162,7 @@ export default async function DashboardLayout({
             Contat<span className="text-brand">ia</span>
           </p>
 
-          <DashboardNav isSuperadmin={isSuperadmin} unreadReplies={unreadReplies} />
+          <DashboardNav isSuperadmin={isSuperadmin} unreadReplies={unreadReplies} triageCount={triageCount} />
 
           <div className="mt-auto border-t border-line pt-4">
             <Link

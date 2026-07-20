@@ -11,6 +11,7 @@ const groups: { title?: string; items: { href: string; label: string; primary?: 
       { href: "/dashboard", label: "Hoje", primary: true },
       { href: "/dashboard/pipeline", label: "Pipeline", primary: true },
       { href: "/dashboard/respostas", label: "Respostas", primary: true },
+      { href: "/dashboard/triagem", label: "Triagem", primary: true },
       { href: "/dashboard/reunioes", label: "Reuniões", primary: true },
     ],
   },
@@ -47,7 +48,7 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-export default function DashboardNav({ isSuperadmin = false, unreadReplies = 0 }: { isSuperadmin?: boolean; unreadReplies?: number }) {
+export default function DashboardNav({ isSuperadmin = false, unreadReplies = 0, triageCount = 0 }: { isSuperadmin?: boolean; unreadReplies?: number; triageCount?: number }) {
   const pathname = usePathname();
 
   const allGroups = isSuperadmin
@@ -77,6 +78,11 @@ export default function DashboardNav({ isSuperadmin = false, unreadReplies = 0 }
             {n.href === "/dashboard/respostas" && unreadReplies > 0 && (
               <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-white text-brand" : "bg-signal text-white"}`}>
                 {unreadReplies > 99 ? "99+" : unreadReplies}
+              </span>
+            )}
+            {n.href === "/dashboard/triagem" && triageCount > 0 && (
+              <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-white text-brand" : "bg-warn text-white"}`}>
+                {triageCount > 99 ? "99+" : triageCount}
               </span>
             )}
           </Link>
