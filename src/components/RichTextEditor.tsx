@@ -40,28 +40,37 @@ const RichTextEditor = forwardRef<RichTextHandle, Props>(function RichTextEditor
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const first = useRef(toEditorHtml(value)); // conteúdo do primeiro paint
+  // último valor que ESTE editor emitiu — para diferenciar "eco da digitação" de
+  // "mudança externa" (modelo/IA) e nunca reescrever o DOM enquanto o usuário digita.
+  const lastValue = useRef(value);
 
-  // Ao ENTRAR no modo visual, joga o valor atual dentro do editor.
+  // Ao ENTRAR no modo visual, joga o valor atual dentro do editor (vindo do HTML).
   useEffect(() => {
     if (mode === "visual" && edRef.current) {
       const norm = toEditorHtml(value);
       if (edRef.current.innerHTML !== norm) edRef.current.innerHTML = norm;
+      lastValue.current = value;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
-  // Se o valor mudar POR FORA (ex.: IA gerou, "usar modelo") e o editor não está
-  // em foco, reflete no DOM. Comparo com o innerHTML pra não pisar na digitação.
+  // Mudança EXTERNA de value (ex.: "usar modelo", IA gerou): reflete no DOM.
+  // Se o value é apenas o eco do que o próprio editor acabou de emitir, ignora —
+  // é isso que impedia a digitação (reescrever o DOM a cada tecla).
   useEffect(() => {
-    if (mode === "visual" && edRef.current && document.activeElement !== edRef.current) {
-      const norm = toEditorHtml(value);
-      if (edRef.current.innerHTML !== norm) edRef.current.innerHTML = norm;
-    }
+    if (mode !== "visual" || !edRef.current) return;
+    if (value === lastValue.current) return; // eco da digitação → não mexe
+    const norm = toEditorHtml(value);
+    if (edRef.current.innerHTML !== norm) edRef.current.innerHTML = norm;
+    lastValue.current = value;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   function sync() {
-    if (edRef.current) onChange(edRef.current.innerHTML);
+    if (edRef.current) {
+      lastValue.current = edRef.current.innerHTML;
+      onChange(edRef.current.innerHTML);
+    }
   }
   function exec(cmd: string, arg?: string) {
     edRef.current?.focus();
