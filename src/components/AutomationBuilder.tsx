@@ -9,6 +9,7 @@ type Seq = { id: string; name: string };
 type Stage = { id: string; name: string };
 type Tag = { id: string; name: string };
 type Product = { id: string; name: string };
+type Member = { id: string; full_name?: string | null; email: string };
 
 const TRIGGERS = [
   { v: "doc_opened", l: "Abriu uma proposta" },
@@ -29,6 +30,8 @@ const ACTIONS = [
   { v: "move_stage", l: "Mover para um estágio" },
   { v: "mark_hot", l: "Marcar como quente" },
   { v: "add_tag", l: "Aplicar uma tag" },
+  { v: "assign_owner", l: "Trocar o responsável (dono)" },
+  { v: "set_product", l: "Trocar o produto da oportunidade" },
   { v: "mark_state", l: "Marcar estado (ex.: dormente)" },
   { v: "suppress", l: "Suprimir (parar definitivo)" },
 ];
@@ -36,7 +39,6 @@ const ACTIONS = [
 // gatilhos cujo valor é "quantidade de dias"
 const DIAS_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won", "state_days"];
 // gatilhos que fazem sentido escopar por produto
-const PRODUTO_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won"];
 
 type Template = { id: string; name: string; description?: string | null; category: string; config: any; is_global: boolean };
 
@@ -53,12 +55,14 @@ export default function AutomationBuilder({
   stages,
   tags,
   products,
+  members = [],
   templates = [],
 }: {
   sequences: Seq[];
   stages: Stage[];
   tags?: Tag[];
   products?: Product[];
+  members?: Member[];
   templates?: Template[];
 }) {
   const router = useRouter();
@@ -76,6 +80,11 @@ export default function AutomationBuilder({
     priority: "100",
     set_state: "",
     cond_state: "",
+    cond_owner_id: "",
+    cond_has_tag: "",
+    cond_not_tag: "",
+    action_owner: "",
+    action_product: "",
   });
   const [stopOnMatch, setStopOnMatch] = useState(false);
   const [endCurrent, setEndCurrent] = useState(false);
@@ -97,7 +106,7 @@ export default function AutomationBuilder({
           end_current: endCurrent,
         });
         if (res?.error) { setMsg(res.error); return; }
-        setF({ name: "", trigger_type: "doc_opened", trigger_value: "", action_type: "enroll", action_seq: "", action_stage: "", action_tag: "", product_id: "", source_seq: "", priority: "100", set_state: "", cond_state: "" });
+        setF({ name: "", trigger_type: "doc_opened", trigger_value: "", action_type: "enroll", action_seq: "", action_stage: "", action_tag: "", product_id: "", source_seq: "", priority: "100", set_state: "", cond_state: "", cond_owner_id: "", cond_has_tag: "", cond_not_tag: "", action_owner: "", action_product: "" });
         setStopOnMatch(false); setEndCurrent(false);
         setOpen(false);
         router.refresh(); // garante que a nova automação aparece na lista na hora
@@ -117,7 +126,6 @@ export default function AutomationBuilder({
 
   const isDias = DIAS_TRIGGERS.includes(f.trigger_type);
   const isScore = f.trigger_type === "score_gte";
-  const podeProduto = PRODUTO_TRIGGERS.includes(f.trigger_type) && (products || []).length > 0;
   const diasPlaceholder =
     f.trigger_type === "no_activity_days"
       ? "Dias sem atividade (ex.: 90)"
@@ -180,21 +188,6 @@ export default function AutomationBuilder({
               options={sequences.map((s): SmartOption => ({ value: s.id, label: s.name }))}
             />
           )}
-          {podeProduto && (
-            <>
-              <SmartSelect
-                className="mt-2"
-                placeholder="Qualquer produto"
-                clearable
-                value={f.product_id}
-                onValueChange={(v) => up("product_id", v)}
-                options={(products || []).map((p): SmartOption => ({ value: p.id, label: p.name }))}
-              />
-              <p className="mt-1 text-[11px] text-subtle">
-                Com um produto escolhido, &ldquo;sem atividade&rdquo; e &ldquo;terminou a cadência&rdquo; olham só para aquele produto — o mesmo lead pode ser trabalhado em outros produtos sem disparar a regra.
-              </p>
-            </>
-          )}
         </div>
 
         <div className="rounded-xl bg-muted p-4">
@@ -232,6 +225,25 @@ export default function AutomationBuilder({
               options={(tags || []).map((t): SmartOption => ({ value: t.id, label: t.name }))}
             />
           )}
+          {f.action_type === "assign_owner" && (
+            <SmartSelect
+              className="mt-2"
+              placeholder="Novo responsável…"
+              clearable
+              value={f.action_owner}
+              onValueChange={(v) => up("action_owner", v)}
+              options={members.map((m): SmartOption => ({ value: m.id, label: m.full_name || m.email }))}
+            />
+          )}
+          {f.action_type === "set_product" && (
+            <SmartSelect
+              className="mt-2"
+              placeholder="Produto de destino…"
+              value={f.action_product}
+              onValueChange={(v) => up("action_product", v)}
+              options={(products || []).map((p): SmartOption => ({ value: p.id, label: p.name }))}
+            />
+          )}
           {f.action_type === "enroll" && (
             <label className="mt-2 flex items-center gap-2 text-sm">
               <input type="checkbox" checked={endCurrent} onChange={(e) => setEndCurrent(e.target.checked)} />
@@ -252,6 +264,60 @@ export default function AutomationBuilder({
             </>
           )}
         </div>
+      </div>
+
+      {/* Condições (guardas): "só dispara se…" — chave para multi-produto */}
+      <div className="mt-3 rounded-xl border border-line p-3">
+        <p className="label">Só dispara se… (opcional)</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <span className="text-[11px] text-subtle">É deste produto</span>
+            <SmartSelect
+              className="mt-1"
+              placeholder="Qualquer produto"
+              clearable
+              value={f.product_id}
+              onValueChange={(v) => up("product_id", v)}
+              options={(products || []).map((p): SmartOption => ({ value: p.id, label: p.name }))}
+            />
+          </div>
+          <div>
+            <span className="text-[11px] text-subtle">É deste responsável</span>
+            <SmartSelect
+              className="mt-1"
+              placeholder="Qualquer dono"
+              clearable
+              value={f.cond_owner_id}
+              onValueChange={(v) => up("cond_owner_id", v)}
+              options={members.map((m): SmartOption => ({ value: m.id, label: m.full_name || m.email }))}
+            />
+          </div>
+          <div>
+            <span className="text-[11px] text-subtle">Tem a tag</span>
+            <SmartSelect
+              className="mt-1"
+              placeholder="—"
+              clearable
+              value={f.cond_has_tag}
+              onValueChange={(v) => up("cond_has_tag", v)}
+              options={(tags || []).map((t): SmartOption => ({ value: t.id, label: t.name }))}
+            />
+          </div>
+          <div>
+            <span className="text-[11px] text-subtle">NÃO tem a tag</span>
+            <SmartSelect
+              className="mt-1"
+              placeholder="—"
+              clearable
+              value={f.cond_not_tag}
+              onValueChange={(v) => up("cond_not_tag", v)}
+              options={(tags || []).map((t): SmartOption => ({ value: t.id, label: t.name }))}
+            />
+          </div>
+        </div>
+        <p className="mt-2 text-[11px] text-subtle">
+          &ldquo;É deste produto&rdquo; = o contato está ligado ao produto (por cadência ou oportunidade). Combine as condições: todas precisam bater para a regra disparar.
+        </p>
       </div>
 
       {/* Avançado: ordem de avaliação e estado (máquina de estados) */}

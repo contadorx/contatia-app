@@ -25,6 +25,8 @@ const ACTION_LABEL: Record<string, string> = {
   move_stage: "mover de estágio",
   mark_hot: "marcar quente",
   add_tag: "aplicar tag",
+  assign_owner: "trocar responsável",
+  set_product: "trocar produto",
   mark_state: "marcar estado",
   suppress: "suprimir (parar definitivo)",
 };
@@ -33,11 +35,11 @@ export default async function Automacoes() {
   // Automações incluídas em TODOS os planos (Individual e Equipes) — sem gate.
   const supabase = createClient();
 
-  const [{ data: automations }, { data: sequences }, { data: allSeqs }, { data: stages }, { data: logs }, { data: tags }, { data: products }, { data: allProducts }] = await Promise.all([
+  const [{ data: automations }, { data: sequences }, { data: allSeqs }, { data: stages }, { data: logs }, { data: tags }, { data: products }, { data: allProducts }, { data: members }] = await Promise.all([
     // SEM embeds: automations tem DUAS FKs para sequences (action_seq e source_seq), o que
     // torna qualquer embed "sequences(...)" ambíguo e quebra a consulta inteira (lista vazia).
     // Buscamos só as colunas cruas e resolvemos os nomes com os mapas abaixo — à prova de embed.
-    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, product_id, cond_state, set_state, action_seq, action_stage, source_seq, action_tag").order("created_at", { ascending: false }),
+    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, product_id, cond_state, set_state, action_seq, action_stage, source_seq, action_tag, cond_owner_id, cond_has_tag, cond_not_tag, action_owner, action_product").order("created_at", { ascending: false }),
     supabase.from("sequences").select("id, name").eq("is_active", true),
     supabase.from("sequences").select("id, name"),
     supabase.from("pipeline_stages").select("id, name").order("position", { ascending: true }),
@@ -45,6 +47,7 @@ export default async function Automacoes() {
     supabase.from("tags").select("id, name").order("name", { ascending: true }),
     supabase.from("products").select("id, name").eq("active", true).order("name", { ascending: true }),
     supabase.from("products").select("id, name"),
+    supabase.from("profiles").select("id, full_name, email").eq("is_active", true),
   ]);
 
   const rules = (automations as any[]) || [];
@@ -54,6 +57,17 @@ export default async function Automacoes() {
   const seqName = new Map(((allSeqs as any[]) || []).map((s) => [s.id, s.name]));
   const stageName = new Map(((stages as any[]) || []).map((s) => [s.id, s.name]));
   const prodName = new Map(((allProducts as any[]) || []).map((p) => [p.id, p.name]));
+  const tagName = new Map(((tags as any[]) || []).map((t) => [t.id, t.name]));
+  const memberName = new Map(((members as any[]) || []).map((m) => [m.id, m.full_name || m.email]));
+  // monta a linha "só se…" das condições
+  const guardText = (r: any) => {
+    const parts: string[] = [];
+    if (r.product_id && prodName.get(r.product_id)) parts.push(`produto ${prodName.get(r.product_id)}`);
+    if (r.cond_owner_id && memberName.get(r.cond_owner_id)) parts.push(`dono ${memberName.get(r.cond_owner_id)}`);
+    if (r.cond_has_tag && tagName.get(r.cond_has_tag)) parts.push(`tem "${tagName.get(r.cond_has_tag)}"`);
+    if (r.cond_not_tag && tagName.get(r.cond_not_tag)) parts.push(`sem "${tagName.get(r.cond_not_tag)}"`);
+    return parts.join(" · ");
+  };
 
   return (
     <div>
@@ -61,7 +75,7 @@ export default async function Automacoes() {
       <p className="mt-1 text-sm text-subtle">Regras &ldquo;quando isso acontecer, faça aquilo&rdquo; — o contato reage sozinho ao comportamento.</p>
 
       <div className="mt-6">
-        <AutomationBuilder sequences={(sequences as any[]) || []} stages={(stages as any[]) || []} tags={(tags as any[]) || []} products={(products as any[]) || []} />
+        <AutomationBuilder sequences={(sequences as any[]) || []} stages={(stages as any[]) || []} tags={(tags as any[]) || []} products={(products as any[]) || []} members={(members as any[]) || []} />
       </div>
 
       <div className="mt-6 space-y-2">
@@ -73,13 +87,15 @@ export default async function Automacoes() {
                 <p className="text-xs text-subtle">
                   Quando <b>{TRIGGER_LABEL[r.trigger_type] || r.trigger_type}{r.cond_state ? ` "${r.cond_state}"` : ""}{r.trigger_value ? ` ${r.trigger_value}${DIAS_TRIGGERS.includes(r.trigger_type) ? " dias" : ""}` : ""}</b>
                   {r.source_seq && seqName.get(r.source_seq) ? <> na cadência <b>{seqName.get(r.source_seq)}</b></> : null}
-                  {r.product_id && prodName.get(r.product_id) ? <> no produto <b>{prodName.get(r.product_id)}</b></> : null}
                   {" → "}
                   {ACTION_LABEL[r.action_type] || r.action_type}
                   {r.action_seq && seqName.get(r.action_seq) ? ` "${seqName.get(r.action_seq)}"` : ""}
                   {r.action_stage && stageName.get(r.action_stage) ? ` "${stageName.get(r.action_stage)}"` : ""}
+                  {r.action_type === "assign_owner" ? ` "${r.action_owner ? memberName.get(r.action_owner) || "—" : "sem dono"}"` : ""}
+                  {r.action_type === "set_product" && r.action_product && prodName.get(r.action_product) ? ` "${prodName.get(r.action_product)}"` : ""}
                   {r.action_type === "mark_state" && r.set_state ? ` "${r.set_state}"` : ""}
                 </p>
+                {guardText(r) ? <p className="text-[11px] text-subtle">só se: {guardText(r)}</p> : null}
               </div>
               <AutomationRow id={r.id} active={r.is_active} />
             </div>

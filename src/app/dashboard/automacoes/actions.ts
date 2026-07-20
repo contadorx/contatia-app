@@ -29,6 +29,11 @@ export async function createAutomation(input: {
   end_current?: boolean;
   set_state?: string;
   cond_state?: string;
+  cond_owner_id?: string;
+  cond_has_tag?: string;
+  cond_not_tag?: string;
+  action_owner?: string;
+  action_product?: string;
 }) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
@@ -36,6 +41,7 @@ export async function createAutomation(input: {
   if (input.action_type === "enroll" && !input.action_seq) return { error: "Escolha a cadência para inscrever." };
   if (input.action_type === "move_stage" && !input.action_stage) return { error: "Escolha o estágio de destino." };
   if (input.action_type === "add_tag" && !input.action_tag) return { error: "Escolha a tag a aplicar." };
+  if (input.action_type === "set_product" && !input.action_product) return { error: "Escolha o produto de destino." };
   if ((input.action_type === "mark_state") && !(input.set_state || "").trim()) return { error: "Informe o estado a marcar (ex.: dormente)." };
   if (input.trigger_type === "score_gte" && !input.trigger_value) return { error: "Informe o score mínimo." };
   if (DIAS_TRIGGERS.includes(input.trigger_type) && !input.trigger_value) return { error: "Informe a quantidade de dias." };
@@ -61,6 +67,13 @@ export async function createAutomation(input: {
       end_current: input.action_type === "enroll" ? input.end_current === true : false,
       set_state: (input.set_state || "").trim() || null,
       cond_state: input.trigger_type === "state_days" ? (input.cond_state || "").trim() || null : null,
+      // guardas (condições)
+      cond_owner_id: input.cond_owner_id || null,
+      cond_has_tag: input.cond_has_tag || null,
+      cond_not_tag: input.cond_not_tag || null,
+      // ações que precisam de alvo próprio
+      action_owner: input.action_type === "assign_owner" ? input.action_owner || null : null,
+      action_product: input.action_type === "set_product" ? input.action_product || null : null,
       created_by: user_id,
     });
     if (error) {

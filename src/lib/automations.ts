@@ -21,7 +21,7 @@ export async function runAutomations(
 
   const { data: rules } = await db
     .from("automations")
-    .select("id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, product_id, source_seq, priority, stop_on_match, end_current, set_state")
+    .select("id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, action_owner, action_product, product_id, source_seq, priority, stop_on_match, end_current, set_state, cond_state, cond_owner_id, cond_has_tag, cond_not_tag")
     .eq("tenant_id", tenantId)
     .eq("is_active", true)
     .eq("trigger_type", trigger)
@@ -65,6 +65,10 @@ export async function applyRule(
   const { data: cSup } = await db.from("contacts").select("opted_out").eq("id", contactId).maybeSingle();
   if ((cSup as any)?.opted_out) return false;
 
+  // GUARDAS (condições): "só se for deste produto / dono / com esta tag / estado".
+  // Se qualquer condição falhar, a regra não dispara (nem marca dedup).
+  if (!(await checkGuards(db, { tenantId, contactId, rule }))) return false;
+
   // dedup 1x por contato: gatilhos de evento (link_clicked, doc_opened, replied…)
   // recorrem — sem essa checagem a regra re-disparava a cada clique/abertura,
   // re-somando score. O caminho de tempo (cron) já checava; agora vale para todos.
@@ -91,6 +95,48 @@ export async function applyRule(
     });
   }
   return ok;
+}
+
+// O contato está LIGADO a este produto? (via cadência do produto OU oportunidade do produto)
+async function contatoTemProduto(db: DB, tenantId: string, contactId: string, productId: string): Promise<boolean> {
+  const { data: enr } = await db
+    .from("enrollments")
+    .select("id, sequences!inner(product_id)")
+    .eq("tenant_id", tenantId)
+    .eq("contact_id", contactId)
+    .eq("sequences.product_id", productId)
+    .limit(1);
+  if (((enr as any[]) || []).length) return true;
+  const { data: opp } = await db
+    .from("opportunities")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("primary_contact_id", contactId)
+    .eq("product_id", productId)
+    .limit(1);
+  return !!((opp as any[]) || []).length;
+}
+
+// Avalia as GUARDAS da regra. true = pode disparar; false = condição não bateu.
+async function checkGuards(db: DB, { tenantId, contactId, rule }: { tenantId: string; contactId: string; rule: any }): Promise<boolean> {
+  // produto: só dispara se o contato estiver ligado a este produto
+  if (rule.product_id) {
+    if (!(await contatoTemProduto(db, tenantId, contactId, rule.product_id))) return false;
+  }
+  // dono e estado (uma leitura do contato)
+  if (rule.cond_owner_id || (rule.cond_state && rule.trigger_type !== "state_days")) {
+    const { data: c } = await db.from("contacts").select("assigned_to, auto_state").eq("id", contactId).maybeSingle();
+    if (rule.cond_owner_id && (c as any)?.assigned_to !== rule.cond_owner_id) return false;
+    if (rule.cond_state && rule.trigger_type !== "state_days" && (c as any)?.auto_state !== rule.cond_state) return false;
+  }
+  // tags: tem / não tem
+  if (rule.cond_has_tag || rule.cond_not_tag) {
+    const { data: ct } = await db.from("contact_tags").select("tag_id").eq("contact_id", contactId);
+    const tags = new Set(((ct as any[]) || []).map((r) => r.tag_id));
+    if (rule.cond_has_tag && !tags.has(rule.cond_has_tag)) return false;
+    if (rule.cond_not_tag && tags.has(rule.cond_not_tag)) return false;
+  }
+  return true;
 }
 
 // Encerra as cadências ATIVAS do contato (transição limpa): enrollments ativos →
@@ -143,6 +189,17 @@ async function applyAction(
       await db.from("opportunities").update({ stage_id: rule.action_stage }).eq("contact_id", contactId).eq("status", "open");
       return true;
     }
+    case "assign_owner": {
+      // troca o responsável do contato (dono). action_owner null = tira o dono.
+      await db.from("contacts").update({ assigned_to: rule.action_owner || null }).eq("id", contactId);
+      return true;
+    }
+    case "set_product": {
+      if (!rule.action_product) return false;
+      // troca o produto da(s) oportunidade(s) aberta(s) do contato
+      await db.from("opportunities").update({ product_id: rule.action_product }).eq("primary_contact_id", contactId).eq("status", "open");
+      return true;
+    }
     case "add_tag": {
       if (!rule.action_tag) return false;
       await db.from("contact_tags").upsert(
@@ -192,7 +249,7 @@ export async function runTimeAutomations(admin: DB): Promise<{ ran: number }> {
   let ran = 0;
   const { data: rules } = await admin
     .from("automations")
-    .select("id, tenant_id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, product_id, source_seq, end_current, set_state, cond_state")
+    .select("id, tenant_id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, action_owner, action_product, product_id, source_seq, end_current, set_state, cond_state, cond_owner_id, cond_has_tag, cond_not_tag")
     .eq("is_active", true)
     .in("trigger_type", TIME_TRIGGERS);
 

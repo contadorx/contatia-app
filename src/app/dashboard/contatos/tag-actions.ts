@@ -40,14 +40,18 @@ async function fireTagAutomation(supabase: any, tenant_id: string, contactId: st
     // gatilho tag_added filtrado pela tag específica (trigger_value = tag_id) ou "qualquer tag" (null)
     const { data: rules } = await supabase
       .from("automations")
-      .select("id, trigger_type, trigger_value, action_type, action_seq, action_stage")
+      .select("id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, action_owner, action_product, product_id, source_seq, priority, stop_on_match, end_current, set_state, cond_state, cond_owner_id, cond_has_tag, cond_not_tag")
       .eq("tenant_id", tenant_id)
       .eq("is_active", true)
-      .eq("trigger_type", "tag_added");
+      .eq("trigger_type", "tag_added")
+      .order("priority", { ascending: true });
     const matching = ((rules as any[]) || []).filter((r) => !r.trigger_value || r.trigger_value === tagId);
     if (!matching.length) return;
     const { applyRule } = await import("@/lib/automations");
-    for (const rule of matching) await applyRule(supabase, { tenantId: tenant_id, contactId, rule });
+    for (const rule of matching) {
+      const ok = await applyRule(supabase, { tenantId: tenant_id, contactId, rule });
+      if (ok && rule.stop_on_match) break;
+    }
   } catch {
     /* automação não bloqueia a aplicação da tag */
   }
