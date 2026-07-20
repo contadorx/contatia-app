@@ -169,22 +169,25 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
     return { id: s.id, name: s.name, total, ativos, respondidos, concluidos, taxa: pct(respondidos, total) };
   }).sort((a, b) => b.total - a.total);
 
-  // ---- Cliques em links (tenant-wide) ----
-  const { data: linkRows } = await supabase
-    .from("link_clicks")
-    .select("id, url, clicks, first_click_at, created_at, contacts(name)")
-    .order("first_click_at", { ascending: false, nullsFirst: false })
-    .limit(5000);
-  const links = (linkRows as any[]) || [];
-  const clicados = links.filter((l) => (l.clicks || 0) > 0);
-  const totalCliques = clicados.reduce((s, l) => s + (l.clicks || 0), 0);
-  const cliquesPeriodo = clicados.filter((l) => l.first_click_at && l.first_click_at >= sinceISO).reduce((s, l) => s + (l.clicks || 0), 0);
-  // top links por total de cliques (agrega por URL)
-  const porUrl = new Map<string, number>();
-  for (const l of clicados) porUrl.set(l.url, (porUrl.get(l.url) || 0) + (l.clicks || 0));
-  const topLinks = Array.from(porUrl.entries()).map(([url, n]) => ({ url, n })).sort((a, b) => b.n - a.n).slice(0, 15);
-  const ultimosCliques = clicados.slice(0, 30);
-  const taxaClique = pct(clicados.length, links.length);
+  // ---- Cliques em links (agregado no BANCO — pronto p/ volume; filtra por vendedor) ----
+  const ownerParam = vendedor || null;
+  const [{ data: totRows }, { data: topRows }] = await Promise.all([
+    supabase.rpc("link_click_totais", { p_since: sinceISO, p_owner: ownerParam }),
+    supabase.rpc("link_click_top", { p_owner: ownerParam, p_limit: 15 }),
+  ]);
+  const tot: any = (Array.isArray(totRows) ? totRows[0] : totRows) || {};
+  const rastreados = Number(tot.rastreados || 0);
+  const clicadosN = Number(tot.clicados || 0);
+  const totalCliques = Number(tot.cliques || 0);
+  const cliquesPeriodo = Number(tot.cliques_periodo || 0);
+  const taxaClique = pct(clicadosN, rastreados);
+  const topLinks = ((topRows as any[]) || []).map((r) => ({ url: r.url, n: Number(r.cliques || 0) }));
+  // últimos cliques (limit 30 — barato em qualquer volume), filtrando por dono se houver
+  let ultQ = ownerParam
+    ? supabase.from("link_clicks").select("id, url, clicks, first_click_at, contacts!inner(name, assigned_to)").gt("clicks", 0).eq("contacts.assigned_to", ownerParam)
+    : supabase.from("link_clicks").select("id, url, clicks, first_click_at, contacts(name)").gt("clicks", 0);
+  const { data: ultRows } = await ultQ.order("first_click_at", { ascending: false, nullsFirst: false }).limit(30);
+  const ultimosCliques = (ultRows as any[]) || [];
 
   // filtro (form GET)
   const memberOpts = ((members as any[]) || []);
@@ -364,10 +367,10 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
       </Secao>
           ) },
           { id: "cliques", label: "Cliques em links", node: (
-      <Secao id="cliques" titulo="Cliques em links" desc="Comportamento de clique nos e-mails: quanto engaja, quais links puxam mais e quem clicou. (Visão de todo o workspace.)">
+      <Secao id="cliques" titulo="Cliques em links" desc={`Comportamento de clique nos e-mails: quanto engaja, quais links puxam mais e quem clicou. ${gestor ? (vendedor ? "Filtrado pelo vendedor selecionado." : "Toda a equipe (filtre por vendedor acima).") : "Seus contatos."}`}>
         <div className="grid gap-3 sm:grid-cols-4">
-          <Tile label="Links rastreados" value={String(links.length)} sub={links.length >= 5000 ? "amostra (5.000 mais recentes)" : undefined} />
-          <Tile label="Links clicados" value={String(clicados.length)} sub={`${taxaClique}% dos rastreados`} />
+          <Tile label="Links rastreados" value={String(rastreados)} />
+          <Tile label="Links clicados" value={String(clicadosN)} sub={`${taxaClique}% dos rastreados`} />
           <Tile label="Cliques totais" value={String(totalCliques)} />
           <Tile label={`Cliques (${dias}d)`} value={String(cliquesPeriodo)} />
         </div>
