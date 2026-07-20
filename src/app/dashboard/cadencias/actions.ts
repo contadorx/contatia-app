@@ -190,22 +190,11 @@ export async function enrollContact(contactId: string, sequenceId: string) {
     .order("position", { ascending: true });
   if (!steps?.length) return { error: "Sequência sem passos." };
 
-  // RESOLVE a caixa de e-mail desta cadência: override da cadência → caixa do
-  // produto → null (rodízio no envio). Carimba na tarefa para o envio usar direto.
-  const { data: seqRow } = await supabase
-    .from("sequences")
-    .select("product_id, email_account_id")
-    .eq("id", sequenceId)
-    .maybeSingle();
-  let resolvedBox: string | null = ((seqRow as any)?.email_account_id as string) || null;
-  if (!resolvedBox && (seqRow as any)?.product_id) {
-    const { data: prod } = await supabase
-      .from("products")
-      .select("email_account_id")
-      .eq("id", (seqRow as any).product_id)
-      .maybeSingle();
-    resolvedBox = ((prod as any)?.email_account_id as string) || null;
-  }
+  // RESOLVE a caixa de e-mail desta inscrição: override da cadência → RODÍZIO no
+  // pool do produto → caixa única legada → null (rodízio geral no envio). Carimba
+  // na tarefa para o envio usar direto e manter o mesmo sender para o contato.
+  const { resolveEmailBox } = await import("@/lib/caixas");
+  const resolvedBox: string | null = await resolveEmailBox(supabase, tenant_id, sequenceId);
 
   const assigned = (contact.assigned_to as string) || user_id;
 

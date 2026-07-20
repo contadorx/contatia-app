@@ -344,6 +344,10 @@ async function enrollViaEngine(
   const firstName = (contact?.name || "").split(" ")[0] || "";
   const company = contact?.company || "";
 
+  // resolve a caixa (override da cadência → rodízio no pool do produto → legada)
+  const { resolveEmailBox } = await import("@/lib/caixas");
+  const resolvedBox = await resolveEmailBox(db, tenantId, sequenceId);
+
   const today = new Date();
   const tasks = ((steps as any[]) || []).map((s) => {
     const due = new Date(today);
@@ -361,6 +365,7 @@ async function enrollViaEngine(
       generated_content: body,
       due_date: due.toISOString().slice(0, 10),
       status: "pending",
+      email_account_id: s.channel === "email" ? resolvedBox : null,
     };
   });
   if (tasks.length) await db.from("tasks").insert(tasks);

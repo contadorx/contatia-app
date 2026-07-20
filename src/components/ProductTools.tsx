@@ -7,7 +7,7 @@ import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
 type Account = { id: string; from_email: string; display_name?: string | null };
-type Product = { id: string; name: string; kind: string; billing: string; price: number; active: boolean; email_account_id?: string | null; email_accounts?: { from_email: string } | null };
+type Product = { id: string; name: string; kind: string; billing: string; price: number; active: boolean; email_account_id?: string | null; email_accounts?: { from_email: string } | null; pool?: { id: string; from_email: string }[] };
 
 const boxLabel = (a: Account) => a.display_name ? `${a.display_name} <${a.from_email}>` : a.from_email;
 
@@ -26,7 +26,8 @@ const BILLING_OPTS_SHORT: SmartOption[] = [
 const accountOpts = (accounts: Account[]): SmartOption[] => accounts.map((a) => ({ value: a.id, label: boxLabel(a) }));
 
 export function ProductForm({ accounts = [] }: { accounts?: Account[] }) {
-  const [f, setF] = useState({ name: "", kind: "servico", billing: "recorrente", price: "", email_account_id: "" });
+  const [f, setF] = useState({ name: "", kind: "servico", billing: "recorrente", price: "" });
+  const [boxes, setBoxes] = useState<string[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const up = (k: string, v: string) => setF((s) => ({ ...s, [k]: v }));
@@ -48,25 +49,25 @@ export function ProductForm({ accounts = [] }: { accounts?: Account[] }) {
           </div>
         </div>
         <div><label className="label">Preço de referência (R$)</label><input className="input mt-1" type="number" value={f.price} onChange={(e) => up("price", e.target.value)} placeholder="0" /></div>
-        <div>
-          <label className="label">Caixa de e-mail deste produto</label>
+        <div className="sm:col-span-2">
+          <label className="label">Caixas de e-mail deste produto (rodízio)</label>
           <div className="mt-1">
             <SmartSelect
+              multiple
               options={accountOpts(accounts)}
-              value={f.email_account_id}
-              onValueChange={(v) => up("email_account_id", v)}
+              values={boxes}
+              onValuesChange={setBoxes}
               disabled={!accounts.length}
-              placeholder={accounts.length ? "Usar rodízio (padrão)" : "Nenhuma caixa conectada"}
-              clearable
+              placeholder={accounts.length ? "Usar rodízio geral (padrão)" : "Nenhuma caixa conectada"}
             />
           </div>
         </div>
       </div>
-      <p className="mt-2 text-xs text-subtle">As cadências deste produto enviam por esta caixa (a cadência pode sobrescrever). Sem caixa, o envio usa o rodízio entre as caixas ativas.</p>
+      <p className="mt-2 text-xs text-subtle">Escolha uma ou várias caixas: as cadências deste produto fazem <b>rodízio</b> entre elas (a cadência pode sobrescrever). Sem caixa, o envio usa o rodízio geral entre todas as caixas ativas.</p>
       {msg && <p className="mt-2 text-sm text-danger">{msg}</p>}
       <button className="btn-brand mt-4 py-1.5 text-sm" disabled={pending} onClick={() => start(async () => {
-        const res = (await createProduct({ ...f, price: Number(f.price) })) as any;
-        if (res?.error) setMsg(res.error); else { setF({ name: "", kind: "servico", billing: "recorrente", price: "", email_account_id: "" }); setMsg(null); }
+        const res = (await createProduct({ ...f, price: Number(f.price), email_account_ids: boxes })) as any;
+        if (res?.error) setMsg(res.error); else { setF({ name: "", kind: "servico", billing: "recorrente", price: "" }); setBoxes([]); setMsg(null); }
       })}>{pending ? "Salvando..." : "Adicionar ao catálogo"}</button>
     </div>
   );
@@ -74,7 +75,8 @@ export function ProductForm({ accounts = [] }: { accounts?: Account[] }) {
 
 export function ProductRow({ p, accounts = [] }: { p: Product; accounts?: Account[] }) {
   const [edit, setEdit] = useState(false);
-  const [f, setF] = useState({ name: p.name, kind: p.kind, billing: p.billing, price: String(p.price), email_account_id: p.email_account_id || "" });
+  const [f, setF] = useState({ name: p.name, kind: p.kind, billing: p.billing, price: String(p.price) });
+  const [boxes, setBoxes] = useState<string[]>((p.pool || []).map((b) => b.id));
   const [pending, start] = useTransition();
   const up = (k: string, v: string) => setF((s) => ({ ...s, [k]: v }));
 
@@ -91,18 +93,18 @@ export function ProductRow({ p, accounts = [] }: { p: Product; accounts?: Accoun
               <SmartSelect className="py-1 text-sm" options={BILLING_OPTS_SHORT} value={f.billing} onValueChange={(v) => up("billing", v)} />
             </div>
             <input className="input py-1 text-sm" style={{ width: 90 }} type="number" value={f.price} onChange={(e) => up("price", e.target.value)} />
-            <div style={{ width: 200 }} title="Caixa de e-mail do produto">
+            <div style={{ minWidth: 220, flex: 1 }} title="Caixas de e-mail do produto (rodízio)">
               <SmartSelect
+                multiple
                 className="py-1 text-sm"
                 options={accountOpts(accounts)}
-                value={f.email_account_id}
-                onValueChange={(v) => up("email_account_id", v)}
+                values={boxes}
+                onValuesChange={setBoxes}
                 disabled={!accounts.length}
-                placeholder="Caixa: rodízio"
-                clearable
+                placeholder="Caixas: rodízio geral"
               />
             </div>
-            <button className="btn-brand py-1 text-xs" disabled={pending} onClick={() => start(async () => { await updateProduct(p.id, { ...f, price: Number(f.price) }); setEdit(false); })}>Salvar</button>
+            <button className="btn-brand py-1 text-xs" disabled={pending} onClick={() => start(async () => { await updateProduct(p.id, { ...f, price: Number(f.price), email_account_ids: boxes }); setEdit(false); })}>Salvar</button>
             <button className="text-xs text-subtle hover:text-ink" onClick={() => setEdit(false)}>cancelar</button>
           </div>
         </td>
@@ -110,15 +112,16 @@ export function ProductRow({ p, accounts = [] }: { p: Product; accounts?: Accoun
     );
   }
 
+  const poolEmails = (p.pool || []).map((b) => b.from_email).filter(Boolean);
   return (
     <tr className="border-b border-line last:border-0">
       <td className="px-4 py-3 font-medium">
         {p.name}{!p.active && <span className="ml-1 text-xs text-subtle">(inativo)</span>}
-        {(() => {
-          const ea: any = (p as any).email_accounts;
-          const boxEmail = Array.isArray(ea) ? ea[0]?.from_email : ea?.from_email;
-          return <span className="block text-xs text-subtle">{boxEmail ? `Caixa: ${boxEmail}` : "Caixa: rodízio"}</span>;
-        })()}
+        <span className="block text-xs text-subtle">
+          {poolEmails.length
+            ? `Caixas (rodízio): ${poolEmails.join(", ")}`
+            : "Caixas: rodízio geral"}
+        </span>
       </td>
       <td className="px-4 py-3"><span className={`rounded-full px-2 py-0.5 text-xs ${p.kind === "produto" ? "bg-brand-soft text-brand-dark" : "bg-muted text-subtle"}`}>{p.kind === "produto" ? "Produto" : "Serviço"}</span></td>
       <td className="px-4 py-3 text-subtle">{p.billing === "recorrente" ? "Recorrente" : "Avulso"}</td>

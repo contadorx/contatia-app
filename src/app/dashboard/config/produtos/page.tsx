@@ -6,12 +6,19 @@ export const dynamic = "force-dynamic";
 
 export default async function ProdutosConfig() {
   const supabase = createClient();
-  const [{ data: products }, { data: accounts }] = await Promise.all([
+  const [{ data: products }, { data: accounts }, { data: pools }] = await Promise.all([
     supabase.from("products").select("id, name, kind, billing, price, active, email_account_id, email_accounts(from_email)").order("created_at", { ascending: false }),
     supabase.from("email_accounts").select("id, from_email, display_name").eq("is_active", true).order("created_at", { ascending: true }),
+    supabase.from("product_email_accounts").select("product_id, email_account_id, email_accounts(from_email)"),
   ]);
-  const list = (products as any[]) || [];
   const accts = (accounts as any[]) || [];
+  // agrupa o pool de caixas por produto
+  const poolByProduct: Record<string, { id: string; from_email: string }[]> = {};
+  for (const r of (pools as any[]) || []) {
+    const pid = r.product_id;
+    (poolByProduct[pid] ||= []).push({ id: r.email_account_id, from_email: r.email_accounts?.from_email || "" });
+  }
+  const list = ((products as any[]) || []).map((p) => ({ ...p, pool: poolByProduct[p.id] || [] }));
 
   return (
     <div className="max-w-3xl">
