@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createAutomation } from "@/app/dashboard/automacoes/actions";
+import { createAutomation, updateAutomation } from "@/app/dashboard/automacoes/actions";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 
 type Seq = { id: string; name: string };
@@ -40,58 +40,62 @@ const ACTIONS = [
 const DIAS_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won", "state_days"];
 // gatilhos que fazem sentido escopar por produto
 
-type Template = { id: string; name: string; description?: string | null; category: string; config: any; is_global: boolean };
-
-const CATEGORY_LABEL: Record<string, string> = {
-  sinais: "Sinais quentes",
-  reciclagem: "Reciclagem / reengajamento",
-  posvenda: "Pós-venda / expansão",
-  higiene: "Higiene",
-  geral: "Outros",
+export type AutoForm = {
+  name: string; trigger_type: string; trigger_value: string; action_type: string;
+  action_seq: string; action_stage: string; action_tag: string; product_id: string;
+  source_seq: string; priority: string; set_state: string; cond_state: string;
+  cond_owner_id: string; cond_has_tag: string; cond_not_tag: string;
+  action_owner: string; action_product: string; stop_on_match: boolean; end_current: boolean;
+};
+export const BLANK_FORM: AutoForm = {
+  name: "", trigger_type: "doc_opened", trigger_value: "", action_type: "enroll",
+  action_seq: "", action_stage: "", action_tag: "", product_id: "", source_seq: "",
+  priority: "100", set_state: "", cond_state: "", cond_owner_id: "", cond_has_tag: "",
+  cond_not_tag: "", action_owner: "", action_product: "", stop_on_match: false, end_current: false,
 };
 
 export default function AutomationBuilder({
+  open,
+  editingId = null,
+  initial,
+  onClose,
+  onSaved,
   sequences,
   stages,
   tags,
   products,
   members = [],
-  templates = [],
 }: {
+  open: boolean;
+  editingId?: string | null;
+  initial?: Partial<AutoForm>;
+  onClose: () => void;
+  onSaved?: () => void;
   sequences: Seq[];
   stages: Stage[];
   tags?: Tag[];
   products?: Product[];
   members?: Member[];
-  templates?: Template[];
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [f, setF] = useState({
-    name: "",
-    trigger_type: "doc_opened",
-    trigger_value: "",
-    action_type: "enroll",
-    action_seq: "",
-    action_stage: "",
-    action_tag: "",
-    product_id: "",
-    source_seq: "",
-    priority: "100",
-    set_state: "",
-    cond_state: "",
-    cond_owner_id: "",
-    cond_has_tag: "",
-    cond_not_tag: "",
-    action_owner: "",
-    action_product: "",
-  });
+  const [f, setF] = useState<AutoForm>(BLANK_FORM);
   const [stopOnMatch, setStopOnMatch] = useState(false);
   const [endCurrent, setEndCurrent] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
-  function up(k: string, v: string) {
+  // ao abrir, carrega os valores iniciais (edição / duplicação / sugestão)
+  useEffect(() => {
+    if (!open) return;
+    const merged = { ...BLANK_FORM, ...(initial || {}) };
+    setF(merged);
+    setStopOnMatch(!!merged.stop_on_match);
+    setEndCurrent(!!merged.end_current);
+    setMsg(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editingId, initial]);
+
+  function up(k: keyof AutoForm, v: string) {
     setF((s) => ({ ...s, [k]: v }));
   }
   function save() {
@@ -99,30 +103,19 @@ export default function AutomationBuilder({
     if (!f.name.trim()) { setMsg("Dê um nome à automação."); return; }
     start(async () => {
       try {
-        const res = await createAutomation({
-          ...f,
-          priority: Number(f.priority) || 100,
-          stop_on_match: stopOnMatch,
-          end_current: endCurrent,
-        });
+        const payload = { ...f, priority: Number(f.priority) || 100, stop_on_match: stopOnMatch, end_current: endCurrent };
+        const res = editingId ? await updateAutomation(editingId, payload) : await createAutomation(payload);
         if (res?.error) { setMsg(res.error); return; }
-        setF({ name: "", trigger_type: "doc_opened", trigger_value: "", action_type: "enroll", action_seq: "", action_stage: "", action_tag: "", product_id: "", source_seq: "", priority: "100", set_state: "", cond_state: "", cond_owner_id: "", cond_has_tag: "", cond_not_tag: "", action_owner: "", action_product: "" });
-        setStopOnMatch(false); setEndCurrent(false);
-        setOpen(false);
-        router.refresh(); // garante que a nova automação aparece na lista na hora
+        onSaved?.();
+        onClose();
+        router.refresh();
       } catch (e: any) {
-        // se a server action lançar, mostra em vez de sumir silenciosamente
-        setMsg("Erro ao criar: " + (e?.message || "falha desconhecida"));
+        setMsg("Erro ao salvar: " + (e?.message || "falha desconhecida"));
       }
     });
   }
 
-  if (!open)
-    return (
-      <button className="btn-brand" onClick={() => setOpen(true)}>
-        + Nova automação
-      </button>
-    );
+  if (!open) return null;
 
   const isDias = DIAS_TRIGGERS.includes(f.trigger_type);
   const isScore = f.trigger_type === "score_gte";
@@ -340,9 +333,9 @@ export default function AutomationBuilder({
       {msg && <p className="mt-3 text-sm text-danger">{msg}</p>}
       <div className="mt-4 flex gap-2">
         <button className="btn-brand py-1.5 text-sm" onClick={save} disabled={pending}>
-          {pending ? "Salvando..." : "Criar automação"}
+          {pending ? "Salvando..." : editingId ? "Salvar alterações" : "Criar automação"}
         </button>
-        <button className="btn-ghost py-1.5 text-sm" onClick={() => setOpen(false)}>Cancelar</button>
+        <button className="btn-ghost py-1.5 text-sm" onClick={onClose}>Cancelar</button>
       </div>
       <p className="mt-3 text-xs text-subtle">
         Gatilhos de evento (abriu, clicou, respondeu) disparam na hora. Os de tempo (&ldquo;sem atividade&rdquo;, &ldquo;terminou a cadência&rdquo;, &ldquo;oportunidade perdida/ganha&rdquo;) são verificados uma vez por dia.

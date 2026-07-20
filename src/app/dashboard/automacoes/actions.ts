@@ -14,7 +14,7 @@ async function ctx() {
 
 const DIAS_TRIGGERS = ["no_activity_days", "opportunity_lost", "opportunity_won", "state_days"];
 
-export async function createAutomation(input: {
+type RegraInput = {
   name: string;
   trigger_type: string;
   trigger_value?: string;
@@ -34,22 +34,22 @@ export async function createAutomation(input: {
   cond_not_tag?: string;
   action_owner?: string;
   action_product?: string;
-}) {
-  const { supabase, tenant_id, user_id } = await ctx();
-  if (!tenant_id) return { error: "Sem workspace." };
+};
+
+// Valida + monta a linha da regra (compartilhado por criar e editar).
+function montarRegra(input: RegraInput): { row?: Record<string, unknown>; error?: string } {
   if (!input.name.trim()) return { error: "Dê um nome à automação." };
   if (input.action_type === "enroll" && !input.action_seq) return { error: "Escolha a cadência para inscrever." };
   if (input.action_type === "move_stage" && !input.action_stage) return { error: "Escolha o estágio de destino." };
   if (input.action_type === "add_tag" && !input.action_tag) return { error: "Escolha a tag a aplicar." };
   if (input.action_type === "set_product" && !input.action_product) return { error: "Escolha o produto de destino." };
-  if ((input.action_type === "mark_state") && !(input.set_state || "").trim()) return { error: "Informe o estado a marcar (ex.: dormente)." };
+  if (input.action_type === "mark_state" && !(input.set_state || "").trim()) return { error: "Informe o estado a marcar (ex.: dormente)." };
   if (input.trigger_type === "score_gte" && !input.trigger_value) return { error: "Informe o score mínimo." };
   if (DIAS_TRIGGERS.includes(input.trigger_type) && !input.trigger_value) return { error: "Informe a quantidade de dias." };
   if (input.trigger_type === "state_days" && !(input.cond_state || "").trim()) return { error: "Informe o estado do gatilho (ex.: dormente)." };
 
-  try {
-    const { error } = await supabase.from("automations").insert({
-      tenant_id,
+  return {
+    row: {
       name: input.name.trim(),
       trigger_type: input.trigger_type,
       trigger_value: input.trigger_value || null,
@@ -57,35 +57,69 @@ export async function createAutomation(input: {
       action_seq: input.action_type === "enroll" ? input.action_seq : null,
       action_stage: input.action_type === "move_stage" ? input.action_stage : null,
       action_tag: (input.action_type === "add_tag" || input.action_type === "suppress") ? input.action_tag || null : null,
-      // escopo por produto (opcional) para gatilhos que dependem de "no produto"
       product_id: input.product_id || null,
-      // cadência de origem do gatilho "terminou a cadência"
       source_seq: input.trigger_type === "cadence_completed" ? input.source_seq || null : null,
-      // máquina de estados (Fase 1): ordem, parar-no-match, transição limpa, estado-destino
       priority: Number.isFinite(input.priority as number) ? (input.priority as number) : 100,
       stop_on_match: input.stop_on_match === true,
       end_current: input.action_type === "enroll" ? input.end_current === true : false,
       set_state: (input.set_state || "").trim() || null,
       cond_state: input.trigger_type === "state_days" ? (input.cond_state || "").trim() || null : null,
-      // guardas (condições)
       cond_owner_id: input.cond_owner_id || null,
       cond_has_tag: input.cond_has_tag || null,
       cond_not_tag: input.cond_not_tag || null,
-      // ações que precisam de alvo próprio
       action_owner: input.action_type === "assign_owner" ? input.action_owner || null : null,
       action_product: input.action_type === "set_product" ? input.action_product || null : null,
-      created_by: user_id,
-    });
-    if (error) {
-      // devolve o máximo de detalhe para diagnóstico (código/dica do Postgres/RLS)
-      const parts = [error.message, error.code ? `código ${error.code}` : "", error.details || "", error.hint || ""].filter(Boolean);
-      return { error: parts.join(" · ") };
-    }
+    },
+  };
+}
+
+function erroDb(error: any): string {
+  const parts = [error.message, error.code ? `código ${error.code}` : "", error.details || "", error.hint || ""].filter(Boolean);
+  return parts.join(" · ");
+}
+
+export async function createAutomation(input: RegraInput) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { row, error: vErr } = montarRegra(input);
+  if (vErr) return { error: vErr };
+  try {
+    const { error } = await supabase.from("automations").insert({ ...row, tenant_id, created_by: user_id });
+    if (error) return { error: erroDb(error) };
     revalidatePath("/dashboard/automacoes");
     return { ok: true };
   } catch (e: any) {
     return { error: "Falha ao salvar: " + (e?.message || String(e)) };
   }
+}
+
+export async function updateAutomation(id: string, input: RegraInput) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { row, error: vErr } = montarRegra(input);
+  if (vErr) return { error: vErr };
+  try {
+    const { error } = await supabase.from("automations").update(row!).eq("id", id).eq("tenant_id", tenant_id);
+    if (error) return { error: erroDb(error) };
+    revalidatePath("/dashboard/automacoes");
+    return { ok: true };
+  } catch (e: any) {
+    return { error: "Falha ao salvar: " + (e?.message || String(e)) };
+  }
+}
+
+// Duplica uma automação (cópia inativa, para revisar antes de ligar).
+export async function duplicateAutomation(id: string) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const cols = "name, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, product_id, source_seq, priority, stop_on_match, end_current, set_state, cond_state, cond_owner_id, cond_has_tag, cond_not_tag, action_owner, action_product";
+  const { data: a } = await supabase.from("automations").select(cols).eq("id", id).eq("tenant_id", tenant_id).maybeSingle();
+  if (!a) return { error: "Automação não encontrada." };
+  const copia: any = { ...(a as any), name: `${(a as any).name} (cópia)`, is_active: false, tenant_id, created_by: user_id };
+  const { error } = await supabase.from("automations").insert(copia);
+  if (error) return { error: erroDb(error) };
+  revalidatePath("/dashboard/automacoes");
+  return { ok: true };
 }
 
 export async function toggleAutomation(id: string, active: boolean) {

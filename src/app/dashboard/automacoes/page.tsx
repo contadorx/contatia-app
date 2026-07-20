@@ -1,35 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
-import AutomationBuilder from "@/components/AutomationBuilder";
-import AutomationRow from "@/components/AutomationRow";
+import AutomationsPanel from "@/components/AutomationsPanel";
 
 export const dynamic = "force-dynamic";
-
-const TRIGGER_LABEL: Record<string, string> = {
-  doc_opened: "Abriu proposta",
-  link_clicked: "Clicou no link",
-  replied: "Respondeu",
-  score_gte: "Score ≥",
-  no_activity_days: "Sem atividade há",
-  tag_added: "Recebeu tag",
-  cadence_completed: "Terminou cadência +",
-  opportunity_lost: "Oportunidade perdida +",
-  opportunity_won: "Oportunidade ganha +",
-  state_days: "No estado há",
-  date_reached: "Chegou a data de retomada",
-};
-// gatilhos cujo trigger_value é "X dias"
-const DIAS_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won", "state_days"];
-const ACTION_LABEL: Record<string, string> = {
-  enroll: "inscrever na cadência",
-  pause_all: "pausar cadências",
-  move_stage: "mover de estágio",
-  mark_hot: "marcar quente",
-  add_tag: "aplicar tag",
-  assign_owner: "trocar responsável",
-  set_product: "trocar produto",
-  mark_state: "marcar estado",
-  suppress: "suprimir (parar definitivo)",
-};
 
 export default async function Automacoes() {
   // Automações incluídas em TODOS os planos (Individual e Equipes) — sem gate.
@@ -38,8 +10,8 @@ export default async function Automacoes() {
   const [{ data: automations }, { data: sequences }, { data: allSeqs }, { data: stages }, { data: logs }, { data: tags }, { data: products }, { data: allProducts }, { data: members }] = await Promise.all([
     // SEM embeds: automations tem DUAS FKs para sequences (action_seq e source_seq), o que
     // torna qualquer embed "sequences(...)" ambíguo e quebra a consulta inteira (lista vazia).
-    // Buscamos só as colunas cruas e resolvemos os nomes com os mapas abaixo — à prova de embed.
-    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, product_id, cond_state, set_state, action_seq, action_stage, source_seq, action_tag, cond_owner_id, cond_has_tag, cond_not_tag, action_owner, action_product").order("created_at", { ascending: false }),
+    // Buscamos as colunas cruas e resolvemos os nomes com mapas no painel — à prova de embed.
+    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, product_id, cond_state, set_state, action_seq, action_stage, source_seq, action_tag, cond_owner_id, cond_has_tag, cond_not_tag, action_owner, action_product, priority, stop_on_match, end_current").order("priority", { ascending: true }).order("created_at", { ascending: false }),
     supabase.from("sequences").select("id, name").eq("is_active", true),
     supabase.from("sequences").select("id, name"),
     supabase.from("pipeline_stages").select("id, name").order("position", { ascending: true }),
@@ -53,58 +25,22 @@ export default async function Automacoes() {
   const rules = (automations as any[]) || [];
   const logList = (logs as any[]) || [];
 
-  // mapas id → nome (resolvem os nomes sem embed)
-  const seqName = new Map(((allSeqs as any[]) || []).map((s) => [s.id, s.name]));
-  const stageName = new Map(((stages as any[]) || []).map((s) => [s.id, s.name]));
-  const prodName = new Map(((allProducts as any[]) || []).map((p) => [p.id, p.name]));
-  const tagName = new Map(((tags as any[]) || []).map((t) => [t.id, t.name]));
-  const memberName = new Map(((members as any[]) || []).map((m) => [m.id, m.full_name || m.email]));
-  // monta a linha "só se…" das condições
-  const guardText = (r: any) => {
-    const parts: string[] = [];
-    if (r.product_id && prodName.get(r.product_id)) parts.push(`produto ${prodName.get(r.product_id)}`);
-    if (r.cond_owner_id && memberName.get(r.cond_owner_id)) parts.push(`dono ${memberName.get(r.cond_owner_id)}`);
-    if (r.cond_has_tag && tagName.get(r.cond_has_tag)) parts.push(`tem "${tagName.get(r.cond_has_tag)}"`);
-    if (r.cond_not_tag && tagName.get(r.cond_not_tag)) parts.push(`sem "${tagName.get(r.cond_not_tag)}"`);
-    return parts.join(" · ");
-  };
-
   return (
     <div>
       <h1 className="font-display text-2xl font-bold">Automações</h1>
       <p className="mt-1 text-sm text-subtle">Regras &ldquo;quando isso acontecer, faça aquilo&rdquo; — o contato reage sozinho ao comportamento.</p>
 
       <div className="mt-6">
-        <AutomationBuilder sequences={(sequences as any[]) || []} stages={(stages as any[]) || []} tags={(tags as any[]) || []} products={(products as any[]) || []} members={(members as any[]) || []} />
-      </div>
-
-      <div className="mt-6 space-y-2">
-        {rules.length ? (
-          rules.map((r) => (
-            <div key={r.id} className="card flex items-center justify-between p-4">
-              <div>
-                <p className="text-sm font-semibold">{r.name}</p>
-                <p className="text-xs text-subtle">
-                  Quando <b>{TRIGGER_LABEL[r.trigger_type] || r.trigger_type}{r.cond_state ? ` "${r.cond_state}"` : ""}{r.trigger_value ? ` ${r.trigger_value}${DIAS_TRIGGERS.includes(r.trigger_type) ? " dias" : ""}` : ""}</b>
-                  {r.source_seq && seqName.get(r.source_seq) ? <> na cadência <b>{seqName.get(r.source_seq)}</b></> : null}
-                  {" → "}
-                  {ACTION_LABEL[r.action_type] || r.action_type}
-                  {r.action_seq && seqName.get(r.action_seq) ? ` "${seqName.get(r.action_seq)}"` : ""}
-                  {r.action_stage && stageName.get(r.action_stage) ? ` "${stageName.get(r.action_stage)}"` : ""}
-                  {r.action_type === "assign_owner" ? ` "${r.action_owner ? memberName.get(r.action_owner) || "—" : "sem dono"}"` : ""}
-                  {r.action_type === "set_product" && r.action_product && prodName.get(r.action_product) ? ` "${prodName.get(r.action_product)}"` : ""}
-                  {r.action_type === "mark_state" && r.set_state ? ` "${r.set_state}"` : ""}
-                </p>
-                {guardText(r) ? <p className="text-[11px] text-subtle">só se: {guardText(r)}</p> : null}
-              </div>
-              <AutomationRow id={r.id} active={r.is_active} />
-            </div>
-          ))
-        ) : (
-          <div className="card p-8 text-center text-sm text-subtle">
-            Nenhuma automação. Crie regras como &ldquo;abriu proposta → inscrever na cadência de aceleração&rdquo; ou &ldquo;120 dias sem atividade → cadência de recuperação&rdquo;.
-          </div>
-        )}
+        <AutomationsPanel
+          rules={rules}
+          sequences={(sequences as any[]) || []}
+          allSeqs={(allSeqs as any[]) || []}
+          stages={(stages as any[]) || []}
+          tags={(tags as any[]) || []}
+          products={(products as any[]) || []}
+          allProducts={(allProducts as any[]) || []}
+          members={(members as any[]) || []}
+        />
       </div>
 
       {logList.length > 0 && (
