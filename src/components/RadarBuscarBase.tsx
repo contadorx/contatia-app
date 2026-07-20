@@ -26,6 +26,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   const [porte, setPorte] = useState("");
   const [comEmail, setComEmail] = useState(true);
   const [emailCorp, setEmailCorp] = useState(false);
+  const [ocultarJaTem, setOcultarJaTem] = useState(false);
   const [busca, setBusca] = useState("");
 
   // resultados
@@ -33,6 +34,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   const [total, setTotal] = useState<number | null>(null);
   const [casadas, setCasadas] = useState<Atividade[]>([]);
   const [temMais, setTemMais] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
   const [buscou, setBuscou] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
 
@@ -77,6 +79,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       porte: porte || undefined,
       com_email: comEmail,
       email_corporativo: comEmail && emailCorp,
+      ocultarJaTem,
     };
   }
   const buscaDigitos = busca.replace(/\D/g, "");
@@ -98,7 +101,10 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       } else {
         setResultados((prev) => [...prev, ...novas]);
       }
-      setTemMais(novas.length === 100);
+      // paginação pelo offset BRUTO consumido da base (não pelo nº exibido), para o
+      // "carregar mais" não repetir quando escondemos as já cadastradas.
+      setNextOffset(typeof r.nextOffset === "number" ? r.nextOffset : (offset + novas.length));
+      setTemMais(typeof r.temMais === "boolean" ? r.temMais : novas.length === 100);
       setBuscou(true);
     });
   }
@@ -221,6 +227,10 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
             <input type="checkbox" checked={emailCorp} disabled={!comEmail} onChange={(e) => setEmailCorp(e.target.checked)} />
             Só e-mail empresarial <span className="text-subtle">(sem gmail/hotmail…)</span>
           </label>
+          <label className="flex items-center gap-2 text-sm" title="Não mostra empresas cujo CNPJ já está no seu cadastro de Empresas.">
+            <input type="checkbox" checked={ocultarJaTem} onChange={(e) => setOcultarJaTem(e.target.checked)} />
+            Ocultar já cadastradas
+          </label>
           <input className="input w-full sm:w-56" placeholder="ou CNAE (código, opcional)" value={cnaeManual} onChange={(e) => setCnaeManual(e.target.value)} />
           <div className="ml-auto flex items-center gap-2">
             <button className="btn-brand px-5" onClick={() => buscar(0)} disabled={ocupado || !temFiltro || !configurada}>
@@ -298,7 +308,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
 
           {temMais && (
             <div className="mt-3 text-center">
-              <button className="btn-outline px-4" onClick={() => buscar(resultados.length)} disabled={ocupado}>
+              <button className="btn-outline px-4" onClick={() => buscar(nextOffset)} disabled={ocupado}>
                 {buscando ? "…" : "Carregar mais 100"}
               </button>
             </div>
