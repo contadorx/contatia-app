@@ -30,6 +30,16 @@ export default async function Suporte() {
       <h1 className="font-display text-2xl font-bold">Suporte</h1>
       <p className="mt-1 text-sm text-subtle">Abra um chamado e acompanhe as respostas aqui.</p>
 
+      <a
+        href="/dashboard/ajuda"
+        className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-brand/30 bg-brand-soft px-4 py-3 text-sm transition hover:border-brand"
+      >
+        <span className="text-ink">
+          <b>Antes de abrir um chamado</b>, veja a Central de ajuda — a maioria das dúvidas tem resposta por lá, na hora.
+        </span>
+        <span className="shrink-0 font-semibold text-brand-dark">Abrir →</span>
+      </a>
+
       <div className="mt-6">
         <OpenTicketForm />
       </div>

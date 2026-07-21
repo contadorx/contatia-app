@@ -12,6 +12,12 @@ export function KbManager({ rows }: { rows: Article[] }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
+  // temas já existentes: alimentam o datalist para manter a Central de ajuda consistente
+  // (evita "E-mail" e "Email" virarem duas seções).
+  const categorias = Array.from(new Set(rows.map((r) => (r.category || "").trim()).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b, "pt-BR")
+  );
+
   function save() {
     if (!editing) return;
     setMsg(null);
@@ -33,7 +39,14 @@ export function KbManager({ rows }: { rows: Article[] }) {
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-3">
               <div><label className="label">Título</label><input className="input mt-1" value={editing.title || ""} onChange={(e) => setEditing({ ...editing, title: e.target.value })} /></div>
-              <div><label className="label">Categoria</label><input className="input mt-1" value={editing.category || ""} onChange={(e) => setEditing({ ...editing, category: e.target.value })} placeholder="Geral" /></div>
+              <div>
+                <label className="label">Tema (categoria)</label>
+                <input className="input mt-1" list="kb-categorias" value={editing.category || ""} onChange={(e) => setEditing({ ...editing, category: e.target.value })} placeholder="Geral" />
+                <datalist id="kb-categorias">
+                  {categorias.map((c) => <option key={c} value={c} />)}
+                </datalist>
+                <p className="mt-1 text-[11px] text-subtle">Reaproveite um tema existente — cada tema vira uma seção na Central de ajuda.</p>
+              </div>
             </div>
             <div><label className="label">Conteúdo</label><textarea className="input mt-1 min-h-[160px]" value={editing.body || ""} onChange={(e) => setEditing({ ...editing, body: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-3">

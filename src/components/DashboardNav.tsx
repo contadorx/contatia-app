@@ -36,6 +36,7 @@ const groups: { title?: string; items: { href: string; label: string; primary?: 
       { href: "/dashboard/relatorios", label: "Resultados" },
       { href: "/dashboard/equipe", label: "Equipe" },
       { href: "/dashboard/planos", label: "Planos" },
+      { href: "/dashboard/ajuda", label: "Central de ajuda" },
       { href: "/dashboard/suporte", label: "Suporte" },
     ],
   },

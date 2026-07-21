@@ -20,7 +20,7 @@ export default async function KbAdmin() {
   return (
     <div className="max-w-3xl">
       <h1 className="font-display text-2xl font-bold">Base de conhecimento</h1>
-      <p className="mt-1 text-sm text-subtle">Artigos de ajuda que todos os clientes veem no botão de ajuda (?). Escreva de forma simples e direta.</p>
+      <p className="mt-1 text-sm text-subtle">Artigos que os clientes navegam por tema na <b>Central de ajuda</b> (/dashboard/ajuda), buscam e também alimentam o botão de ajuda (?). Agrupe por tema, escreva simples e direto. Dica de formatação: <code>## Título</code> vira subtítulo, <code>- item</code> vira lista, <code>**texto**</code> fica em negrito.</p>
       <div className="mt-6">
         <KbManager rows={(rows as any[]) || []} />
       </div>
