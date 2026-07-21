@@ -67,6 +67,59 @@ export async function discoverEmail(nome: string, dominio: string): Promise<Disc
   }
 }
 
+// ============================================================
+// DESCOBERTA PARALELA (app-side): gera os padrões nome@domínio e verifica TODOS de
+// uma vez (Promise.all), em vez de deixar o worker testar um a um (que estoura o tempo
+// em servidores lentos/tarpit). Cada verificação é uma conversa SMTP independente;
+// paralelas, o total ≈ a mais lenta, não a soma. Não exige mudar o worker.
+// ============================================================
+const CAND_LIMIT = 6;
+
+export function candidatePatterns(nome: string, dominioRaw: string): string[] {
+  const d = (dominioDe(dominioRaw) || "").replace(/^@/, "");
+  if (!d) return [];
+  const strip = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const parts = strip(nome || "").toLowerCase().trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return [];
+  const first = parts[0];
+  const last = parts.length > 1 ? parts[parts.length - 1] : "";
+  const set = new Set<string>();
+  if (first) set.add(`${first}@${d}`);
+  if (first && last) {
+    set.add(`${first}.${last}@${d}`);
+    set.add(`${first}${last}@${d}`);
+    set.add(`${first[0]}${last}@${d}`);
+    set.add(`${first}.${last[0]}@${d}`);
+    set.add(`${last}@${d}`);
+  }
+  return Array.from(set).slice(0, CAND_LIMIT);
+}
+
+export async function discoverEmailParallel(nome: string, dominio: string): Promise<DiscoverResult> {
+  const cands = candidatePatterns(nome, dominio);
+  if (!cands.length) return { email: null, status: "not_found", tentativas: [] };
+
+  const results = await Promise.all(
+    cands.map(async (email) => {
+      const r = await verifyEmail(email); // { status, reason } — valid|invalid|uncertain|blocked|error
+      return { email, status: r.status, reason: (r as any).reason || "" };
+    })
+  );
+  const tentativas = results.map((r) => ({ email: r.email, status: r.status, reason: r.reason }));
+
+  const hit = results.find((r) => r.status === "valid");
+  if (hit) return { email: hit.email, status: "valid", tentativas };
+
+  if (results.every((r) => r.status === "error")) return { email: null, status: "error", tentativas: [] };
+
+  const temDefinitivoNao = results.some((r) => r.status === "invalid");
+  const temBloqueado = results.some((r) => r.status === "blocked");
+  const temIncerto = results.some((r) => r.status === "uncertain" || r.status === "error");
+  if (temBloqueado && !temDefinitivoNao) return { email: null, status: "blocked", tentativas };
+  if (temIncerto && !temDefinitivoNao) return { email: null, status: "uncertain", tentativas };
+  return { email: null, status: "not_found", tentativas };
+}
+
 /** Verifica um e-mail específico (usado antes de inscrever numa cadência). */
 export async function verifyEmail(email: string): Promise<{ status: string; reason?: string }> {
   const c = cfg();

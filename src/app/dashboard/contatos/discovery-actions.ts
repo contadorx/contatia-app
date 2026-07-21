@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { dominioDe, discoverEmail, workerConfigurado } from "@/lib/emailFinder";
+import { dominioDe, discoverEmailParallel, workerConfigurado } from "@/lib/emailFinder";
 import { findPublishedEmail } from "@/lib/webEmail";
 
 // ============================================================
@@ -156,7 +156,7 @@ export async function buscarEmailAgora(contactId: string, siteOuDominio: string)
   let tentativas: { email: string; status: string }[] = [];
   let workerStatus: string | null = null;
   if (workerConfigurado()) {
-    const r = await discoverEmail((contact as any).name, dominio);
+    const r = await discoverEmailParallel((contact as any).name, dominio);
     tentativas = (r.tentativas || []).map((t) => ({ email: t.email, status: t.status }));
     workerStatus = r.status;
 
