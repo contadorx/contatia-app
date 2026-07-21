@@ -58,7 +58,7 @@ export async function discoverEmail(nome: string, dominio: string): Promise<Disc
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.token}` },
       body: JSON.stringify({ nome, dominio }),
-      signal: AbortSignal.timeout(45000), // a conversa SMTP é lenta
+      signal: AbortSignal.timeout(55000), // a conversa SMTP é lenta (vários padrões × servidor lento)
     });
     if (!res.ok) return { email: null, status: "error" };
     return (await res.json()) as DiscoverResult;
@@ -76,7 +76,7 @@ export async function verifyEmail(email: string): Promise<{ status: string; reas
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${c.token}` },
       body: JSON.stringify({ email }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(45000), // servidores reais podem levar 20-30s pra responder o RCPT
     });
     if (!res.ok) return { status: "error" };
     return await res.json();

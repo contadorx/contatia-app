@@ -20,6 +20,11 @@ import { channelLabel, type Channel } from "@/lib/cadence";
 import { produtosDoContato } from "@/lib/produtos";
 
 export const dynamic = "force-dynamic";
+// A busca/verificação de e-mail conversa com o servidor SMTP do destino, que pode
+// levar 20-30s (greylisting/servidores lentos). Sem isto, a função da Vercel morre
+// no meio e a tela mostra "não foi possível verificar agora". 60s cobre o caso real
+// e é permitido tanto no Hobby (teto 60s) quanto no Pro.
+export const maxDuration = 60;
 
 function Field({ label, value }: { label: string; value?: string | null }) {
   return (
