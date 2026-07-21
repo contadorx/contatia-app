@@ -494,7 +494,7 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
       </Secao>
           ) },
           { id: "cadencias", label: "Cadências", node: (
-      <Secao id="cadencias" titulo="Desempenho de cadências" desc="Como cada sequência está convertendo: inscritos, ativos, respostas e taxa de resposta.">
+      <Secao id="cadencias" titulo="Desempenho de cadências" desc="Como cada cadência está convertendo: inscritos, ativos, respostas e taxa de resposta.">
         <Tabela
           vazio="Nenhuma cadência com inscritos ainda."
           head={["Cadência", "Inscritos", "Ativos", "Respostas", "Concluídos", "Taxa resposta"]}

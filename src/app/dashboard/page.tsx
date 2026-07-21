@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import TaskQueue from "@/components/TaskQueue";
 import OnboardingChecklist from "@/components/OnboardingChecklist";
 import { HOT_THRESHOLD } from "@/lib/scoring";
+import { effectiveDailyCap } from "@/lib/warmup";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export default async function Today() {
     waDisconnected = ((waAcc as any[]) || []).length > 0;
   }
 
-  const [{ data: rawTasks }, contactsCount, hotCount] = await Promise.all([
+  const [{ data: rawTasks }, contactsCount, hotCount, { data: boxes }] = await Promise.all([
     supabase
       .from("tasks")
       .select("id, channel, title, generated_content, due_date, contact_id, enrollment_id, contacts(name, company, phone, email, score)")
@@ -34,7 +35,20 @@ export default async function Today() {
       .lte("due_date", in3),
     supabase.from("contacts").select("id", { count: "exact", head: true }),
     supabase.from("contacts").select("id", { count: "exact", head: true }).gte("score", HOT_THRESHOLD),
+    supabase.from("email_accounts").select("daily_cap, warmup_stage, created_at").eq("is_active", true),
   ]);
+
+  // Envio Seguro: soma o que as caixas conseguem enviar HOJE (com aquecimento) — evita a
+  // surpresa "inscrevi 100 e saíram 10". Reusa a curva de warmup do envio.
+  const activeBoxes = (boxes as any[]) || [];
+  let sendCapToday = 0;
+  let anyWarming = false;
+  for (const a of activeBoxes) {
+    const warmupOn = (a.warmup_stage ?? 0) !== -1;
+    const { cap, warming } = effectiveDailyCap(a.created_at, a.daily_cap ?? 40, warmupOn);
+    sendCapToday += cap;
+    if (warming) anyWarming = true;
+  }
 
   const allTasks = (rawTasks as any[]) || [];
 
@@ -123,6 +137,15 @@ export default async function Today() {
           <span className="font-medium text-warn">⚠ Seu WhatsApp desconectou. Os envios automáticos estão pausados até reconectar.</span>
           <span className="font-semibold text-warn">Reconectar →</span>
         </a>
+      )}
+
+      {activeBoxes.length > 0 && (
+        <div className="mt-4 rounded-xl border border-line bg-surface px-4 py-2.5 text-sm">
+          <span className="font-semibold text-ink">Envio Seguro:</span>{" "}
+          <span className="text-subtle">hoje suas caixas enviam até <b className="text-ink">{sendCapToday} e-mails</b> no total
+            {anyWarming ? " — em aquecimento, o limite sobe sozinho a cada dia. O que passar disso entra na fila e sai amanhã." : ". O que passar disso entra na fila e sai no dia seguinte."}
+          </span>
+        </div>
       )}
 
       <div className="mt-6">

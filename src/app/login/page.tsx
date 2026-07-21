@@ -8,7 +8,7 @@ import { setupWorkspace } from "@/app/dashboard/setup-actions";
 export default function LoginPage() {
   const router = useRouter();
   const supabase = createClient();
-  const [mode, setMode] = useState<"in" | "up">("in");
+  const [mode, setMode] = useState<"in" | "up" | "reset">("in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -19,6 +19,16 @@ export default function LoginPage() {
   async function submit() {
     setLoading(true);
     setMsg(null);
+    if (mode === "reset") {
+      if (!email.trim()) { setMsg("Informe seu e-mail."); setLoading(false); return; }
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/redefinir-senha`,
+      });
+      // não revelamos se o e-mail existe (segurança) — mensagem sempre igual
+      setMsg(error ? error.message : "Se este e-mail tiver conta, enviamos um link para redefinir a senha. Confira sua caixa (e o spam).");
+      setLoading(false);
+      return;
+    }
     if (mode === "in") {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setMsg(error.message);
@@ -61,7 +71,7 @@ export default function LoginPage() {
             Contat<span className="text-brand">ia</span>
           </p>
           <p className="mt-1 text-sm text-subtle">
-            {mode === "in" ? "Entre na sua conta" : "Crie sua conta"}
+            {mode === "in" ? "Entre na sua conta" : mode === "up" ? "Crie sua conta" : "Recuperar senha"}
           </p>
         </div>
 
@@ -99,33 +109,46 @@ export default function LoginPage() {
               placeholder="voce@suaempresa.com.br"
             />
           </div>
-          <div>
-            <label className="label">Senha</label>
-            <input
-              className="input mt-1"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-            />
-          </div>
+          {mode !== "reset" && (
+            <div>
+              <label className="label">Senha</label>
+              <input
+                className="input mt-1"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+              />
+              {mode === "in" && (
+                <button type="button" className="mt-1 text-xs text-subtle hover:text-brand" onClick={() => { setMode("reset"); setMsg(null); }}>
+                  Esqueci minha senha
+                </button>
+              )}
+            </div>
+          )}
+          {mode === "reset" && (
+            <p className="text-xs text-subtle">Digite o e-mail da sua conta e enviaremos um link para criar uma senha nova.</p>
+          )}
 
-          {msg && <p className="text-sm text-danger">{msg}</p>}
+          {msg && <p className={`text-sm ${mode === "reset" ? "text-ink" : "text-danger"}`}>{msg}</p>}
 
           <button className="btn-brand w-full" onClick={submit} disabled={loading}>
-            {loading ? "..." : mode === "in" ? "Entrar" : "Criar conta"}
+            {loading ? "..." : mode === "in" ? "Entrar" : mode === "up" ? "Criar conta" : "Enviar link de recuperação"}
           </button>
         </div>
 
-        <button
-          className="mt-4 w-full text-center text-sm text-subtle hover:text-brand"
-          onClick={() => {
-            setMode(mode === "in" ? "up" : "in");
-            setMsg(null);
-          }}
-        >
-          {mode === "in" ? "Não tem conta? Cadastre-se" : "Já tem conta? Entrar"}
-        </button>
+        {mode === "reset" ? (
+          <button className="mt-4 w-full text-center text-sm text-subtle hover:text-brand" onClick={() => { setMode("in"); setMsg(null); }}>
+            ← Voltar ao login
+          </button>
+        ) : (
+          <button
+            className="mt-4 w-full text-center text-sm text-subtle hover:text-brand"
+            onClick={() => { setMode(mode === "in" ? "up" : "in"); setMsg(null); }}
+          >
+            {mode === "in" ? "Não tem conta? Cadastre-se" : "Já tem conta? Entrar"}
+          </button>
+        )}
       </div>
     </main>
   );

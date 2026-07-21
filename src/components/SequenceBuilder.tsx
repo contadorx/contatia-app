@@ -195,7 +195,7 @@ export default function SequenceBuilder({
   if (!open)
     return (
       <button className="btn-brand" onClick={() => setOpen(true)}>
-        + Nova sequência
+        + Nova cadência
       </button>
     );
 
@@ -313,7 +313,7 @@ export default function SequenceBuilder({
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <label className="label">Nome da sequência *</label>
+          <label className="label">Nome da cadência *</label>
           <input className="input mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Prospecção — Q3" />
         </div>
         <div>
@@ -504,7 +504,7 @@ export default function SequenceBuilder({
 
       <div className="mt-5 flex gap-2">
         <button className="btn-brand" onClick={save} disabled={pending}>
-          {pending ? "Salvando..." : editId ? "Salvar alterações" : "Salvar sequência"}
+          {pending ? "Salvando..." : editId ? "Salvar alterações" : "Salvar cadência"}
         </button>
         <button className="btn-ghost" onClick={() => { setOpen(false); onDone?.(); }}>
           Cancelar

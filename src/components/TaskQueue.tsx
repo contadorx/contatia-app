@@ -357,7 +357,7 @@ export default function TaskQueue({
                   className="rounded-lg border border-signal/40 px-2 py-1.5 text-xs font-semibold text-signal hover:bg-signal/10"
                   disabled={pending}
                   onClick={() => act(() => markReplied(t.contact_id as string))}
-                  title="Marcar que respondeu — pausa a sequência"
+                  title="Marcar que respondeu — pausa a cadência"
                 >
                   Respondeu
                 </button>

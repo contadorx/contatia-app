@@ -59,6 +59,49 @@ const EXPLICACAO: Record<string, { titulo: string; detalhe: string }> = {
   },
 };
 
+// Diagnóstico do serviço de busca (worker no VPS). Transforma "não funciona" numa
+// causa específica que o próprio usuário resolve.
+export async function testarWorker(): Promise<{ ok: boolean; titulo: string; detalhe: string }> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, titulo: "Sessão expirada", detalhe: "Recarregue a página." };
+  const { workerHealth } = await import("@/lib/emailFinder");
+  const h = await workerHealth();
+  if (!h.configured) {
+    return {
+      ok: false,
+      titulo: "Serviço de busca não configurado",
+      detalhe: "Faltam as variáveis WORKER_URL e WORKER_TOKEN no ambiente do app (Vercel → Settings → Environment Variables). Sem elas, a confirmação por servidor não roda — a busca só encontra e-mail publicado no site.",
+    };
+  }
+  if (h.ok) {
+    return {
+      ok: true,
+      titulo: "Serviço de busca no ar ✓",
+      detalhe: "O worker respondeu normalmente. Se mesmo assim uma busca específica falhar, o motivo costuma ser o domínio testado (catch-all, Google/Microsoft ou greylisting), não o serviço.",
+    };
+  }
+  if (h.httpStatus === 401 || h.httpStatus === 403) {
+    return {
+      ok: false,
+      titulo: "Token recusado pelo worker",
+      detalhe: "O worker está no ar, mas rejeitou o token (401/403). O WORKER_TOKEN no app precisa ser EXATAMENTE o mesmo configurado no VPS.",
+    };
+  }
+  if (h.httpStatus) {
+    return {
+      ok: false,
+      titulo: `Worker respondeu com erro (HTTP ${h.httpStatus})`,
+      detalhe: "O endereço responde, mas não com saúde OK. Confira se o processo do worker está rodando no VPS (systemd/pm2) e se o proxy HTTPS (Caddy/Nginx) aponta pra ele.",
+    };
+  }
+  return {
+    ok: false,
+    titulo: "Worker fora do ar",
+    detalhe: `Não consegui falar com o worker (${h.error || "sem conexão"}). Verifique se o VPS está ligado, se o processo do worker está rodando e se o WORKER_URL do app aponta pro endereço certo (com https://).`,
+  };
+}
+
 export async function buscarEmailAgora(contactId: string, siteOuDominio: string): Promise<ResultadoBusca> {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();

@@ -155,6 +155,7 @@ export default async function DashboardLayout({
         userLabel={profile?.full_name || user?.email || undefined}
         roleLabel={profile?.role === "owner" ? "Dono" : "Parceiro"}
         unreadReplies={unreadReplies}
+        triageCount={triageCount}
       />
       <div className="flex flex-1">
         <aside className="hidden w-56 flex-col self-start sticky top-0 h-screen overflow-y-auto border-r border-line bg-surface p-5 md:flex">

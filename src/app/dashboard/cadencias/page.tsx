@@ -52,7 +52,7 @@ export default async function Cadencias() {
       <div className="mt-6 space-y-3">
         {!sequences?.length ? (
           <div className="card p-10 text-center text-sm text-subtle">
-            Nenhuma sequência ainda. Crie a primeira acima — do zero, com IA, ou a partir de um template.
+            Nenhuma cadência ainda. Crie a primeira acima — do zero, com IA, ou a partir de um template.
           </div>
         ) : (
           sequences.map((s0) => {

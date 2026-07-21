@@ -25,6 +25,25 @@ export function workerConfigurado(): boolean {
   return !!cfg();
 }
 
+export type WorkerHealth = { configured: boolean; ok: boolean; httpStatus?: number; error?: string };
+
+/** Diagnóstico: o worker está configurado e no ar? (autoatendimento) */
+export async function workerHealth(): Promise<WorkerHealth> {
+  const c = cfg();
+  if (!c) return { configured: false, ok: false };
+  try {
+    const res = await fetch(`${c.url}/health`, {
+      headers: { Authorization: `Bearer ${c.token}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return { configured: true, ok: false, httpStatus: res.status };
+    const j = (await res.json().catch(() => ({}))) as { ok?: boolean };
+    return { configured: true, ok: j?.ok !== false, httpStatus: res.status };
+  } catch (e) {
+    return { configured: true, ok: false, error: e instanceof Error ? e.message : "sem conexão" };
+  }
+}
+
 /**
  * Descobre o e-mail de um decisor pelo nome + domínio da empresa.
  * Só devolve um e-mail quando o servidor CONFIRMA que a caixa existe.

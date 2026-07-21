@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { buscarEmailAgora, type ResultadoBusca } from "@/app/dashboard/contatos/discovery-actions";
+import { buscarEmailAgora, testarWorker, type ResultadoBusca } from "@/app/dashboard/contatos/discovery-actions";
 
 // ============================================================
 // BUSCA DO E-MAIL DO DECISOR
@@ -51,6 +51,13 @@ export function EmailFinder({
   const [res, setRes] = useState<ResultadoBusca | null>(null);
   const [pending, start] = useTransition();
   const [verDetalhes, setVerDetalhes] = useState(false);
+  const [diag, setDiag] = useState<{ ok: boolean; titulo: string; detalhe: string } | null>(null);
+  const [diagPending, startDiag] = useTransition();
+
+  function diagnosticar() {
+    setDiag(null);
+    startDiag(async () => setDiag(await testarWorker()));
+  }
 
   /** limpa o que o usuário colar: https://, www., caminho */
   function limpar(v: string): string {
@@ -189,6 +196,25 @@ export function EmailFinder({
                 <p className="mt-2 text-xs opacity-75">
                   Sem e-mail confiável, este contato deve seguir por <b>WhatsApp</b> ou <b>LinkedIn</b>.
                 </p>
+              )}
+
+              {/* falhou por serviço → diagnóstico self-service */}
+              {!res.ok && ["error", "sem_worker"].includes(res.status) && (
+                <div className="mt-2">
+                  <button
+                    onClick={diagnosticar}
+                    disabled={diagPending}
+                    className="rounded-lg border border-current/40 px-2 py-0.5 text-xs font-semibold underline-offset-2 hover:underline disabled:opacity-50"
+                  >
+                    {diagPending ? "Testando serviço…" : "Testar serviço de busca"}
+                  </button>
+                  {diag && (
+                    <div className={`mt-2 rounded-lg border p-2.5 text-xs ${diag.ok ? "border-signal/30 bg-signal/10 text-signal" : "border-danger/30 bg-danger/10 text-danger"}`}>
+                      <p className="font-semibold">{diag.ok ? "✓ " : "✕ "}{diag.titulo}</p>
+                      <p className="mt-0.5 opacity-90">{diag.detalhe}</p>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
