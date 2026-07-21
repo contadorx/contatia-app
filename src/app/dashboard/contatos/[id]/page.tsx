@@ -15,7 +15,7 @@ import EditContactButton from "@/components/EditContactButton";
 import DeleteContactButton from "@/components/DeleteContactButton";
 import ContactExtras from "@/components/ContactExtras";
 import ProdutoBadges from "@/components/ProdutoBadges";
-import { EmailVerifyBadge, DecisorFinder, TestEmailBox } from "@/components/EmailVerify";
+import { EmailVerifyBadge, TestEmailBox } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
 import { produtosDoContato } from "@/lib/produtos";
 
@@ -134,13 +134,6 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
             <p className="mt-1 text-sm text-subtle">{[c.email, c.phone].filter(Boolean).join(" · ") || "—"}</p>
             <div className="mt-2">
               <EmailVerifyBadge contactId={c.id} hasEmail={!!c.email} initial={(c as any).custom?.email_check ?? null} />
-              <div className="mt-2">
-                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-subtle">Ferramentas de e-mail</p>
-                <div className="space-y-2">
-                  <DecisorFinder contactId={c.id} />
-                  <TestEmailBox contactId={c.id} />
-                </div>
-              </div>
             </div>
           </div>
           <div className="text-right">
@@ -160,12 +153,19 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
         </div>
 
         {!c.email && (
-          <EmailFinder
-            contactId={c.id}
-            contactName={c.name}
-            companyDomain={(c as any).company_domain || (c as any).accounts?.domain || null}
-            discovery={(c as any).email_discovery || null}
-          />
+          <>
+            <EmailFinder
+              contactId={c.id}
+              contactName={c.name}
+              companyDomain={(c as any).company_domain || (c as any).accounts?.domain || null}
+              discovery={(c as any).email_discovery || null}
+            />
+            {/* "Testar um e-mail que já tenho" logo abaixo do buscador: para e-mails
+                por função (contato@, contabil@) que não seguem o nome da pessoa. */}
+            <div className="mt-2">
+              <TestEmailBox contactId={c.id} />
+            </div>
+          </>
         )}
 
         {/* Dados do contato/empresa (o que já está no banco e antes ficava escondido) */}
