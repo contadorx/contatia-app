@@ -9,10 +9,11 @@ export const dynamic = "force-dynamic";
 
 const NENHUM = "00000000-0000-0000-0000-000000000000";
 
-export default async function Contatos({ searchParams }: { searchParams: { tag?: string; q?: string; frio?: string; produto?: string } }) {
+export default async function Contatos({ searchParams }: { searchParams: { tag?: string; q?: string; frio?: string; produto?: string; cadencia?: string } }) {
   const supabase = createClient();
   const tagFilter = searchParams.tag;
   const produtoFilter = searchParams.produto || "";
+  const cadenciaFilter = searchParams.cadencia || "";
   const frio = searchParams.frio || ""; // "15" | "30" | "nunca"
   const q = (searchParams.q || "").trim();
   // sanitiza para o filtro .or() do PostgREST (vírgula/parênteses/% têm significado)
@@ -35,6 +36,15 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
   }
   if (produtoFilter) {
     idConstraints.push(await contatoIdsPorProduto(supabase, produtoFilter));
+  }
+  if (cadenciaFilter) {
+    // contatos ativos/pausados nesta cadência
+    const { data: en } = await supabase
+      .from("enrollments")
+      .select("contact_id")
+      .eq("sequence_id", cadenciaFilter)
+      .in("status", ["active", "paused"]);
+    idConstraints.push(((en as any[]) || []).map((r) => r.contact_id));
   }
   let idsFiltro: string[] | null = null;
   if (idConstraints.length) {
@@ -143,12 +153,35 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
             if (q) params.set("q", q);
             if (tagFilter) params.set("tag", tagFilter);
             if (frio) params.set("frio", frio);
+            if (cadenciaFilter) params.set("cadencia", cadenciaFilter);
             if (p.id) params.set("produto", p.id);
             const href = `/dashboard/contatos${params.toString() ? `?${params.toString()}` : ""}`;
             const ativo = produtoFilter === p.id;
             return (
               <Link key={p.id || "todos"} href={href} className={`rounded-full px-3 py-1 text-xs ${ativo ? "bg-brand text-white" : "border border-brand/25 bg-brand/5 text-brand-dark hover:bg-brand/10"}`}>
                 {p.name}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Filtro por cadência inscrita */}
+      {seqs.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-subtle">Cadência:</span>
+          {[{ id: "", name: "Todas" }, ...seqs].map((s) => {
+            const params = new URLSearchParams();
+            if (q) params.set("q", q);
+            if (tagFilter) params.set("tag", tagFilter);
+            if (produtoFilter) params.set("produto", produtoFilter);
+            if (frio) params.set("frio", frio);
+            if (s.id) params.set("cadencia", s.id);
+            const href = `/dashboard/contatos${params.toString() ? `?${params.toString()}` : ""}`;
+            const ativo = cadenciaFilter === s.id;
+            return (
+              <Link key={s.id || "todas"} href={href} className={`rounded-full px-3 py-1 text-xs ${ativo ? "bg-brand text-white" : "border border-brand/25 bg-brand/5 text-brand-dark hover:bg-brand/10"}`}>
+                {s.name}
               </Link>
             );
           })}
@@ -168,6 +201,7 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
           if (q) params.set("q", q);
           if (tagFilter) params.set("tag", tagFilter);
           if (produtoFilter) params.set("produto", produtoFilter);
+          if (cadenciaFilter) params.set("cadencia", cadenciaFilter);
           if (o.k) params.set("frio", o.k);
           const href = `/dashboard/contatos${params.toString() ? `?${params.toString()}` : ""}`;
           const ativo = frio === o.k;

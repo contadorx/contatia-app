@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import SmartSelect from "@/components/SmartSelect";
-import { atividadesReceita, buscarNaBase, enviarParaCadastro } from "@/app/dashboard/radar/actions";
+import { atividadesReceita, buscarNaBase, enviarParaCadastro, descartarCnpjs, reincluirCnpjs } from "@/app/dashboard/radar/actions";
 
 const UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
 
@@ -12,6 +12,7 @@ type Empresa = {
   cnae: string | null; cnae_descricao: string | null; uf: string | null;
   municipio: string | null; email: string | null; telefone: string | null; porte: string | null;
   jaTem?: boolean;
+  descartado?: boolean;
 };
 
 export default function RadarBusca({ configurada }: { configurada: boolean }) {
@@ -42,6 +43,9 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   const [erro, setErro] = useState<string | null>(null);
   const [buscando, startBusca] = useTransition();
   const [enviando, startEnvio] = useTransition();
+  const [descartando, startDescarte] = useTransition();
+  // como salvar do Radar: "empresa" (padrão, sem contato-fantasma) ou "empresa_contato".
+  const [modoSalvar, setModoSalvar] = useState<"empresa" | "empresa_contato">("empresa");
 
   const debounce = useRef<any>(null);
 
@@ -117,7 +121,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
     });
   }
   // "selecionar todos" só marca as que ainda NÃO estão na sua base
-  const selecionaveis = resultados.filter((r) => !r.jaTem);
+  const selecionaveis = resultados.filter((r) => !r.jaTem && !r.descartado);
   const todosMarcados = selecionaveis.length > 0 && selecionaveis.every((r) => sel.has(r.cnpj));
   function toggleTodos() {
     setSel(todosMarcados ? new Set() : new Set(selecionaveis.map((r) => r.cnpj)));
@@ -129,13 +133,40 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
     setErro(null);
     setMsg(null);
     startEnvio(async () => {
-      const r: any = await enviarParaCadastro(escolhidasRows);
+      const r: any = await enviarParaCadastro(escolhidasRows, modoSalvar);
       if (r.error) { setErro(r.error); return; }
       const partes: string[] = [];
-      partes.push(`${r.contatosCriados} contato(s) e ${r.empresasCriadas} empresa(s) criadas`);
+      if (modoSalvar === "empresa_contato") partes.push(`${r.contatosCriados} contato(s) e ${r.empresasCriadas} empresa(s) criadas`);
+      else partes.push(`${r.empresasCriadas} empresa(s) criadas`);
       if (r.pulados) partes.push(`${r.pulados} já existia(m)`);
-      setMsg(partes.join(" · ") + ". Veja em Empresas e Contatos.");
+      setMsg(partes.join(" · ") + (modoSalvar === "empresa_contato" ? ". Veja em Empresas e Contatos." : ". Veja em Empresas."));
       setSel(new Set());
+    });
+  }
+
+  // Descarta CNPJs: ficam em CINZA (igual "já na base") e não podem ser selecionados/enviados.
+  function descartar(cnpjs: string[]) {
+    if (!cnpjs.length) return;
+    setErro(null);
+    setMsg(null);
+    startDescarte(async () => {
+      const r: any = await descartarCnpjs(cnpjs);
+      if (r.error) { setErro(r.error); return; }
+      const alvo = new Set(cnpjs);
+      setResultados((rows) => rows.map((x) => (alvo.has(x.cnpj) ? { ...x, descartado: true } : x)));
+      setSel((s) => { const n = new Set(s); for (const c of cnpjs) n.delete(c); return n; });
+      setMsg(`${r.count} CNPJ(s) descartado(s) — ficam em cinza e não voltam nas buscas.`);
+    });
+  }
+
+  // Desfaz o descarte de um CNPJ (volta ao normal).
+  function reincluir(cnpj: string) {
+    setErro(null);
+    setMsg(null);
+    startDescarte(async () => {
+      const r: any = await reincluirCnpjs([cnpj]);
+      if (r.error) { setErro(r.error); return; }
+      setResultados((rows) => rows.map((x) => (x.cnpj === cnpj ? { ...x, descartado: false } : x)));
     });
   }
 
@@ -259,10 +290,25 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
 
           {/* barra de ação em lote */}
           {sel.size > 0 && (
-            <div className="mt-2 flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2">
+            <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2">
               <span className="text-sm font-medium text-brand-dark">{sel.size} selecionada(s)</span>
+              <div className="inline-flex overflow-hidden rounded-lg border border-brand/30 text-xs">
+                <button type="button" onClick={() => setModoSalvar("empresa")}
+                  className={`px-2.5 py-1 font-medium ${modoSalvar === "empresa" ? "bg-brand text-white" : "bg-white text-brand-dark hover:bg-brand-soft"}`}
+                  title="Salva só a empresa (recomendado). O contato real entra depois, quando houver uma pessoa/e-mail.">
+                  Só empresa
+                </button>
+                <button type="button" onClick={() => setModoSalvar("empresa_contato")}
+                  className={`px-2.5 py-1 font-medium ${modoSalvar === "empresa_contato" ? "bg-brand text-white" : "bg-white text-brand-dark hover:bg-brand-soft"}`}
+                  title="Cria a empresa e também um contato (leva o nome da empresa).">
+                  Empresa + contato
+                </button>
+              </div>
+              <button className="text-xs text-subtle hover:text-danger" onClick={() => descartar(Array.from(sel))} disabled={descartando}>
+                {descartando ? "descartando…" : "descartar selecionadas"}
+              </button>
               <button className="btn-brand ml-auto px-4" onClick={enviar} disabled={enviando}>
-                {enviando ? "Enviando…" : "Enviar para Empresas e Contatos"}
+                {enviando ? "Enviando…" : modoSalvar === "empresa" ? "Enviar para Empresas" : "Enviar para Empresas e Contatos"}
               </button>
             </div>
           )}
@@ -279,18 +325,20 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
                   <th className="px-3 py-3 font-medium">Município</th>
                   <th className="px-3 py-3 font-medium">E-mail</th>
                   <th className="px-3 py-3 font-medium">Telefone</th>
+                  <th className="px-3 py-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
                 {resultados.length ? resultados.map((r) => (
-                  <tr key={r.cnpj} className={`border-b border-line last:border-0 ${r.jaTem ? "opacity-60" : sel.has(r.cnpj) ? "bg-brand-soft/40" : "hover:bg-muted"}`}>
+                  <tr key={r.cnpj} className={`border-b border-line last:border-0 ${r.jaTem || r.descartado ? "opacity-60" : sel.has(r.cnpj) ? "bg-brand-soft/40" : "hover:bg-muted"}`}>
                     <td className="px-3 py-3">
-                      <input type="checkbox" checked={sel.has(r.cnpj)} disabled={r.jaTem} onChange={() => toggle(r.cnpj)} title={r.jaTem ? "Já está na sua base" : ""} />
+                      <input type="checkbox" checked={sel.has(r.cnpj)} disabled={r.jaTem || r.descartado} onChange={() => toggle(r.cnpj)} title={r.jaTem ? "Já está na sua base" : r.descartado ? "Descartado" : ""} />
                     </td>
                     <td className="px-3 py-3">
                       <p className="font-medium">
                         {r.nome_fantasia || r.razao_social || "—"}
                         {r.jaTem && <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-subtle">✓ já na base</span>}
+                        {!r.jaTem && r.descartado && <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-subtle">descartado</span>}
                       </p>
                       <p className="text-xs text-subtle">{r.cnpj}{r.porte ? ` · ${r.porte}` : ""}</p>
                     </td>
@@ -298,9 +346,20 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
                     <td className="px-3 py-3 text-subtle">{[r.municipio, r.uf].filter(Boolean).join("/") || "—"}</td>
                     <td className="px-3 py-3 text-subtle">{r.email || "—"}</td>
                     <td className="px-3 py-3 text-subtle">{r.telefone || "—"}</td>
+                    <td className="px-3 py-3 text-right">
+                      {r.descartado ? (
+                        <button className="text-xs text-subtle hover:text-brand disabled:opacity-50" disabled={descartando} onClick={() => reincluir(r.cnpj)} title="Voltar a mostrar este CNPJ nas buscas.">
+                          reincluir
+                        </button>
+                      ) : !r.jaTem ? (
+                        <button className="text-xs text-subtle hover:text-danger disabled:opacity-50" disabled={descartando} onClick={() => descartar([r.cnpj])} title="Descartar: fica em cinza e não volta nas buscas (ex.: sem perfil).">
+                          descartar
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 )) : (
-                  <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-subtle">Nenhuma empresa encontrada com esses filtros.</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-subtle">Nenhuma empresa encontrada com esses filtros.</td></tr>
                 )}
               </tbody>
             </table>
@@ -316,7 +375,9 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
 
           {resultados.length > 0 && (
             <p className="mt-3 text-xs text-subtle">
-              Marque as empresas e clique em enviar: elas entram em <b>Empresas</b> e <b>Contatos</b> já com e-mail, telefone, CNAE e município. As que você já tem são puladas.
+              Marque as empresas e escolha como salvar: <b>Só empresa</b> (padrão) grava em <b>Empresas</b> com e-mail,
+              telefone, CNAE e município — o contato real entra depois. <b>Empresa + contato</b> também cria um contato.
+              As que você já tem aparecem em <b>cinza</b> (&ldquo;já na base&rdquo;); o <b>descartar</b> deixa o CNPJ igual — em cinza, marcado como &ldquo;descartado&rdquo; e fora das próximas buscas (dá pra <b>reincluir</b>).
             </p>
           )}
         </>

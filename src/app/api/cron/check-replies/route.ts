@@ -26,6 +26,7 @@ export async function GET(req: Request) {
 
   let marked = 0;
   let suggestions = 0;
+  let bounced = 0;
   const errors: string[] = [];
 
   // M8: a fase de IMAP não pode consumir todo o orçamento (maxDuration=60) e impedir os
@@ -113,6 +114,33 @@ export async function GET(req: Request) {
           await upsertReplyTriage(admin, { tenantId: acc.tenant_id, contactId: e.contact_id, channel: "email", text: subjectByEmail[email] || "" });
         } catch { /* não bloqueia o cron */ }
         marked++;
+      }
+
+      // BOUNCE (SMTP puro): lê os avisos de mailer-daemon que caíram na caixa, extrai o
+      // destinatário que falhou e suprime — para de reenviar pra endereço morto (o que mais
+      // queima domínio). Espelha o efeito do webhook do Brevo, só que via IMAP. Só suprime
+      // bounce PERMANENTE (5.x.x) com destinatário identificável.
+      try {
+        const { parseBounce } = await import("@/lib/bounces");
+        const ownDom = (acc.smtp_user || "").split("@")[1]?.toLowerCase() || null;
+        const jaTratado = new Set<string>();
+        for (const m of msgs) {
+          const b = parseBounce(m, ownDom);
+          if (!b || jaTratado.has(b.email)) continue;
+          jaTratado.add(b.email);
+          await admin.from("email_suppressions").upsert(
+            { tenant_id: acc.tenant_id, email: b.email, reason: "hard_bounce" },
+            { onConflict: "tenant_id,email", ignoreDuplicates: true }
+          );
+          const { data: cs } = await admin.from("contacts").select("id").eq("tenant_id", acc.tenant_id).eq("email", b.email);
+          for (const c of (cs as any[]) || []) {
+            await admin.from("contacts").update({ email_status: "hard_bounce" }).eq("id", c.id);
+            await admin.from("tasks").update({ status: "skipped" }).eq("contact_id", c.id).eq("channel", "email").eq("status", "pending");
+          }
+          bounced++;
+        }
+      } catch (e: any) {
+        errors.push(`bounce ${acc.id}: ${e?.message || "erro"}`);
       }
 
       // remetentes que NÃO são contatos → viram sugestão (não perder quem te respondeu)
@@ -278,5 +306,5 @@ export async function GET(req: Request) {
     errors.push(`discovery: ${e?.message || "erro"}`);
   }
 
-  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, autoRan, purged, reminders, seatsSynced, lifecycle, dunning, retention, crm, discovery, errors });
+  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, bounced, autoRan, purged, reminders, seatsSynced, lifecycle, dunning, retention, crm, discovery, errors });
 }

@@ -40,6 +40,50 @@ function preencherExemplo(s: string): string {
 
 }
 
+// Visão de servidor (engajamento): o que os SEUS envios reais geraram nos últimos
+// 30 dias — enviados, cliques, respostas e tamanho da lista de supressão. Sem API
+// externa e sem inventar taxa de bounce/spam que o SMTP puro não fornece. Engajamento
+// é o melhor sinal disponível, sem feedback loop, de que você está caindo na entrada.
+export async function deliveryHealth() {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada. Recarregue a página." };
+
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const cnt = (type: string) =>
+    supabase.from("events").select("id", { count: "exact", head: true }).eq("type", type).gte("created_at", since);
+
+  const [sentRes, clickRes, replyRes, supRes, bounceRes] = await Promise.all([
+    cnt("email_sent"),
+    cnt("link_clicked"),
+    cnt("replied"),
+    supabase.from("email_suppressions").select("id", { count: "exact", head: true }),
+    // bounces permanentes capturados nos últimos 30d (via webhook Brevo OU IMAP)
+    supabase.from("email_suppressions").select("id", { count: "exact", head: true }).eq("reason", "hard_bounce").gte("created_at", since),
+  ]);
+
+  const sent = sentRes.count || 0;
+  const clicks = clickRes.count || 0;
+  const replies = replyRes.count || 0;
+  const suppressed = supRes.count || 0;
+  const bounces = bounceRes.count || 0;
+  const rate = (n: number) => (sent > 0 ? (n / sent) * 100 : 0);
+
+  return {
+    ok: true,
+    result: {
+      sent,
+      clicks,
+      clickRate: rate(clicks),
+      replies,
+      replyRate: rate(replies),
+      bounces,
+      bounceRate: rate(bounces),
+      suppressed,
+    },
+  };
+}
+
 // Roda o conteúdo (assunto + corpo) pelo SpamAssassin (API gratuita do Postmark).
 export async function checkSpamContent(subject: string, body: string) {
   const supabase = createClient();

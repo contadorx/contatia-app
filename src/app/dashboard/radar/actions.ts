@@ -35,17 +35,54 @@ function montarFiltro(input: any): FiltroReceita {
 }
 
 // marca cada resultado com jaTem=true se o CNPJ já estiver em Empresas (evita repuxar)
+// e REMOVE os CNPJs descartados (radar_dismissed) — some das buscas de vez.
 async function marcarJaTem(rows: any[]): Promise<any[]> {
   if (!Array.isArray(rows) || !rows.length) return rows || [];
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return rows;
   const cnpjs = Array.from(new Set(rows.map((r) => soDigitos(r.cnpj)).filter((d) => d.length === 14)));
   const tem = new Set<string>();
+  const desc = new Set<string>();
   for (let i = 0; i < cnpjs.length; i += 500) {
-    const { data } = await supabase.from("accounts").select("cnpj").eq("tenant_id", tenant_id).in("cnpj", cnpjs.slice(i, i + 500));
-    for (const a of (data as any[]) || []) if (a.cnpj) tem.add(soDigitos(a.cnpj));
+    const slice = cnpjs.slice(i, i + 500);
+    const [{ data: accs }, { data: dis }] = await Promise.all([
+      supabase.from("accounts").select("cnpj").eq("tenant_id", tenant_id).in("cnpj", slice),
+      supabase.from("radar_dismissed").select("cnpj").eq("tenant_id", tenant_id).in("cnpj", slice),
+    ]);
+    for (const a of (accs as any[]) || []) if (a.cnpj) tem.add(soDigitos(a.cnpj));
+    for (const d of (dis as any[]) || []) if (d.cnpj) desc.add(soDigitos(d.cnpj));
   }
-  return rows.map((r) => ({ ...r, jaTem: tem.has(soDigitos(r.cnpj)) }));
+  // Marca (não remove): já cadastrados E descartados aparecem em CINZA, iguais.
+  return rows.map((r) => ({
+    ...r,
+    jaTem: tem.has(soDigitos(r.cnpj)),
+    descartado: desc.has(soDigitos(r.cnpj)),
+  }));
+}
+
+// Descarta CNPJs do Radar: sacode-os das buscas (sem virar contato/empresa).
+export async function descartarCnpjs(cnpjs: string[]) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const limpos = Array.from(new Set((cnpjs || []).map(soDigitos).filter((d) => d.length === 14)));
+  if (!limpos.length) return { error: "Nenhum CNPJ válido para descartar." };
+  const rows = limpos.map((cnpj) => ({ tenant_id, cnpj }));
+  const { error } = await supabase
+    .from("radar_dismissed")
+    .upsert(rows, { onConflict: "tenant_id,cnpj", ignoreDuplicates: true });
+  if (error) return { error: error.message };
+  return { ok: true, count: limpos.length };
+}
+
+// Desfaz o descarte: os CNPJs voltam a aparecer normalmente nas buscas.
+export async function reincluirCnpjs(cnpjs: string[]) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const limpos = Array.from(new Set((cnpjs || []).map(soDigitos).filter((d) => d.length === 14)));
+  if (!limpos.length) return { error: "Nenhum CNPJ válido." };
+  const { error } = await supabase.from("radar_dismissed").delete().eq("tenant_id", tenant_id).in("cnpj", limpos);
+  if (error) return { error: error.message };
+  return { ok: true, count: limpos.length };
 }
 
 // garante a tag "Radar" e devolve o id (marca as empresas que vieram do Radar)
@@ -138,14 +175,17 @@ export async function buscarNaBase(input: any, offset = 0) {
 // Como a busca já traz e-mail/telefone/CNAE/município da base, não precisa de
 // nenhuma chamada externa: grava direto. Deduplica por CNPJ.
 // ============================================================
-export async function enviarParaCadastro(empresas: any[]) {
+export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "empresa_contato" = "empresa") {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (!Array.isArray(empresas) || !empresas.length) return { error: "Nenhuma empresa selecionada." };
+  const criarContato = modo === "empresa_contato";
 
-  // teto do plano (o envio não pode furar o limite de contatos)
-  const lim = await canCreate("contatos");
-  if (!lim.permitido) return { error: mensagemLimite("contatos", lim.usado, lim.limite, lim.sugerido) };
+  // teto do plano só se apertar (só o modo "empresa + contato" cria contato).
+  if (criarContato) {
+    const lim = await canCreate("contatos");
+    if (!lim.permitido) return { error: mensagemLimite("contatos", lim.usado, lim.limite, lim.sugerido) };
+  }
 
   // 1) carrega empresas e contatos existentes do workspace (dedup em memória)
   const { data: accs } = await supabase.from("accounts").select("id, name, cnpj").eq("tenant_id", tenant_id);
@@ -211,8 +251,10 @@ export async function enviarParaCadastro(empresas: any[]) {
     }
     if (account_id) contasParaMarcar.add(account_id); // será marcada com a tag Radar
 
-    // 3) cria o CONTATO (a empresa vira o contato, já que sócios ficaram pra depois),
-    //    a não ser que já exista um contato com esse CNPJ (dedup).
+    // 3) cria o CONTATO apenas no modo "empresa + contato". No padrão ("só empresa"),
+    //    NÃO criamos um contato-fantasma com o nome da empresa — o contato real entra
+    //    depois (descoberta de e-mail ou cadastro manual, quando houver uma pessoa).
+    if (!criarContato) continue;
     if (contatoTemCnpj.has(cnpj)) { pulados++; continue; }
     const { error: errC } = await supabase.from("contacts").insert({
       tenant_id,

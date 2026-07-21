@@ -212,25 +212,25 @@ export default function SequenceBuilder({
             <p className="text-sm font-semibold">Contexto para a IA montar a cadência</p>
             <p className="mt-0.5 text-xs text-subtle">Quanto mais contexto, melhor a cadência. Puxamos o que já está salvo no seu negócio.</p>
 
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <input className="input" value={brief.market} onChange={(e) => bf("market", e.target.value)} placeholder="Mercado-alvo (ex.: clínicas particulares em SP)" />
               <input className="input" value={brief.product} onChange={(e) => bf("product", e.target.value)} placeholder="Seu produto/serviço" />
-              <input className="input" value={brief.icp} onChange={(e) => bf("icp", e.target.value)} placeholder="Cliente ideal (cargo, porte)" />
             </div>
             <div className="mt-3">
               <label className="label">Dor que você resolve</label>
               <textarea className="input mt-1 min-h-[90px] leading-relaxed" value={brief.pain} onChange={(e) => bf("pain", e.target.value)} placeholder="O problema concreto do cliente e por que dói. Quanto mais específico, melhor a cadência." />
             </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <input className="input" value={brief.goal} onChange={(e) => bf("goal", e.target.value)} placeholder="Objetivo (ex.: agendar diagnóstico)" />
-              <input className="input" value={brief.cta} onChange={(e) => bf("cta", e.target.value)} placeholder="CTA preferido (ex.: 15 min esta semana)" />
-            </div>
 
             <button type="button" className="mt-3 text-xs font-medium text-brand hover:underline" onClick={() => setShowMoreCtx((s) => !s)}>
-              {showMoreCtx ? "− Menos contexto" : "+ Mais contexto (prova, tom, o que evitar)"}
+              {showMoreCtx ? "− Menos contexto" : "+ Mais contexto (cliente ideal, objetivo, CTA, prova, tom)"}
             </button>
             {showMoreCtx && (
               <div className="mt-2 space-y-3">
+                <input className="input" value={brief.icp} onChange={(e) => bf("icp", e.target.value)} placeholder="Cliente ideal (cargo, porte)" />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <input className="input" value={brief.goal} onChange={(e) => bf("goal", e.target.value)} placeholder="Objetivo (ex.: agendar diagnóstico)" />
+                  <input className="input" value={brief.cta} onChange={(e) => bf("cta", e.target.value)} placeholder="CTA preferido (ex.: 15 min esta semana)" />
+                </div>
                 <div>
                   <label className="label">Prova / diferencial</label>
                   <textarea className="input mt-1 min-h-[80px] leading-relaxed" value={brief.proof} onChange={(e) => bf("proof", e.target.value)} placeholder="Resultado, número ou case real que sustenta sua promessa (sem exagerar)." />

@@ -102,7 +102,12 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   if (!task) return { error: "Tarefa não encontrada." };
   if (task.channel !== "email") return { error: "Tarefa não é de e-mail." };
   const to = (task as any).contacts?.email as string | undefined;
-  if (!to) return { error: "Contato sem e-mail." };
+  if (!to) {
+    // contato sem e-mail: pula a tarefa (não fica pendente para sempre) — cobre também
+    // tarefas criadas antes do gate de inscrição.
+    await supabase.from("tasks").update({ status: "skipped" }).eq("id", taskId);
+    return { error: "Contato sem e-mail. Tarefa de e-mail pulada." };
+  }
 
   // não envia para e-mail marcado como inválido/bounce (protege reputação)
   const estatus = (task as any).contacts?.email_status as string | undefined;

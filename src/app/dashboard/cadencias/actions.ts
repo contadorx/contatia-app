@@ -192,6 +192,22 @@ export async function enrollContact(contactId: string, sequenceId: string) {
     .order("position", { ascending: true });
   if (!steps?.length) return { error: "Sequência sem passos." };
 
+  // GATE DE DADOS: o contato precisa TER o dado que cada canal exige. E-mail sem e-mail
+  // e WhatsApp/ligação sem telefone não podem virar tarefa (era o bug: contato sem e-mail
+  // entrava e "enviava"). Passos sem o dado são PULADOS; se sobrar zero, não inscreve.
+  const hasEmail = !!(contact.email && String(contact.email).trim());
+  const hasPhone = !!(contact.phone && String(contact.phone).trim());
+  const podeCanal = (ch: string) =>
+    ch === "email" ? hasEmail : ch === "whatsapp" || ch === "call" ? hasPhone : true;
+  if (!steps.some((s) => podeCanal(s.channel))) {
+    return {
+      error: hasEmail || hasPhone
+        ? "O contato não tem o dado necessário para nenhum passo desta cadência."
+        : "Este contato não tem e-mail nem telefone — adicione um contato antes de inscrever numa cadência.",
+      missingData: true,
+    };
+  }
+
   // RESOLVE a caixa de e-mail desta inscrição: override da cadência → RODÍZIO no
   // pool do produto → caixa única legada → null (rodízio geral no envio). Carimba
   // na tarefa para o envio usar direto e manter o mesmo sender para o contato.
@@ -209,13 +225,17 @@ export async function enrollContact(contactId: string, sequenceId: string) {
 
   const today = new Date();
   let offset = 0;
-  const tasks = steps.map((s) => {
+  const tasks = [];
+  for (const s of steps) {
+    // o cronograma acumula sobre TODOS os passos (mantém as datas), mas só vira tarefa
+    // o passo cujo canal o contato consegue receber.
     offset += Number(s.delay_days) || 0;
+    if (!podeCanal(s.channel)) continue;
     // A/B de assunto: se o passo tem variante B, sorteia qual usar nesta inscrição
     const hasB = s.channel === "email" && s.subject_b && String(s.subject_b).trim();
     const variant = hasB ? (Math.random() < 0.5 ? "a" : "b") : null;
     const chosenSubject = variant === "b" ? s.subject_b : s.subject;
-    return {
+    tasks.push({
       tenant_id,
       enrollment_id: enr.id,
       contact_id: contactId,
@@ -228,8 +248,13 @@ export async function enrollContact(contactId: string, sequenceId: string) {
       step_position: s.position,
       subject_variant: variant,
       email_account_id: s.channel === "email" ? resolvedBox : null,
-    };
-  });
+    });
+  }
+  // segurança: se por algum motivo nada virou tarefa, desfaz a inscrição em vez de deixá-la vazia.
+  if (!tasks.length) {
+    await supabase.from("enrollments").delete().eq("id", enr.id);
+    return { error: "O contato não tem os dados necessários para os passos desta cadência.", missingData: true };
+  }
   const { error: e2 } = await supabase.from("tasks").insert(tasks);
   if (e2) return { error: e2.message };
 
@@ -440,6 +465,16 @@ export async function pauseEnrollment(enrollmentId: string) {
 export async function resumeEnrollment(enrollmentId: string) {
   const { supabase } = await ctx();
   await supabase.from("enrollments").update({ status: "active" }).eq("id", enrollmentId);
+  revalidatePath("/dashboard/contatos", "layout");
+  return { ok: true };
+}
+
+// REMOVE o contato da cadência: encerra a inscrição (status "stopped") e cancela as
+// tarefas de e-mail/WhatsApp ainda pendentes. Diferente de pausar — não há retomar.
+export async function stopEnrollment(enrollmentId: string) {
+  const { supabase } = await ctx();
+  await supabase.from("enrollments").update({ status: "stopped" }).eq("id", enrollmentId);
+  await supabase.from("tasks").update({ status: "skipped" }).eq("enrollment_id", enrollmentId).eq("status", "pending");
   revalidatePath("/dashboard/contatos", "layout");
   return { ok: true };
 }

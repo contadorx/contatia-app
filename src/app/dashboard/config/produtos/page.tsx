@@ -7,7 +7,11 @@ export const dynamic = "force-dynamic";
 export default async function ProdutosConfig() {
   const supabase = createClient();
   const [{ data: products }, { data: accounts }, { data: pools }] = await Promise.all([
-    supabase.from("products").select("id, name, kind, billing, price, active, email_account_id, email_accounts(from_email)").order("created_at", { ascending: false }),
+    // NÃO embutir "email_accounts(...)" aqui: products tem DOIS caminhos até email_accounts
+    // (a FK direta email_account_id + o pool product_email_accounts, migration 0085), o que
+    // torna o embed ambíguo e quebra a consulta INTEIRA (lista vazia / "produtos sumiram").
+    // As caixas do produto vêm do pool (query abaixo); o from_email do pool resolve por lá.
+    supabase.from("products").select("id, name, kind, billing, price, active, email_account_id").order("created_at", { ascending: false }),
     supabase.from("email_accounts").select("id, from_email, display_name").eq("is_active", true).order("created_at", { ascending: true }),
     supabase.from("product_email_accounts").select("product_id, email_account_id, email_accounts(from_email)"),
   ]);

@@ -36,7 +36,9 @@ export default function SmtpForm({ editAccount }: { editAccount?: EditAccount })
     smtp_secure: editAccount?.smtp_secure || false,
     smtp_user: editAccount?.smtp_user || "",
     smtp_pass: "",
-    detect_replies: editAccount?.detect_replies || false,
+    // IMAP ligado por padrão em caixa nova: é o que pausa a cadência quando o lead
+    // responde e alimenta a captura de bounce. Em edição, respeita o que já estava salvo.
+    detect_replies: editAccount ? (editAccount.detect_replies ?? true) : true,
     imap_host: editAccount?.imap_host || "",
   });
   const [msg, setMsg] = useState<string | null>(null);
@@ -96,10 +98,10 @@ export default function SmtpForm({ editAccount }: { editAccount?: EditAccount })
       if (res?.error) setMsg(res.error);
       else if (!isEdit && (res as any)?.verified === false) {
         // salvou, mas a conexão não validou — avisa sem bloquear (a caixa fica vermelha).
-        setF({ from_email: "", display_name: "", smtp_host: "", smtp_port: 587, smtp_secure: false, smtp_user: "", smtp_pass: "", detect_replies: false, imap_host: "" });
+        setF({ from_email: "", display_name: "", smtp_host: "", smtp_port: 587, smtp_secure: false, smtp_user: "", smtp_pass: "", detect_replies: true, imap_host: "" });
         setOpen(false);
       } else {
-        if (!isEdit) setF({ from_email: "", display_name: "", smtp_host: "", smtp_port: 587, smtp_secure: false, smtp_user: "", smtp_pass: "", detect_replies: false, imap_host: "" });
+        if (!isEdit) setF({ from_email: "", display_name: "", smtp_host: "", smtp_port: 587, smtp_secure: false, smtp_user: "", smtp_pass: "", detect_replies: true, imap_host: "" });
         setOpen(false);
       }
     });

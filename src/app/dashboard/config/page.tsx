@@ -97,7 +97,6 @@ export default async function Config() {
   // status de setup
   const idOk = !!(tenant as any)?.legal_name;
   const emailOk = rows.length > 0;
-  const waLabel = waMode === "evolution" ? "automático" : waMode === "meta" ? "oficial" : "assistido";
 
   return (
     <div className="max-w-3xl">
@@ -108,18 +107,19 @@ export default async function Config() {
         <p className="mt-3 rounded-lg bg-muted p-3 text-sm text-subtle">Algumas configurações são editáveis apenas pelo dono do workspace.</p>
       )}
 
-      {/* Status de configuração */}
-      <div className="mt-5 card p-4">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-subtle">Status de configuração</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <Chip ok={idOk} label="Identidade" />
-          <Chip ok={emailOk} label="E-mail conectado" />
-          <span className="inline-flex items-center gap-1 rounded-full bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-dark">WhatsApp: {waLabel}</span>
+      {/* Status de configuração — só aparece enquanto falta algo */}
+      {(!idOk || !emailOk) && (
+        <div className="mt-5 card p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-subtle">Complete sua configuração</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Chip ok={idOk} label="Identidade" />
+            <Chip ok={emailOk} label="E-mail conectado" />
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="mt-6">
-        <ConfigTabs tabs={["Negócio", "Canais", "Vendas", "Conexões"]}>
+        <ConfigTabs tabs={["Negócio", "Canais", "Conexões"]}>
           {/* ===================== NEGÓCIO ===================== */}
           <div>
             <Section title="Identidade e marca" desc="Nome, documento e marca do workspace — usados nos entregáveis white-label (assinatura, propostas, relatórios).">
@@ -132,6 +132,10 @@ export default async function Config() {
               <div className="card p-5">
                 <SignatureForm initial={((tenant as any)?.email_signature as string) || ""} />
               </div>
+            </Section>
+
+            <Section title="Produtos e serviços" desc="O que você vende — vincule às oportunidades para medir receita por produto.">
+              <LinkCard title="Catálogo de produtos e serviços" desc="Cadastre o que você vende (avulso ou recorrente) e vincule às oportunidades." href="/dashboard/config/produtos" />
             </Section>
           </div>
 
@@ -187,25 +191,23 @@ export default async function Config() {
                   <div className="card p-6 text-sm text-subtle">Nenhuma caixa conectada. Conecte uma abaixo para enviar e-mails direto do app.</div>
                 )}
               </div>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                <div className="card p-5">
-                  <p className="text-sm font-semibold">Gmail / Google Workspace</p>
-                  <p className="mt-1 text-xs text-subtle">Conecte via OAuth (recomendado): envia e, no futuro, lê respostas.</p>
-                  {gmailReady ? (
+              <div className={`mt-4 grid gap-4 ${gmailReady ? "sm:grid-cols-2" : ""}`}>
+                {gmailReady && (
+                  <div className="card p-5">
+                    <p className="text-sm font-semibold">Gmail / Google Workspace</p>
+                    <p className="mt-1 text-xs text-subtle">Conecte via OAuth — o jeito mais simples para contas Google.</p>
                     <a href="/api/gmail/connect" className="btn-brand mt-3 inline-flex">Conectar Gmail</a>
-                  ) : (
-                    <p className="mt-3 rounded-lg bg-warn/10 p-3 text-xs text-warn">Falta configurar GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no ambiente para habilitar o OAuth do Gmail.</p>
-                  )}
-                </div>
+                  </div>
+                )}
                 <div className="card p-5">
-                  <p className="text-sm font-semibold">Outro provedor (SMTP)</p>
-                  <p className="mt-1 text-xs text-subtle">Outlook, servidor próprio, ou Gmail com senha de app. A <b>detecção de respostas por IMAP</b> fica dentro deste formulário — ative para a cadência pausar sozinha quando o lead responder.</p>
+                  <p className="text-sm font-semibold">Conectar caixa de e-mail</p>
+                  <p className="mt-1 text-xs text-subtle">Gmail, Outlook, Brevo ou servidor próprio. A detecção de respostas por IMAP já vem ligada — a cadência pausa sozinha quando o lead responde.</p>
                   <div className="mt-3"><SmtpForm /></div>
                 </div>
               </div>
             </Section>
 
-            <Section title="Saúde do domínio" desc="Cheque MX, SPF, DKIM e DMARC — os quatro registros que fazem seus e-mails chegarem à caixa de entrada em vez do spam.">
+            <Section title="Saúde do domínio" desc="MX, SPF, DKIM e DMARC — os registros que mantêm seu e-mail fora do spam.">
               <DomainHealthPanel />
             </Section>
 
@@ -219,30 +221,13 @@ export default async function Config() {
 
             <div className="mt-2 mb-8">
               <SubHead>WhatsApp</SubHead>
-              <Section title="Canal do WhatsApp" desc="Escolha COMO usar o WhatsApp na cadência — o nível é seu, por trade-off de risco: do link sem risco à API automática.">
+              <Section title="Canal do WhatsApp" desc="Como o WhatsApp entra na cadência — do link sem risco à API automática.">
                 {/* WhatsApp incluído em TODOS os planos — sem gate. */}
                 <div className="card p-5">
                   <WhatsAppConnect accounts={(waAccounts as any[]) || []} mode={waMode as any} acked={waAcked} platformReady={waPlatformReady} />
                 </div>
               </Section>
             </div>
-          </div>
-
-          {/* ===================== VENDAS ===================== */}
-          <div>
-            <Section title="Produtos e serviços" desc="Seu catálogo do que você vende, para vincular às oportunidades e medir receita por produto.">
-              <LinkCard title="Catálogo de produtos e serviços" desc="Cadastre o que você vende (avulso ou recorrente) e vincule às oportunidades." href="/dashboard/config/produtos" />
-            </Section>
-
-            <Section title="IA de cadência" desc="A IA que monta a cadência já vem incluída e gerenciada pela Contatia — nada para configurar aqui.">
-              {/* IA incluída em TODOS os planos — sem gate. */}
-              <div className="card p-5">
-                <p className="text-sm text-subtle">
-                  A geração de cadência com IA já vem <b>pronta e gerenciada pela Contatia</b> — você não precisa
-                  informar modelo nem chave. Use direto na tela de <b>Cadências</b> (Começar → Com IA).
-                </p>
-              </div>
-            </Section>
           </div>
 
           {/* ===================== CONEXÕES ===================== */}
@@ -276,15 +261,6 @@ export default async function Config() {
             </Section>
           </div>
         </ConfigTabs>
-      </div>
-
-      {/* Rodapé-ponte: configs de conta que vivem fora daqui */}
-      <div className="mt-10 border-t border-line pt-6">
-        <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-subtle">Configurações da conta</p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <LinkCard title="Usuários e permissões" desc="Convide gente, defina papéis e veja o placar da equipe." href="/dashboard/equipe" cta="Abrir Equipe →" />
-          <LinkCard title="Plano e cobrança" desc="Seu plano, faturas, cupom e retenção de arquivos." href="/dashboard/planos" cta="Abrir Planos →" />
-        </div>
       </div>
     </div>
   );
