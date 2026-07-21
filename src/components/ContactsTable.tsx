@@ -81,10 +81,14 @@ export default function ContactsTable({
     if (!seq) return setMsg("Escolha a cadência.");
     setMsg(null);
     start(async () => {
-      const res = (await bulkEnroll([...sel], seq)) as { enrolled?: number; skipped?: number; error?: string };
+      const res = (await bulkEnroll([...sel], seq)) as { enrolled?: number; semDado?: number; jaInscrito?: number; outros?: number; error?: string };
       if (res?.error) setMsg(res.error);
       else {
-        setMsg(`✓ ${res.enrolled} inscritos${res.skipped ? `, ${res.skipped} pulados (já em cadência/sem dados)` : ""}.`);
+        const partes = [`✓ ${res.enrolled ?? 0} inscrito(s)`];
+        if (res.semDado) partes.push(`⚠ ${res.semDado} sem e-mail/telefone — complete o cadastro (visão “A completar”)`);
+        if (res.jaInscrito) partes.push(`${res.jaInscrito} já em cadência`);
+        if (res.outros) partes.push(`${res.outros} não entraram`);
+        setMsg(partes.join(" · "));
         clear();
         setSeq("");
       }
@@ -289,12 +293,13 @@ export default function ContactsTable({
                         </span>
                       </span>
                     ) : (
-                      <span
-                        className="cursor-help rounded-full bg-warn/10 px-2 py-0.5 text-[11px] font-semibold text-warn"
-                        title="Abra o contato para procurar o e-mail."
+                      <Link
+                        href={`/dashboard/contatos/${c.id}`}
+                        className="rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-semibold text-danger hover:bg-danger/20"
+                        title="Sem e-mail nem telefone — clique para completar o cadastro. Sem um deles, o contato não entra em cadência."
                       >
-                        sem e-mail
-                      </span>
+                        sem contato — preencher
+                      </Link>
                     )}
                   </td>
                   <td className="px-4 py-3">

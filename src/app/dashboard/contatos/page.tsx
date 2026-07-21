@@ -1,26 +1,26 @@
 import { createClient } from "@/lib/supabase/server";
 import ContactTools from "@/components/ContactTools";
 import ContactsTable from "@/components/ContactsTable";
-import Link from "next/link";
+import ContactsFilterBar from "@/components/ContactsFilterBar";
 import { isManager } from "@/lib/permissions";
+import { HOT_THRESHOLD } from "@/lib/scoring";
 import { produtosPorContatos, contatoIdsPorProduto } from "@/lib/produtos";
 
 export const dynamic = "force-dynamic";
 
 const NENHUM = "00000000-0000-0000-0000-000000000000";
 
-export default async function Contatos({ searchParams }: { searchParams: { tag?: string; q?: string; frio?: string; produto?: string; cadencia?: string } }) {
+export default async function Contatos({ searchParams }: { searchParams: { tag?: string; q?: string; frio?: string; produto?: string; cadencia?: string; semcontato?: string; view?: string } }) {
   const supabase = createClient();
-  const tagFilter = searchParams.tag;
+  const tagFilter = searchParams.tag || "";
   const produtoFilter = searchParams.produto || "";
   const cadenciaFilter = searchParams.cadencia || "";
   const frio = searchParams.frio || ""; // "15" | "30" | "nunca"
+  // visão rápida: completar | prontos | resgatar | quentes (vazio = todos). semcontato=1 vira "completar".
+  const view = searchParams.view || (searchParams.semcontato === "1" ? "completar" : "");
   const q = (searchParams.q || "").trim();
-  // sanitiza para o filtro .or() do PostgREST (vírgula/parênteses/% têm significado)
   const qSafe = q.slice(0, 80).replace(/[,()%*]/g, " ").trim();
 
-  // Visibilidade por papel: Dono/Admin/Gestor veem os contatos de toda a equipe;
-  // Vendedor/SDR veem só os seus (assigned_to = você).
   const { data: { user } } = await supabase.auth.getUser();
   const { data: me } = await supabase.from("profiles").select("role, team_role").eq("id", user?.id ?? "").maybeSingle();
   const gerente = isManager((me as any)?.role, (me as any)?.team_role);
@@ -28,7 +28,7 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
   const { data: tags } = await supabase.from("tags").select("id, name, color").order("name", { ascending: true });
   const { count: suggestionCount } = await supabase.from("contact_suggestions").select("id", { count: "exact", head: true }).eq("status", "pending");
 
-  // Filtros que restringem por lista de IDs (tag e produto). Intersectamos.
+  // Filtros detalhados que restringem por lista de IDs (tag, produto, cadência). Intersectamos.
   const idConstraints: string[][] = [];
   if (tagFilter) {
     const { data: ct } = await supabase.from("contact_tags").select("contact_id").eq("tag_id", tagFilter);
@@ -38,17 +38,19 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
     idConstraints.push(await contatoIdsPorProduto(supabase, produtoFilter));
   }
   if (cadenciaFilter) {
-    // contatos ativos/pausados nesta cadência
-    const { data: en } = await supabase
-      .from("enrollments")
-      .select("contact_id")
-      .eq("sequence_id", cadenciaFilter)
-      .in("status", ["active", "paused"]);
+    const { data: en } = await supabase.from("enrollments").select("contact_id").eq("sequence_id", cadenciaFilter).in("status", ["active", "paused"]);
     idConstraints.push(((en as any[]) || []).map((r) => r.contact_id));
   }
   let idsFiltro: string[] | null = null;
   if (idConstraints.length) {
     idsFiltro = idConstraints.reduce((acc, cur) => acc.filter((id) => cur.includes(id)));
+  }
+
+  // Visões "prontos" e "resgatar" excluem quem já está numa cadência ativa.
+  let emCadencia: string[] = [];
+  if (view === "prontos" || view === "resgatar") {
+    const { data: en } = await supabase.from("enrollments").select("contact_id").in("status", ["active", "paused"]);
+    emCadencia = Array.from(new Set(((en as any[]) || []).map((r) => r.contact_id).filter(Boolean)));
   }
 
   let contactsQuery = supabase
@@ -59,9 +61,26 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
     .limit(200);
   if (idsFiltro) contactsQuery = contactsQuery.in("id", idsFiltro.length ? idsFiltro : [NENHUM]);
   if (!gerente) contactsQuery = contactsQuery.eq("assigned_to", user?.id ?? "");
-  // busca por nome, e-mail ou empresa
   if (qSafe) contactsQuery = contactsQuery.or(`name.ilike.%${qSafe}%,email.ilike.%${qSafe}%,company.ilike.%${qSafe}%`);
-  // filtro de "frios": sem toque há N dias (ou nunca tocados)
+
+  // ---- VISÕES RÁPIDAS ----
+  if (view === "completar") {
+    // sem e-mail E sem telefone (null ou vazio)
+    contactsQuery = contactsQuery.or("email.is.null,email.eq.").or("phone.is.null,phone.eq.");
+  } else if (view === "quentes") {
+    contactsQuery = contactsQuery.gte("score", HOT_THRESHOLD);
+  } else if (view === "prontos") {
+    // tem e-mail OU telefone, e fora de cadência ativa
+    contactsQuery = contactsQuery.or("email.neq.,phone.neq.");
+    if (emCadencia.length) contactsQuery = contactsQuery.not("id", "in", `(${emCadencia.join(",")})`);
+  } else if (view === "resgatar") {
+    // frio (sem toque há +30d ou nunca) e fora de cadência ativa
+    const corte = new Date(); corte.setDate(corte.getDate() - 30);
+    contactsQuery = contactsQuery.or(`last_activity_at.is.null,last_activity_at.lt.${corte.toISOString()}`);
+    if (emCadencia.length) contactsQuery = contactsQuery.not("id", "in", `(${emCadencia.join(",")})`);
+  }
+
+  // ---- FILTRO DETALHADO: último toque (independente das visões) ----
   if (frio === "nunca") {
     contactsQuery = contactsQuery.is("last_activity_at", null);
   } else if (frio === "15" || frio === "30") {
@@ -93,7 +112,7 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-bold">Contatos</h1>
-          <p className="mt-1 text-sm text-subtle">Sua base de prospecção e relacionamento. Selecione vários para inscrever, atribuir ou taguear em lote.</p>
+          <p className="mt-1 text-sm text-subtle">Sua base de prospecção e relacionamento. Comece pela <b>Visão</b> e afunile nos filtros quando precisar.</p>
         </div>
         {(suggestionCount ?? 0) > 0 && (
           <a href="/dashboard/contatos/sugestoes" className="shrink-0 rounded-lg bg-warn/10 px-3 py-2 text-sm font-semibold text-warn hover:bg-warn/20">
@@ -106,112 +125,17 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
         <ContactTools />
       </div>
 
-      {/* Busca por nome / e-mail / empresa */}
-      <form className="mt-4 flex flex-wrap items-center gap-2">
-        {tagFilter && <input type="hidden" name="tag" value={tagFilter} />}
-        <input
-          name="q"
-          defaultValue={q}
-          className="input max-w-xs py-1.5 text-sm"
-          placeholder="Buscar por nome, e-mail ou empresa…"
-        />
-        <button className="btn-ghost py-1.5 text-sm" type="submit">Buscar</button>
-        {q && (
-          <a href={tagFilter ? `/dashboard/contatos?tag=${tagFilter}` : "/dashboard/contatos"} className="text-xs text-subtle hover:text-ink">
-            limpar busca
-          </a>
-        )}
-        {q && <span className="text-xs text-subtle">Resultados para “{q}”</span>}
-      </form>
-
-      {/* Filtro por tag */}
-      {tagList.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-subtle">Filtrar por tag:</span>
-          <Link href={q ? `/dashboard/contatos?q=${encodeURIComponent(q)}` : "/dashboard/contatos"} className={`rounded-full px-3 py-1 text-xs ${!tagFilter ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}>
-            Todos
-          </Link>
-          {tagList.map((t) => (
-            <Link
-              key={t.id}
-              href={`/dashboard/contatos?tag=${t.id}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
-              className={`rounded-full px-3 py-1 text-xs ${tagFilter === t.id ? "text-white" : "text-ink hover:opacity-80"}`}
-              style={{ background: tagFilter === t.id ? t.color : `${t.color}22` }}
-            >
-              {t.name}
-            </Link>
-          ))}
-        </div>
-      )}
-
-      {/* Filtro por produto */}
-      {produtoList.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-subtle">Produto:</span>
-          {[{ id: "", name: "Todos" }, ...produtoList].map((p) => {
-            const params = new URLSearchParams();
-            if (q) params.set("q", q);
-            if (tagFilter) params.set("tag", tagFilter);
-            if (frio) params.set("frio", frio);
-            if (cadenciaFilter) params.set("cadencia", cadenciaFilter);
-            if (p.id) params.set("produto", p.id);
-            const href = `/dashboard/contatos${params.toString() ? `?${params.toString()}` : ""}`;
-            const ativo = produtoFilter === p.id;
-            return (
-              <Link key={p.id || "todos"} href={href} className={`rounded-full px-3 py-1 text-xs ${ativo ? "bg-brand text-white" : "border border-brand/25 bg-brand/5 text-brand-dark hover:bg-brand/10"}`}>
-                {p.name}
-              </Link>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Filtro por cadência inscrita */}
-      {seqs.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-subtle">Cadência:</span>
-          {[{ id: "", name: "Todas" }, ...seqs].map((s) => {
-            const params = new URLSearchParams();
-            if (q) params.set("q", q);
-            if (tagFilter) params.set("tag", tagFilter);
-            if (produtoFilter) params.set("produto", produtoFilter);
-            if (frio) params.set("frio", frio);
-            if (s.id) params.set("cadencia", s.id);
-            const href = `/dashboard/contatos${params.toString() ? `?${params.toString()}` : ""}`;
-            const ativo = cadenciaFilter === s.id;
-            return (
-              <Link key={s.id || "todas"} href={href} className={`rounded-full px-3 py-1 text-xs ${ativo ? "bg-brand text-white" : "border border-brand/25 bg-brand/5 text-brand-dark hover:bg-brand/10"}`}>
-                {s.name}
-              </Link>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Filtro por último toque (carteira fria) */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="text-xs text-subtle">Último toque:</span>
-        {[
-          { k: "", label: "Todos" },
-          { k: "15", label: "Frios +15d" },
-          { k: "30", label: "Frios +30d" },
-          { k: "nunca", label: "Nunca tocados" },
-        ].map((o) => {
-          const params = new URLSearchParams();
-          if (q) params.set("q", q);
-          if (tagFilter) params.set("tag", tagFilter);
-          if (produtoFilter) params.set("produto", produtoFilter);
-          if (cadenciaFilter) params.set("cadencia", cadenciaFilter);
-          if (o.k) params.set("frio", o.k);
-          const href = `/dashboard/contatos${params.toString() ? `?${params.toString()}` : ""}`;
-          const ativo = frio === o.k;
-          return (
-            <Link key={o.k || "todos"} href={href} className={`rounded-full px-3 py-1 text-xs ${ativo ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}>
-              {o.label}
-            </Link>
-          );
-        })}
-      </div>
+      <ContactsFilterBar
+        view={view}
+        q={q}
+        tag={tagFilter}
+        produto={produtoFilter}
+        cadencia={cadenciaFilter}
+        frio={frio}
+        tags={tagList}
+        produtos={produtoList}
+        cadencias={seqs}
+      />
 
       <div className="mt-4">
         <ContactsTable contacts={(contacts as any[]) || []} sequences={seqs} members={memberList} tags={tagList} products={produtosContato} />

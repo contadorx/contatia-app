@@ -31,13 +31,17 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string) {
 
   const ids = contactIds.slice(0, 500); // trava de segurança
   let enrolled = 0;
-  let skipped = 0;
+  let semDado = 0;      // sem e-mail nem telefone para os passos da cadência
+  let jaInscrito = 0;   // já estava ativo/pausado nesta cadência
+  let outros = 0;       // suprimido, erro etc.
   for (const id of ids) {
-    const res = (await enrollContact(id, sequenceId)) as { ok?: boolean; error?: string };
+    const res = (await enrollContact(id, sequenceId)) as { ok?: boolean; error?: string; missingData?: boolean; already?: boolean };
     if (res?.ok) enrolled++;
-    else skipped++;
+    else if (res?.missingData) semDado++;
+    else if (res?.already) jaInscrito++;
+    else outros++;
   }
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard");
-  return { ok: true, enrolled, skipped };
+  return { ok: true, enrolled, semDado, jaInscrito, outros };
 }

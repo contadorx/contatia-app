@@ -1,13 +1,13 @@
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import AccountTools from "@/components/AccountTools";
 import AccountImport from "@/components/AccountImport";
 import AccountsCockpit from "@/components/AccountsCockpit";
+import AccountsFilterBar from "@/components/AccountsFilterBar";
 import { produtosPorContatos } from "@/lib/produtos";
 
 export const dynamic = "force-dynamic";
 
-export default async function Contas({ searchParams }: { searchParams: { tag?: string; q?: string; produto?: string } }) {
+export default async function Contas({ searchParams }: { searchParams: { tag?: string; q?: string; produto?: string; view?: string } }) {
   const supabase = createClient();
   const q = (searchParams.q || "").trim();
   const qSafe = q.slice(0, 80).replace(/[,()%*]/g, " ").trim();
@@ -64,6 +64,12 @@ export default async function Contas({ searchParams }: { searchParams: { tag?: s
   const produtoFilter = searchParams.produto || "";
   if (produtoFilter) rows = rows.filter((a) => a.produtos.some((p) => p.id === produtoFilter));
 
+  // Visões rápidas (in-memory) — o "trabalho do dia" em Empresas
+  const view = searchParams.view || "";
+  if (view === "sem_contato") rows = rows.filter((a) => a.contacts.length === 0);
+  else if (view === "sem_opp") rows = rows.filter((a) => a.opps.length === 0);
+  else if (view === "com_opp") rows = rows.filter((a) => a.opps.some((o: any) => o.status === "open"));
+
   return (
     <div>
       <h1 className="font-display text-2xl font-bold">Empresas</h1>
@@ -74,58 +80,14 @@ export default async function Contas({ searchParams }: { searchParams: { tag?: s
         <AccountImport />
       </div>
 
-      {/* busca por nome / CNPJ / domínio */}
-      <form className="mt-4 flex flex-wrap items-center gap-2">
-        {tagFilter && <input type="hidden" name="tag" value={tagFilter} />}
-        <input
-          name="q"
-          defaultValue={q}
-          className="input max-w-xs py-1.5 text-sm"
-          placeholder="Buscar por nome, CNPJ ou domínio…"
-        />
-        <button className="btn-ghost py-1.5 text-sm" type="submit">Buscar</button>
-        {q && (
-          <a href={tagFilter ? `/dashboard/contas?tag=${tagFilter}` : "/dashboard/contas"} className="text-xs text-subtle hover:text-ink">limpar busca</a>
-        )}
-      </form>
-
-      {/* filtro por tag */}
-      {((allTags as any[]) || []).length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-subtle">Filtrar:</span>
-          <Link href={q ? `/dashboard/contas?q=${encodeURIComponent(q)}` : "/dashboard/contas"} className={`rounded-full px-2 py-0.5 text-xs font-medium ${!tagFilter ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}>Todas</Link>
-          {((allTags as any[]) || []).map((t) => (
-            <Link
-              key={t.id}
-              href={`/dashboard/contas?tag=${t.id}${q ? `&q=${encodeURIComponent(q)}` : ""}${produtoFilter ? `&produto=${produtoFilter}` : ""}`}
-              className="rounded-full px-2 py-0.5 text-xs font-medium"
-              style={tagFilter === t.id ? { background: t.color, color: "#fff" } : { background: `${t.color}20`, color: t.color }}
-            >
-              {t.name}
-            </Link>
-          ))}
-        </div>
-      )}
-
-      {/* filtro por produto */}
-      {produtoList.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-subtle">Produto:</span>
-          {[{ id: "", name: "Todos" }, ...produtoList].map((p) => {
-            const params = new URLSearchParams();
-            if (q) params.set("q", q);
-            if (tagFilter) params.set("tag", tagFilter);
-            if (p.id) params.set("produto", p.id);
-            const href = `/dashboard/contas${params.toString() ? `?${params.toString()}` : ""}`;
-            const ativo = produtoFilter === p.id;
-            return (
-              <Link key={p.id || "todos"} href={href} className={`rounded-full px-2 py-0.5 text-xs font-medium ${ativo ? "bg-brand text-white" : "border border-brand/25 bg-brand/5 text-brand-dark hover:bg-brand/10"}`}>
-                {p.name}
-              </Link>
-            );
-          })}
-        </div>
-      )}
+      <AccountsFilterBar
+        view={view}
+        q={q}
+        tag={tagFilter}
+        produto={produtoFilter}
+        tags={(allTags as { id: string; name: string }[]) || []}
+        produtos={produtoList}
+      />
 
       <div className="mt-6">
         <AccountsCockpit rows={rows} allTags={(allTags as any[]) || []} members={memberList} />
