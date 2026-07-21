@@ -11,7 +11,6 @@ const groups: { title?: string; items: { href: string; label: string; primary?: 
       { href: "/dashboard", label: "Hoje", primary: true },
       { href: "/dashboard/pipeline", label: "Pipeline", primary: true },
       { href: "/dashboard/respostas", label: "Respostas", primary: true },
-      { href: "/dashboard/triagem", label: "Triagem", primary: true },
       { href: "/dashboard/reunioes", label: "Reuniões", primary: true },
     ],
   },
@@ -34,8 +33,7 @@ const groups: { title?: string; items: { href: string; label: string; primary?: 
   {
     title: "Gestão",
     items: [
-      { href: "/dashboard/metricas", label: "Métricas" },
-      { href: "/dashboard/relatorios", label: "Relatórios" },
+      { href: "/dashboard/relatorios", label: "Resultados" },
       { href: "/dashboard/equipe", label: "Equipe" },
       { href: "/dashboard/planos", label: "Planos" },
       { href: "/dashboard/suporte", label: "Suporte" },
@@ -75,14 +73,18 @@ export default function DashboardNav({ isSuperadmin = false, unreadReplies = 0, 
             ].join(" ")}
           >
             <span>{n.label}</span>
-            {n.href === "/dashboard/respostas" && unreadReplies > 0 && (
-              <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-white text-brand" : "bg-signal text-white"}`}>
-                {unreadReplies > 99 ? "99+" : unreadReplies}
-              </span>
-            )}
-            {n.href === "/dashboard/triagem" && triageCount > 0 && (
-              <span className={`ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-white text-brand" : "bg-warn text-white"}`}>
-                {triageCount > 99 ? "99+" : triageCount}
+            {n.href === "/dashboard/respostas" && (unreadReplies > 0 || triageCount > 0) && (
+              <span className="ml-2 flex items-center gap-1">
+                {unreadReplies > 0 && (
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-white text-brand" : "bg-signal text-white"}`} title="não lidas">
+                    {unreadReplies > 99 ? "99+" : unreadReplies}
+                  </span>
+                )}
+                {triageCount > 0 && (
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-white text-warn" : "bg-warn text-white"}`} title="aguardando decisão">
+                    {triageCount > 99 ? "99+" : triageCount}
+                  </span>
+                )}
               </span>
             )}
           </Link>

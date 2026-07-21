@@ -15,6 +15,11 @@ import {
 } from "@/app/dashboard/respostas/actions";
 import { waLink } from "@/lib/cadence";
 import RichTextEditor from "@/components/RichTextEditor";
+import TriageDecisionBar from "@/components/TriageDecisionBar";
+import type { ReplyIntent } from "@/lib/replyIntent";
+
+export type TriageItem = { id: string; intent: ReplyIntent };
+export type Seq = { id: string; name: string };
 
 export type Thread = {
   key: string;
@@ -41,7 +46,17 @@ function snippet(t: Thread) {
 }
 const MEDIA_LABEL: Record<string, string> = { image: "imagem", audio: "áudio", video: "vídeo", document: "documento", sticker: "figurinha" };
 
-export default function RespostasInbox({ threads, canReply }: { threads: Thread[]; canReply: boolean }) {
+export default function RespostasInbox({
+  threads,
+  canReply,
+  triageByContact = {},
+  sequences = [],
+}: {
+  threads: Thread[];
+  canReply: boolean;
+  triageByContact?: Record<string, TriageItem>;
+  sequences?: Seq[];
+}) {
   const router = useRouter();
   const [sel, setSel] = useState<string | null>(threads[0]?.key ?? null);
   const [busca, setBusca] = useState("");
@@ -184,6 +199,9 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
                 </span>
                 <p className="truncate text-sm font-semibold">{t.name}</p>
                 {t.unread > 0 && <span className="rounded-full bg-signal px-1.5 py-0.5 text-[10px] font-bold text-white">{t.unread}</span>}
+                {t.contactId && triageByContact[t.contactId] && (
+                  <span className="shrink-0 rounded-full bg-warn px-1.5 py-0.5 text-[9px] font-bold uppercase text-white" title="aguardando decisão">decidir</span>
+                )}
               </div>
               <p className="truncate text-xs text-subtle">{snippet(t)}</p>
             </div>
@@ -257,6 +275,11 @@ export default function RespostasInbox({ threads, canReply }: { threads: Thread[
                 <button className="btn-ghost py-1 text-xs" onClick={() => setConfirm(null)}>Cancelar</button>
               </div>
             </div>
+          )}
+
+          {/* barra de decisão da triagem — só quando este contato tem resposta pendente */}
+          {active.contactId && triageByContact[active.contactId] && (
+            <TriageDecisionBar item={triageByContact[active.contactId]} sequences={sequences} name={active.name} />
           )}
 
           <div className="flex-1 space-y-2 overflow-y-auto p-4">

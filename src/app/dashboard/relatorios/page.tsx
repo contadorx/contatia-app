@@ -4,6 +4,7 @@ import { isManager as isMgr } from "@/lib/permissions";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import { UltimoToque, diasSemToque } from "@/lib/lastTouch";
 import ReportTabs from "@/components/ReportTabs";
+import GoalPanel from "@/components/GoalPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,11 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
   const sinceISO = new Date(Date.now() - dias * 86400000).toISOString();
   const frioISO = new Date(Date.now() - frio * 86400000).toISOString();
 
+  // mês corrente — para a meta (GoalPanel) da Visão geral
+  const now = new Date();
+  const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
   // ---- coleta ----
   const membersP = gestor
     ? supabase.from("profiles").select("id, full_name, email").eq("is_active", true).order("full_name", { ascending: true })
@@ -51,13 +57,13 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
   let contactsQ = supabase.from("contacts").select("id, name, company, score, assigned_to, last_activity_at, account_id, email").limit(4000);
   if (vendedor) contactsQ = contactsQ.eq("assigned_to", vendedor);
 
-  let oppsQ = supabase.from("opportunities").select("id, title, value_mrr, stage_id, status, owner_id, created_at, updated_at, account_id").limit(4000);
+  let oppsQ = supabase.from("opportunities").select("id, title, value_mrr, stage_id, status, owner_id, created_at, updated_at, account_id, loss_reason, product_id, products(name)").limit(4000);
   if (vendedor) oppsQ = oppsQ.eq("owner_id", vendedor);
 
   let mtgsQ = supabase.from("meetings").select("id, assigned_to, datetime, status, created_at").gte("created_at", sinceISO).limit(4000);
   if (vendedor) mtgsQ = mtgsQ.eq("assigned_to", vendedor);
 
-  const [{ data: members }, { data: contacts }, { data: opps }, { data: stages }, { data: enrollments }, { data: sequences }, { data: meetings }, { data: events }, { data: accounts }] =
+  const [{ data: members }, { data: contacts }, { data: opps }, { data: stages }, { data: enrollments }, { data: sequences }, { data: meetings }, { data: events }, { data: accounts }, { data: goal }, { data: monthWon }] =
     await Promise.all([
       membersP,
       contactsQ,
@@ -68,6 +74,10 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
       mtgsQ,
       supabase.from("events").select("type, contact_id, created_at").gte("created_at", sinceISO).in("type", ["task_done", "email_sent", "whatsapp_sent", "replied"]).limit(8000),
       supabase.from("accounts").select("id, name, municipio, uf").limit(4000),
+      supabase.from("goals").select("mrr_target, touch_target").eq("user_id", vendedor || user?.id || "").eq("period", period).maybeSingle(),
+      (vendedor
+        ? supabase.from("opportunities").select("value_mrr").eq("status", "won").eq("owner_id", vendedor).gte("updated_at", monthStart)
+        : supabase.from("opportunities").select("value_mrr").eq("status", "won").gte("updated_at", monthStart)),
     ]);
 
   const cts = (contacts as any[]) || [];
@@ -189,13 +199,66 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
   const { data: ultRows } = await ultQ.order("first_click_at", { ascending: false, nullsFirst: false }).limit(30);
   const ultimosCliques = (ultRows as any[]) || [];
 
+  // ===================== VISÃO GERAL (agregada — antiga Métricas) =====================
+  // atividade do recorte, escopada ao vendedor quando houver (via contatos dele)
+  const viewEvs = vendedor ? evs.filter((e) => e.contact_id && contatoOwner.has(e.contact_id)) : evs;
+  const vgCount = (t: string) => viewEvs.filter((e) => e.type === t).length;
+  const vgEmails = vgCount("email_sent");
+  const vgTouches = vgCount("task_done") + vgEmails;
+  const vgReplies = vgCount("replied");
+
+  const vgOpen = oppList.filter((o) => o.status === "open");
+  const vgOpenValue = vgOpen.reduce((s, o) => s + Number(o.value_mrr || 0), 0);
+  const vgWon = oppList.filter((o) => o.status === "won");
+  const vgLost = oppList.filter((o) => o.status === "lost");
+  const vgWonValue = vgWon.reduce((s, o) => s + Number(o.value_mrr || 0), 0);
+  const vgClosed = vgWon.length + vgLost.length;
+  const vgWinRate = vgClosed > 0 ? Math.round((vgWon.length / vgClosed) * 100) : null;
+  const vgCycleDays = vgWon
+    .map((o) => (o.created_at && o.updated_at ? (new Date(o.updated_at).getTime() - new Date(o.created_at).getTime()) / 86400000 : null))
+    .filter((d): d is number => d !== null && d >= 0);
+  const vgAvgCycle = vgCycleDays.length ? Math.round(vgCycleDays.reduce((a, b) => a + b, 0) / vgCycleDays.length) : null;
+  const vgAvgTicket = vgWon.length ? vgWonValue / vgWon.length : null;
+
+  const vgLossReasons: Record<string, number> = {};
+  for (const o of vgLost) { const r = (o.loss_reason || "Não informado").trim() || "Não informado"; vgLossReasons[r] = (vgLossReasons[r] || 0) + 1; }
+  const vgLossTop = Object.entries(vgLossReasons).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  const vgRevByProduct: Record<string, number> = {};
+  for (const o of vgWon) { const pname = (o as any).products?.name || "Sem produto"; vgRevByProduct[pname] = (vgRevByProduct[pname] || 0) + Number(o.value_mrr || 0); }
+  const vgRevProductTop = Object.entries(vgRevByProduct).sort((a, b) => b[1] - a[1]).slice(0, 6);
+
+  const vgFunnel = stageList
+    .filter((s) => !s.is_won && !s.is_lost)
+    .map((s, i, arr) => {
+      const inStage = vgOpen.filter((o) => o.stage_id === s.id);
+      const here = inStage.length;
+      const next = i < arr.length - 1 ? vgOpen.filter((o) => o.stage_id === arr[i + 1].id).length : null;
+      const conv = next !== null && here > 0 ? Math.round((next / here) * 100) : null;
+      return { name: s.name, count: here, value: inStage.reduce((a, o) => a + Number(o.value_mrr || 0), 0), conv };
+    });
+  const vgMaxCount = Math.max(1, ...vgFunnel.map((f) => f.count));
+
+  const vgRealizadas = mtgs.filter((m) => m.status === "realizada").length;
+  const vgNoShows = mtgs.filter((m) => m.status === "no_show").length;
+  const vgNoShowBase = vgRealizadas + vgNoShows;
+  const vgNoShowRate = vgNoShowBase > 0 ? Math.round((vgNoShows / vgNoShowBase) * 100) : null;
+
+  const vgWonMrrMonth = ((monthWon as any[]) || []).reduce((s, o) => s + Number(o.value_mrr || 0), 0);
+  const selectedName = vendedor ? memberName(vendedor) : "toda a equipe";
+  const vgCards = [
+    { label: "Negócios em aberto", value: brl(vgOpenValue), sub: `${vgOpen.length} negócios` },
+    { label: "Receita fechada", value: brl(vgWonValue), sub: `${vgWon.length} fechados no recorte` },
+    { label: "Taxa de ganho", value: vgWinRate === null ? "—" : `${vgWinRate}%`, sub: `${vgWon.length}/${vgClosed} fechados` },
+  ];
+
   // filtro (form GET)
   const memberOpts = ((members as any[]) || []);
 
   return (
     <div>
-      <h1 className="font-display text-2xl font-bold">Relatórios</h1>
-      <p className="mt-1 text-sm text-subtle">Listas de gestão para agir: o que está parado, o que resgatar e como a equipe está produzindo. Diferente de Métricas (visão agregada), aqui você clica e trata.</p>
+      <h1 className="font-display text-2xl font-bold">Resultados</h1>
+      <p className="mt-1 text-sm text-subtle">Sua operação em números e em listas para agir: comece pela <b>Visão geral</b> e vá fundo nas listas quando algo pedir ação.</p>
 
       {/* filtros */}
       <form className="mt-4 flex flex-wrap items-end gap-3">
@@ -233,6 +296,89 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
 
       <ReportTabs
         tabs={[
+          { id: "visao", label: "Visão geral", node: (
+      <div className="mt-2">
+        <GoalPanel
+          period={period}
+          mrrTarget={Number((goal as any)?.mrr_target) || 0}
+          touchTarget={Number((goal as any)?.touch_target) || 0}
+          wonMrr={vgWonMrrMonth}
+          touchesDone={vgTouches}
+          targetUserId={gestor && vendedor ? vendedor : undefined}
+          targetName={gestor && vendedor ? selectedName : undefined}
+        />
+        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+          {vgCards.map((c) => (
+            <div key={c.label} className="card p-5">
+              <span className="label">{c.label}</span>
+              <p className="mt-2 font-display text-3xl font-bold">{c.value}</p>
+              <p className="mt-1 text-xs text-subtle">{c.sub}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <div className="card p-5">
+            <h2 className="font-display text-lg font-bold">Funil de negócios em aberto</h2>
+            <p className="text-xs text-subtle">Quantos negócios e quanto valor em cada etapa — e quantos % avançam para a próxima.</p>
+            <div className="mt-4 space-y-3">
+              {vgFunnel.map((f) => (
+                <div key={f.name}>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-medium">{f.name}</span>
+                    <span className="text-subtle">{f.count} · {brl(f.value)}/mês{f.conv !== null && <span className="ml-2 font-semibold text-brand-dark">→ {f.conv}% avança</span>}</span>
+                  </div>
+                  <div className="mt-1 h-2 rounded-full bg-muted"><div className="h-2 rounded-full bg-brand" style={{ width: `${(f.count / vgMaxCount) * 100}%` }} /></div>
+                </div>
+              ))}
+              {!vgFunnel.length && <p className="text-sm text-subtle">Sem estágios abertos.</p>}
+            </div>
+          </div>
+          <div className="card p-5">
+            <h2 className="font-display text-lg font-bold">Atividade ({dias} dias)</h2>
+            <div className="mt-4 grid grid-cols-2 gap-4">
+              <Metric label="Atividades feitas" value={vgTouches} />
+              <Metric label="E-mails enviados" value={vgEmails} />
+              <Metric label="Respostas recebidas" value={vgReplies} />
+              <Metric label="Reuniões realizadas" value={vgRealizadas} />
+            </div>
+            <div className="mt-4 rounded-xl bg-muted p-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium">Taxa de faltas nas reuniões</span>
+                <span className={`font-bold ${vgNoShowRate !== null && vgNoShowRate > 30 ? "text-danger" : "text-ink"}`}>{vgNoShowRate === null ? "—" : `${vgNoShowRate}%`}</span>
+              </div>
+              <p className="mt-1 text-xs text-subtle">{vgNoShows} falta(s) em {vgNoShowBase} reuniões concluídas</p>
+            </div>
+          </div>
+        </div>
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="card p-5">
+            <div className="grid grid-cols-2 gap-4">
+              <Metric label="Valor médio por negócio" value={vgAvgTicket === null ? "—" : brl(vgAvgTicket)} />
+              <Metric label="Tempo médio de fechamento" value={vgAvgCycle === null ? "—" : `${vgAvgCycle} dias`} />
+            </div>
+            <div className="mt-5 border-t border-line pt-4">
+              <p className="text-sm font-semibold">Motivos de perda</p>
+              <p className="text-xs text-subtle">{vgLost.length} negócio(s) perdido(s) no recorte.</p>
+              <div className="mt-2 space-y-2">
+                {vgLossTop.map(([reason, count]) => (
+                  <div key={reason} className="flex items-center justify-between text-sm"><span>{reason}</span><span className="rounded-full bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">{count}</span></div>
+                ))}
+                {!vgLossTop.length && <p className="text-sm text-subtle">Nenhuma perda registrada.</p>}
+              </div>
+            </div>
+          </div>
+          <div className="card p-5">
+            <p className="text-sm font-semibold">Receita por produto</p>
+            <p className="text-xs text-subtle">Receita recorrente fechada por produto/serviço.</p>
+            <div className="mt-3 space-y-2">
+              {vgRevProductTop.length ? vgRevProductTop.map(([name, val]) => (
+                <div key={name} className="flex items-center justify-between text-sm"><span>{name}</span><span className="font-semibold text-signal">{brl(val)}</span></div>
+              )) : <p className="text-sm text-subtle">Vincule produtos às oportunidades para ver a receita por produto.</p>}
+            </div>
+          </div>
+        </div>
+      </div>
+          ) },
           { id: "carteira", label: "Carteira parada", node: (
       <Secao id="carteira" titulo="Carteira parada / a resgatar" desc={`Contatos sem toque há +${frio} dias e fora de cadência ativa — o dinheiro parado. Ordenado por score (os mais quentes primeiro).`}>
         <div className="mb-3 flex flex-wrap gap-2 text-xs">
@@ -440,6 +586,15 @@ function Tabela({
         </tbody>
       </table>
       {nota && <p className="px-4 py-2 text-xs text-subtle">{nota}</p>}
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div>
+      <p className="font-display text-2xl font-bold">{value}</p>
+      <p className="text-xs text-subtle">{label}</p>
     </div>
   );
 }

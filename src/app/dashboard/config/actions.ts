@@ -5,6 +5,18 @@ import { canCreate, mensagemLimite } from "@/lib/plan";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
+// Detecta o provedor de e-mail pelo domínio (para autopreencher a caixa SMTP/IMAP).
+export async function detectProvider(email: string) {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada. Recarregue a página." };
+  const domain = (email || "").split("@")[1]?.toLowerCase().trim();
+  if (!domain || !domain.includes(".")) return { error: "Digite o e-mail completo." };
+  const { providerFromDomain } = await import("@/lib/mailproviders");
+  const provider = await providerFromDomain(domain);
+  return { ok: true, provider };
+}
+
 async function ctx() {
   const supabase = createClient();
   const {

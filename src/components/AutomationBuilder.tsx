@@ -81,6 +81,7 @@ export default function AutomationBuilder({
   const [f, setF] = useState<AutoForm>(BLANK_FORM);
   const [stopOnMatch, setStopOnMatch] = useState(false);
   const [endCurrent, setEndCurrent] = useState(false);
+  const [showAdv, setShowAdv] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -91,6 +92,8 @@ export default function AutomationBuilder({
     setF(merged);
     setStopOnMatch(!!merged.stop_on_match);
     setEndCurrent(!!merged.end_current);
+    // abre o "Avançado" sozinho quando a regra já usa algum desses campos
+    setShowAdv((Number(merged.priority) || 100) !== 100 || !!merged.stop_on_match || !!(merged.set_state && merged.set_state.trim()));
     setMsg(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editingId, initial]);
@@ -188,7 +191,7 @@ export default function AutomationBuilder({
           <SmartSelect
             className="mt-1"
             value={f.action_type}
-            onValueChange={(v) => up("action_type", v)}
+            onValueChange={(v) => { up("action_type", v); if (v === "suppress") setStopOnMatch(true); }}
             options={ACTIONS.map((a): SmartOption => ({ value: a.v, label: a.l }))}
           />
           {f.action_type === "enroll" && (
@@ -313,21 +316,29 @@ export default function AutomationBuilder({
         </p>
       </div>
 
-      {/* Avançado: ordem de avaliação e estado (máquina de estados) */}
-      <div className="mt-3 grid gap-3 rounded-xl border border-line p-3 sm:grid-cols-3">
-        <div>
-          <label className="label">Prioridade</label>
-          <input className="input mt-1" type="number" value={f.priority} onChange={(e) => up("priority", e.target.value)} placeholder="100" />
-          <p className="mt-1 text-[11px] text-subtle">Menor = avaliada antes.</p>
-        </div>
-        <label className="flex items-center gap-2 self-end pb-2 text-sm">
-          <input type="checkbox" checked={stopOnMatch} onChange={(e) => setStopOnMatch(e.target.checked)} />
-          Parar nas demais regras se esta disparar
-        </label>
-        <div>
-          <label className="label">Marcar estado (opcional)</label>
-          <input className="input mt-1" value={f.set_state} onChange={(e) => up("set_state", e.target.value)} placeholder="ex.: em_A, dormente" />
-        </div>
+      {/* Avançado — colapsado por padrão. Defaults bons: prioridade 100 (ordem de criação);
+          "parar nas demais" liga sozinho na ação suprimir; estado é para a máquina de estados. */}
+      <div className="mt-3">
+        <button type="button" className="text-xs font-medium text-brand hover:underline" onClick={() => setShowAdv((s) => !s)}>
+          {showAdv ? "− Avançado" : "+ Avançado (ordem de avaliação, parar nas demais, estado)"}
+        </button>
+        {showAdv && (
+          <div className="mt-2 grid gap-3 rounded-xl border border-line p-3 sm:grid-cols-3">
+            <div>
+              <label className="label">Prioridade</label>
+              <input className="input mt-1" type="number" value={f.priority} onChange={(e) => up("priority", e.target.value)} placeholder="100" />
+              <p className="mt-1 text-[11px] text-subtle">Menor = avaliada antes. Padrão 100 (ordem de criação).</p>
+            </div>
+            <label className="flex items-center gap-2 self-end pb-2 text-sm">
+              <input type="checkbox" checked={stopOnMatch} onChange={(e) => setStopOnMatch(e.target.checked)} />
+              Parar nas demais regras se esta disparar
+            </label>
+            <div>
+              <label className="label">Marcar estado (opcional)</label>
+              <input className="input mt-1" value={f.set_state} onChange={(e) => up("set_state", e.target.value)} placeholder="ex.: em_A, dormente" />
+            </div>
+          </div>
+        )}
       </div>
 
       {msg && <p className="mt-3 text-sm text-danger">{msg}</p>}

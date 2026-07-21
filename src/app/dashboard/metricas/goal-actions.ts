@@ -31,6 +31,6 @@ export async function setGoal(input: { period: string; mrr_target: number; touch
     { onConflict: "tenant_id,user_id,period" }
   );
   if (error) return { error: error.message };
-  revalidatePath("/dashboard/metricas");
+  revalidatePath("/dashboard/relatorios");
   return { ok: true };
 }

@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import RespostasInbox, { type Thread } from "@/components/RespostasInbox";
+import RespostasInbox, { type Thread, type TriageItem, type Seq } from "@/components/RespostasInbox";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ export default async function Respostas() {
   const { data: tenant } = await supabase.from("tenants").select("whatsapp_mode").maybeSingle();
   const canReply = (((tenant as any)?.whatsapp_mode as string) || "assistido") === "evolution";
 
-  const [{ data: msgs }, { data: emails }] = await Promise.all([
+  const [{ data: msgs }, { data: emails }, { data: triage }, { data: sequences }] = await Promise.all([
     supabase
       .from("whatsapp_messages")
       .select("id, contact_id, phone, direction, text, media_type, read_at, created_at, contacts(name)")
@@ -20,7 +20,21 @@ export default async function Respostas() {
       .select("id, contact_id, email, direction, subject, text, read_at, created_at, contacts(name)")
       .order("created_at", { ascending: false })
       .limit(1000),
+    supabase
+      .from("reply_triage")
+      .select("id, contact_id, intent, created_at")
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(500),
+    supabase.from("sequences").select("id, name").eq("is_active", true).order("created_at", { ascending: false }),
   ]);
+
+  // triagem pendente por contato (o mais recente por contato)
+  const triageByContact: Record<string, TriageItem> = {};
+  for (const t of ((triage as any[]) || [])) {
+    if (t.contact_id && !triageByContact[t.contact_id]) triageByContact[t.contact_id] = { id: t.id, intent: t.intent };
+  }
+  const seqs: Seq[] = ((sequences as any[]) || []).map((s) => ({ id: s.id, name: s.name }));
 
   const map = new Map<string, Thread>();
 
@@ -59,10 +73,10 @@ export default async function Respostas() {
     <div>
       <h1 className="font-display text-2xl font-bold">Respostas</h1>
       <p className="mt-1 text-sm text-subtle">
-        Caixa única das respostas dos leads — WhatsApp e e-mail no mesmo lugar. Não precisa abrir o celular nem a caixa de e-mail para ver o que responderam.
+        Caixa única das respostas — WhatsApp e e-mail no mesmo lugar. Quem respondeu e precisa de decisão aparece marcado com <b>decidir</b>: você resolve dentro da própria conversa.
       </p>
       <div className="mt-6">
-        <RespostasInbox threads={threads} canReply={canReply} />
+        <RespostasInbox threads={threads} canReply={canReply} triageByContact={triageByContact} sequences={seqs} />
       </div>
     </div>
   );
