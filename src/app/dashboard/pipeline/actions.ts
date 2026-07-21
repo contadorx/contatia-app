@@ -16,6 +16,27 @@ async function ctx() {
   return { supabase, tenant_id: (data?.tenant_id as string) || null, user_id: user?.id };
 }
 
+// Cria o funil padrão quando o workspace está sem estágios (autoatendimento —
+// antes o estado vazio mandava "falar com o suporte"). Idempotente: só cria se zero.
+export async function seedDefaultStages() {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace atribuído." };
+  const { count } = await supabase.from("pipeline_stages").select("id", { count: "exact", head: true });
+  if ((count ?? 0) > 0) return { ok: true, already: true };
+  const { error } = await supabase.from("pipeline_stages").insert([
+    { tenant_id, name: "Novo", position: 0, is_won: false, is_lost: false },
+    { tenant_id, name: "Contatado", position: 1, is_won: false, is_lost: false },
+    { tenant_id, name: "Respondeu", position: 2, is_won: false, is_lost: false },
+    { tenant_id, name: "Reunião", position: 3, is_won: false, is_lost: false },
+    { tenant_id, name: "Proposta", position: 4, is_won: false, is_lost: false },
+    { tenant_id, name: "Fechado", position: 5, is_won: true, is_lost: false },
+    { tenant_id, name: "Perdido", position: 6, is_won: false, is_lost: true },
+  ]);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/pipeline");
+  return { ok: true };
+}
+
 export async function createOpportunity(input: {
   title: string;
   value_mrr: number;

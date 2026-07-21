@@ -50,3 +50,15 @@ export async function setupWorkspace(name: string) {
   revalidatePath("/dashboard");
   return { ok: true };
 }
+
+// Dispensa a caixa "Primeiros passos" do Hoje ("não mostrar mais"). Por usuário,
+// persistido no perfil — some em qualquer dispositivo, não é cookie.
+export async function hideOnboarding() {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Sessão expirada." };
+  const { error } = await supabase.from("profiles").update({ onboarding_hidden: true }).eq("id", user.id);
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard");
+  return { ok: true };
+}

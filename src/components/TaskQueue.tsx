@@ -176,7 +176,11 @@ export default function TaskQueue({
   if (!allTasks.length)
     return (
       <div className="card p-10 text-center text-sm text-subtle">
-        Nada na fila hoje. Inscreva contatos numa cadência para gerar toques.
+        <p>Nada na fila hoje. Os toques aparecem aqui quando contatos entram numa cadência.</p>
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+          <a href="/dashboard/contatos" className="btn-brand py-1.5 text-xs">Inscrever contatos</a>
+          <a href="/dashboard/cadencias" className="btn-ghost py-1.5 text-xs">Criar uma cadência</a>
+        </div>
       </div>
     );
 

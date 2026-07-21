@@ -54,8 +54,11 @@ function Chip({ ok, label }: { ok: boolean; label: string }) {
 
 const RAMP = [10, 15, 20, 25, 30, 40, 50, 65, 80, 100, 125, 150, 175, 200];
 
-export default async function Config() {
+export default async function Config({ searchParams }: { searchParams?: { tab?: string } }) {
   const supabase = createClient();
+  // deep-link de aba: /dashboard/config?tab=canais abre direto em Canais
+  const TAB_IDS = ["negocio", "canais", "conexoes"];
+  const initialTab = Math.max(0, TAB_IDS.indexOf((searchParams?.tab || "").toLowerCase()));
   const { data: accounts } = await supabase
     .from("email_accounts")
     .select("id, provider, from_email, display_name, is_active, daily_cap, warmup_stage, created_at, verified, verified_at, smtp_host, smtp_port, smtp_secure, smtp_user, detect_replies, imap_host, signature")
@@ -119,7 +122,7 @@ export default async function Config() {
       )}
 
       <div className="mt-6">
-        <ConfigTabs tabs={["Negócio", "Canais", "Conexões"]}>
+        <ConfigTabs tabs={["Negócio", "Canais", "Conexões"]} initial={initialTab}>
           {/* ===================== NEGÓCIO ===================== */}
           <div>
             <Section title="Identidade e marca" desc="Nome, documento e marca do workspace — usados nos entregáveis white-label (assinatura, propostas, relatórios).">

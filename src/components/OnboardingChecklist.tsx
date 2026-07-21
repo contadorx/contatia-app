@@ -1,22 +1,28 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import DismissOnboarding from "@/components/DismissOnboarding";
 
 export default async function OnboardingChecklist() {
   const supabase = createClient();
 
-  const [email, contacts, sequences, enrollments] = await Promise.all([
+  const { data: { user } } = await supabase.auth.getUser();
+  const [{ data: me }, email, contacts, sequences, enrollments] = await Promise.all([
+    supabase.from("profiles").select("onboarding_hidden").eq("id", user?.id ?? "").maybeSingle(),
     supabase.from("email_accounts").select("id", { count: "exact", head: true }),
     supabase.from("contacts").select("id", { count: "exact", head: true }),
     supabase.from("sequences").select("id", { count: "exact", head: true }),
     supabase.from("enrollments").select("id", { count: "exact", head: true }),
   ]);
 
+  // dispensada pelo usuário → não aparece mais (em nenhum dispositivo)
+  if ((me as any)?.onboarding_hidden) return null;
+
   const steps = [
     {
       done: (email.count ?? 0) > 0,
       label: "Conecte um e-mail para enviar",
-      hint: "Config → caixa SMTP (ou preset Brevo).",
-      href: "/dashboard/config",
+      hint: "Só e-mail e senha — detectamos o provedor pra você.",
+      href: "/dashboard/config?tab=canais",
     },
     {
       done: (contacts.count ?? 0) > 0,
@@ -47,7 +53,10 @@ export default async function OnboardingChecklist() {
     <div className="card mb-6 border-brand/30 bg-brand-soft/40 p-5">
       <div className="flex items-center justify-between">
         <p className="font-display text-lg font-bold">Primeiros passos</p>
-        <span className="text-sm text-subtle">{doneCount} de {steps.length}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-subtle">{doneCount} de {steps.length}</span>
+          <DismissOnboarding />
+        </div>
       </div>
       <div className="mt-1 h-1.5 w-full rounded-full bg-muted">
         <div className="h-1.5 rounded-full bg-brand transition-all" style={{ width: `${(doneCount / steps.length) * 100}%` }} />

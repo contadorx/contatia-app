@@ -2,8 +2,8 @@
 
 import { Children, useState, type ReactNode } from "react";
 
-export default function ConfigTabs({ tabs, children }: { tabs: string[]; children: ReactNode }) {
-  const [active, setActive] = useState(0);
+export default function ConfigTabs({ tabs, children, initial = 0 }: { tabs: string[]; children: ReactNode; initial?: number }) {
+  const [active, setActive] = useState(Math.min(Math.max(initial, 0), tabs.length - 1));
   const panels = Children.toArray(children);
 
   return (

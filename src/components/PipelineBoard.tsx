@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
-import { createOpportunity, moveOpportunity, updateOpportunity, deleteOpportunity } from "@/app/dashboard/pipeline/actions";
+import { createOpportunity, moveOpportunity, updateOpportunity, deleteOpportunity, seedDefaultStages } from "@/app/dashboard/pipeline/actions";
 import { UltimoToque } from "@/lib/lastTouch";
 
 type Stage = { id: string; name: string; position: number; is_won: boolean; is_lost: boolean };
@@ -121,12 +122,7 @@ export default function PipelineBoard({
     });
   }
 
-  if (!stages.length)
-    return (
-      <div className="card p-10 text-center text-sm text-subtle">
-        Nenhum estágio no seu funil ainda. Fale com o suporte para configurar os estágios do pipeline.
-      </div>
-    );
+  if (!stages.length) return <FunilVazio />;
 
   const total = opps.filter((o) => o.status === "open").reduce((s, o) => s + Number(o.value_mrr || 0), 0);
 
@@ -384,6 +380,28 @@ export default function PipelineBoard({
         })}
       </div>
       </div>
+    </div>
+  );
+}
+
+// Estado vazio AUTOATENDIDO: cria o funil padrão em 1 clique (antes mandava
+// "falar com o suporte" — anti-adoção). Idempotente no servidor.
+function FunilVazio() {
+  const router = useRouter();
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  return (
+    <div className="card p-10 text-center">
+      <p className="text-sm text-subtle">Seu funil ainda não tem estágios.</p>
+      <button
+        className="btn-brand mt-4"
+        disabled={pending}
+        onClick={() => { setErr(null); start(async () => { const r: any = await seedDefaultStages(); if (r?.error) setErr(r.error); else router.refresh(); }); }}
+      >
+        {pending ? "Criando…" : "Criar funil padrão (Novo → Fechado)"}
+      </button>
+      <p className="mt-2 text-xs text-subtle">Novo · Contatado · Respondeu · Reunião · Proposta · Fechado · Perdido — você pode renomear depois.</p>
+      {err && <p className="mt-2 text-sm text-danger">{err}</p>}
     </div>
   );
 }
