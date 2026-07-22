@@ -7,6 +7,8 @@ import { HOT_THRESHOLD } from "@/lib/scoring";
 import { produtosPorContatos, contatoIdsPorProduto } from "@/lib/produtos";
 
 export const dynamic = "force-dynamic";
+// A captura no site raspa vários domínios por ação (HTTP); 60s cobre o lote inline.
+export const maxDuration = 60;
 
 const NENHUM = "00000000-0000-0000-0000-000000000000";
 

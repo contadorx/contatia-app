@@ -10,6 +10,7 @@ import { bulkAssign, bulkEnroll } from "@/app/dashboard/contatos/bulk-actions";
 import { bulkTag, createTag } from "@/app/dashboard/contatos/tag-actions";
 import { bulkDeleteContacts } from "@/app/dashboard/contatos/actions";
 import { verificarWhatsAppLote } from "@/app/dashboard/contatos/wa-actions";
+import { capturarDoSiteLote } from "@/app/dashboard/contatos/web-capture-actions";
 import { UltimoToque } from "@/lib/lastTouch";
 
 type Contact = {
@@ -125,6 +126,23 @@ export default function ContactsTable({
       }
     });
   }
+  function doCaptureWeb() {
+    setMsg(null);
+    start(async () => {
+      const res = (await capturarDoSiteLote([...sel])) as { ok?: boolean; achou?: number; whats?: number; filaVerif?: number; enfileirados?: number; semDominio?: number; error?: string };
+      if (res?.error) setMsg(res.error);
+      else {
+        const partes = [`✓ ${res.achou ?? 0} número(s) no site`];
+        if (res.whats) partes.push(`${res.whats} já confirmados no WhatsApp`);
+        if (res.filaVerif) partes.push(`${res.filaVerif} na fila de verificação`);
+        if (res.enfileirados) partes.push(`${res.enfileirados} na fila (captura continua sozinha)`);
+        if (res.semDominio) partes.push(`${res.semDominio} sem domínio`);
+        setMsg(partes.join(" · "));
+        clear();
+        router.refresh();
+      }
+    });
+  }
   function doCreateTag() {
     if (!newTag.trim()) return;
     start(async () => {
@@ -204,6 +222,15 @@ export default function ContactsTable({
               <button className="btn-ghost py-1.5 text-sm" onClick={doTag} disabled={pending || !tagIds.length}>Aplicar</button>
             </div>
           )}
+
+          <button
+            className="rounded-lg border border-brand/40 bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand-dark hover:bg-brand-soft/70"
+            onClick={doCaptureWeb}
+            disabled={pending}
+            title="Lê o site da empresa e captura o telefone/WhatsApp publicado. Um link wa.me já entra como WhatsApp confirmado."
+          >
+            {pending ? "..." : "Capturar do site"}
+          </button>
 
           <button
             className="rounded-lg border border-signal/40 bg-signal/5 px-3 py-1.5 text-sm font-medium text-signal hover:bg-signal/10"
