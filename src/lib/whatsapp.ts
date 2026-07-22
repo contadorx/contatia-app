@@ -42,18 +42,81 @@ function base(url: string) {
   return url.replace(/\/+$/, "");
 }
 
+// ============================================================
+// 9º DÍGITO BRASILEIRO: o WhatsApp pode ter a conta registrada COM ou SEM o
+// nono dígito (55DD9XXXXXXXX vs 55DDXXXXXXXX). Mandar o formato errado faz o
+// Evolution responder 400 {"exists":false} — o bug que dava "Evolution 400".
+// Geramos as duas formas e descobrimos qual existe ANTES de enviar.
+// ============================================================
+function brVariants(number: string): string[] {
+  const set = new Set<string>([number]);
+  const m = number.match(/^55(\d{2})(\d+)$/);
+  if (m) {
+    const ddd = m[1], sub = m[2];
+    if (sub.length === 9 && sub.startsWith("9")) set.add(`55${ddd}${sub.slice(1)}`); // tira o 9
+    else if (sub.length === 8) set.add(`55${ddd}9${sub}`);                            // põe o 9
+  }
+  return Array.from(set);
+}
+
+// Pergunta ao Evolution quais variantes EXISTEM no WhatsApp e devolve o número certo.
+// checked=false => não deu pra checar (endpoint indisponível) => o chamador tenta o envio direto.
+async function resolveWaNumber(acc: WaAccount, number: string): Promise<{ checked: boolean; exists: boolean; number?: string }> {
+  const numbers = brVariants(number);
+  try {
+    const res = await fetch(`${base(acc.evolution_url)}/chat/whatsappNumbers/${acc.instance}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", apikey: acc.api_key },
+      body: JSON.stringify({ numbers }),
+    });
+    if (!res.ok) return { checked: false, exists: false };
+    const arr = await res.json().catch(() => null);
+    if (!Array.isArray(arr)) return { checked: false, exists: false };
+    const hit = arr.find((x: any) => x?.exists);
+    if (hit) {
+      const num = String(hit.number || (hit.jid || "").split("@")[0] || number).replace(/\D/g, "");
+      return { checked: true, exists: true, number: num };
+    }
+    return { checked: true, exists: false };
+  } catch {
+    return { checked: false, exists: false };
+  }
+}
+
 // Envia texto. Formato Evolution API v2: POST /message/sendText/{instance}
 export async function sendText(acc: WaAccount, to: string, text: string): Promise<{ ok?: boolean; error?: string }> {
   const number = normalizePhone(to);
   if (!number) return { error: "Telefone inválido." };
-  try {
-    const res = await fetch(`${base(acc.evolution_url)}/message/sendText/${acc.instance}`, {
+
+  // resolve o número certo (contorna o 9º dígito BR) antes de enviar
+  let target = number;
+  const r = await resolveWaNumber(acc, number);
+  if (r.checked && !r.exists) {
+    return { error: "Este número não tem WhatsApp (verifiquei com e sem o 9º dígito)." };
+  }
+  if (r.checked && r.exists && r.number) target = r.number;
+
+  const post = (num: string) =>
+    fetch(`${base(acc.evolution_url)}/message/sendText/${acc.instance}`, {
       method: "POST",
       headers: { "content-type": "application/json", apikey: acc.api_key },
-      body: JSON.stringify({ number, text }),
+      body: JSON.stringify({ number: num, text }),
     });
+
+  try {
+    const res = await post(target);
     if (!res.ok) {
       const t = await res.text();
+      const noWa = /"exists"\s*:\s*false/i.test(t);
+      // se o número não existe nesse formato e ainda não checamos, tenta a variante alternativa
+      if (noWa && !r.checked) {
+        for (const alt of brVariants(number)) {
+          if (alt === target) continue;
+          const res2 = await post(alt);
+          if (res2.ok) return { ok: true };
+        }
+      }
+      if (noWa) return { error: "Este número não tem WhatsApp." };
       return { error: `Evolution ${res.status}: ${t.slice(0, 160)}` };
     }
     return { ok: true };
