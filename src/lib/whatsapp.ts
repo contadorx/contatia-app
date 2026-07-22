@@ -48,7 +48,7 @@ function base(url: string) {
 // Evolution responder 400 {"exists":false} — o bug que dava "Evolution 400".
 // Geramos as duas formas e descobrimos qual existe ANTES de enviar.
 // ============================================================
-function brVariants(number: string): string[] {
+export function brVariants(number: string): string[] {
   const set = new Set<string>([number]);
   const m = number.match(/^55(\d{2})(\d+)$/);
   if (m) {
@@ -57,6 +57,29 @@ function brVariants(number: string): string[] {
     else if (sub.length === 8) set.add(`55${ddd}9${sub}`);                            // põe o 9
   }
   return Array.from(set);
+}
+
+// Verifica uma LISTA de números numa única chamada (base da verificação em massa).
+// Devolve, por número, se existe no WhatsApp. Lança em erro de transporte/HTTP —
+// o chamador decide re-tentar (o cron tenta de novo na próxima rodada).
+export async function checkWhatsappNumbers(
+  acc: WaAccount,
+  numbers: string[]
+): Promise<{ number: string; exists: boolean; jid?: string }[]> {
+  if (!numbers.length) return [];
+  const res = await fetch(`${base(acc.evolution_url)}/chat/whatsappNumbers/${acc.instance}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", apikey: acc.api_key },
+    body: JSON.stringify({ numbers }),
+  });
+  if (!res.ok) throw new Error(`Evolution ${res.status}`);
+  const arr = await res.json().catch(() => null);
+  if (!Array.isArray(arr)) return [];
+  return arr.map((x: any) => ({
+    number: String(x?.number || (x?.jid || "").split("@")[0] || "").replace(/\D/g, ""),
+    exists: !!x?.exists,
+    jid: x?.jid,
+  }));
 }
 
 // Pergunta ao Evolution quais variantes EXISTEM no WhatsApp e devolve o número certo.

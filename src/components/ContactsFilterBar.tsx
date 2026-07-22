@@ -12,6 +12,7 @@ const VIEWS: { v: string; label: string; tone?: "danger" | "warn" }[] = [
   { v: "prontos", label: "Prontos p/ cadência" },
   { v: "resgatar", label: "Frios a resgatar", tone: "warn" },
   { v: "quentes", label: "Quentes", tone: "warn" },
+  { v: "com_wa", label: "Com WhatsApp" },
 ];
 
 export default function ContactsFilterBar({

@@ -55,7 +55,7 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
 
   let contactsQuery = supabase
     .from("contacts")
-    .select("id, name, email, phone, company, origin, status, score, assigned_to, created_at, last_activity_at, contact_tags(tag_id, tags(id, name, color))")
+    .select("id, name, email, phone, company, origin, status, score, assigned_to, created_at, last_activity_at, wa_status, contact_tags(tag_id, tags(id, name, color))")
     .order("score", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(200);
@@ -69,6 +69,9 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
     contactsQuery = contactsQuery.or("email.is.null,email.eq.").or("phone.is.null,phone.eq.");
   } else if (view === "quentes") {
     contactsQuery = contactsQuery.gte("score", HOT_THRESHOLD);
+  } else if (view === "com_wa") {
+    // números confirmados no WhatsApp — prontos para uma cadência de WhatsApp
+    contactsQuery = contactsQuery.eq("wa_status", "valid");
   } else if (view === "prontos") {
     // tem e-mail OU telefone, e fora de cadência ativa
     contactsQuery = contactsQuery.or("email.neq.,phone.neq.");

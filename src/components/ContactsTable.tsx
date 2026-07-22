@@ -9,6 +9,7 @@ import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { bulkAssign, bulkEnroll } from "@/app/dashboard/contatos/bulk-actions";
 import { bulkTag, createTag } from "@/app/dashboard/contatos/tag-actions";
 import { bulkDeleteContacts } from "@/app/dashboard/contatos/actions";
+import { verificarWhatsAppLote } from "@/app/dashboard/contatos/wa-actions";
 import { UltimoToque } from "@/lib/lastTouch";
 
 type Contact = {
@@ -21,6 +22,7 @@ type Contact = {
   score: number | null;
   assigned_to: string | null;
   last_activity_at?: string | null;
+  wa_status?: string | null;
   contact_tags?: { tag_id: string; tags: { id: string; name: string; color: string } | null }[];
 };
 type Member = { id: string; full_name: string | null; email: string };
@@ -107,6 +109,22 @@ export default function ContactsTable({
       }
     });
   }
+  function doVerifyWa() {
+    setMsg(null);
+    start(async () => {
+      const res = (await verificarWhatsAppLote([...sel])) as { ok?: boolean; verificados?: number; comWa?: number; semWa?: number; enfileirados?: number; semTelefone?: number; error?: string };
+      if (res?.error) setMsg(res.error);
+      else {
+        const partes = [`✓ ${res.comWa ?? 0} com WhatsApp`];
+        if (res.semWa) partes.push(`${res.semWa} sem WhatsApp`);
+        if (res.enfileirados) partes.push(`${res.enfileirados} na fila (verificação continua sozinha)`);
+        if (res.semTelefone) partes.push(`${res.semTelefone} sem telefone`);
+        setMsg(partes.join(" · "));
+        clear();
+        router.refresh();
+      }
+    });
+  }
   function doCreateTag() {
     if (!newTag.trim()) return;
     start(async () => {
@@ -186,6 +204,15 @@ export default function ContactsTable({
               <button className="btn-ghost py-1.5 text-sm" onClick={doTag} disabled={pending || !tagIds.length}>Aplicar</button>
             </div>
           )}
+
+          <button
+            className="rounded-lg border border-signal/40 bg-signal/5 px-3 py-1.5 text-sm font-medium text-signal hover:bg-signal/10"
+            onClick={doVerifyWa}
+            disabled={pending}
+            title="Descobre quais números têm WhatsApp (checa com e sem o 9º dígito). Exige o modo Evolution."
+          >
+            {pending ? "..." : "Verificar WhatsApp"}
+          </button>
 
           <button
             className="ml-auto rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
@@ -284,13 +311,24 @@ export default function ContactsTable({
                   <td className="px-4 py-3 text-subtle">{c.company || "—"}</td>
                   <td className="px-4 py-3 text-subtle">
                     {c.email ? (
-                      c.email
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        {c.email}
+                        {c.wa_status === "valid" && (
+                          <span className="rounded-full bg-signal/10 px-1.5 py-0.5 text-[10px] font-semibold text-signal">WhatsApp ✓</span>
+                        )}
+                      </span>
                     ) : c.phone ? (
                       <span className="flex flex-wrap items-center gap-1.5">
                         {c.phone}
-                        <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] font-semibold text-warn">
-                          sem e-mail
-                        </span>
+                        {c.wa_status === "valid" ? (
+                          <span className="rounded-full bg-signal/10 px-1.5 py-0.5 text-[10px] font-semibold text-signal">WhatsApp ✓</span>
+                        ) : c.wa_status === "invalid" ? (
+                          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-subtle">sem WhatsApp</span>
+                        ) : (
+                          <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] font-semibold text-warn">
+                            sem e-mail
+                          </span>
+                        )}
                       </span>
                     ) : (
                       <Link
