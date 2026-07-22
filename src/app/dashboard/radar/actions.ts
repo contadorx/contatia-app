@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { canCreate, mensagemLimite } from "@/lib/plan";
 import { buscarAtividades, buscarEmpresas, buscarEmpresaPorCnpj, receitaConfigurada, type FiltroReceita } from "@/lib/receita";
 import { nomeProprio } from "@/lib/cnpj";
+import { dominioCorporativo } from "@/lib/emailFinder";
 
 async function ctx() {
   const supabase = createClient();
@@ -219,7 +220,9 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
 
     const nomeEmpresa = nomeProprio((e.nome_fantasia || e.razao_social || "").trim()) || cnpj;
     const email = (e.email || "").trim().toLowerCase() || null;
-    const dominio = email && email.includes("@") ? email.split("@")[1] : null;
+    // domínio só quando é o SITE da empresa (não gmail/hotmail) — é o que permite
+    // raspar o site depois em busca de telefone/WhatsApp.
+    const dominio = dominioCorporativo(email);
 
     // 2) garante a EMPRESA (por CNPJ; senão por nome; senão cria enriquecida)
     let account_id = contaPorCnpj.get(cnpj) || contaPorNome.get(normNome(nomeEmpresa)) || null;
@@ -265,8 +268,13 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
       cnpj,
       email,
       phone: e.telefone || null,
+      company_domain: dominio,
       origin: "Radar",
       status: "novo",
+      // ESTEIRA AUTOMÁTICA: com telefone da Receita → fila de verificação de WhatsApp;
+      // com domínio corporativo → fila de captura no site (busca um wa.me melhor).
+      wa_status: e.telefone ? "queued" : null,
+      web_capture: dominio ? "queued" : null,
     });
     if (!errC) {
       contatoTemCnpj.add(cnpj);

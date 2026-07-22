@@ -173,3 +173,26 @@ export function dominioDe(entrada?: string | null): string | null {
 
   return s;
 }
+
+// Provedores de e-mail PÚBLICOS: o domínio deles não é o site da empresa, então
+// não serve para captura no site (raspar gmail.com não traz o telefone da empresa).
+const PROVEDOR_PUBLICO = new Set([
+  "gmail.com", "googlemail.com", "gmail.com.br",
+  "hotmail.com", "hotmail.com.br", "outlook.com", "outlook.com.br",
+  "live.com", "live.com.br", "msn.com",
+  "yahoo.com", "yahoo.com.br", "ymail.com", "rocketmail.com",
+  "bol.com.br", "uol.com.br", "terra.com.br", "ig.com.br", "r7.com",
+  "icloud.com", "me.com", "mac.com", "aol.com",
+  "globomail.com", "globo.com", "zipmail.com.br", "oi.com.br",
+]);
+
+/**
+ * Domínio CORPORATIVO a partir de um e-mail: devolve o domínio só quando ele é o
+ * site da empresa (não um provedor público). Usado no Radar/enriquecimento para
+ * decidir se dá para raspar o site em busca de telefone/WhatsApp.
+ */
+export function dominioCorporativo(email?: string | null): string | null {
+  const d = dominioDe(email);
+  if (!d) return null;
+  return PROVEDOR_PUBLICO.has(d) ? null : d;
+}

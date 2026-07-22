@@ -399,9 +399,11 @@ export async function addSocioContact(sourceContactId: string, socioName: string
 
   const { data: src } = await supabase
     .from("contacts")
-    .select("account_id, company, cnpj")
+    .select("account_id, company, cnpj, company_domain, accounts(domain)")
     .eq("id", sourceContactId)
     .maybeSingle();
+  // o sócio herda o domínio da empresa → já entra na esteira de captura no site
+  const dominioSocio = dominioDe((src as any)?.company_domain || (src as any)?.accounts?.domain || null);
 
   // M10: evita duplicar. Com empresa, checa dentro da empresa; SEM empresa (o guard
   // antigo só rodava com account_id), checa por nome + empresa/CNPJ no tenant.
@@ -428,8 +430,12 @@ export async function addSocioContact(sourceContactId: string, socioName: string
     company: (src as any)?.company || null,
     account_id: (src as any)?.account_id || null,
     cnpj: (src as any)?.cnpj || null,
+    company_domain: dominioSocio,
     origin: "Sócio (Receita)",
     status: "novo",
+    // com domínio da empresa, o sócio já entra na fila de captura (busca o WhatsApp
+    // no site) — e o que for achado cai sozinho na fila de verificação.
+    web_capture: dominioSocio ? "queued" : null,
   });
   if (error) return { error: error.message };
   revalidatePath(`/dashboard/contatos/${sourceContactId}`);
