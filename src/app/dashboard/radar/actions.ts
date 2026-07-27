@@ -1,10 +1,11 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { canCreate, mensagemLimite } from "@/lib/plan";
 import { buscarAtividades, buscarEmpresas, buscarEmpresaPorCnpj, receitaConfigurada, type FiltroReceita } from "@/lib/receita";
-import { nomeProprio } from "@/lib/cnpj";
+import { nomeProprio, enrichCnpj } from "@/lib/cnpj";
 import { dominioCorporativo } from "@/lib/emailFinder";
 
 async function ctx() {
@@ -71,7 +72,7 @@ export async function descartarCnpjs(cnpjs: string[]) {
   const { error } = await supabase
     .from("radar_dismissed")
     .upsert(rows, { onConflict: "tenant_id,cnpj", ignoreDuplicates: true });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   return { ok: true, count: limpos.length };
 }
 
@@ -82,7 +83,7 @@ export async function reincluirCnpjs(cnpjs: string[]) {
   const limpos = Array.from(new Set((cnpjs || []).map(soDigitos).filter((d) => d.length === 14)));
   if (!limpos.length) return { error: "Nenhum CNPJ válido." };
   const { error } = await supabase.from("radar_dismissed").delete().eq("tenant_id", tenant_id).in("cnpj", limpos);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   return { ok: true, count: limpos.length };
 }
 
@@ -172,9 +173,72 @@ export async function buscarNaBase(input: any, offset = 0) {
 }
 
 // ============================================================
+// EXPORTAR TODOS os resultados de uma busca (não só a página carregada). Puxa
+// várias páginas da base até um TETO (anti-abuso e anti-timeout) e devolve as
+// linhas para o cliente montar o CSV. Espelha a tela: exclui descartados e, se o
+// usuário marcou "ocultar já cadastradas", exclui as que já estão na base.
+// ============================================================
+export async function exportarRadar(input: any): Promise<{ rows?: any[]; total?: number | null; capped?: boolean; error?: string }> {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  if (!receitaConfigurada()) return { error: "Base da Receita não configurada." };
+
+  const f = montarFiltro(input);
+  const busca = typeof input?.busca === "string" ? input.busca.trim() : "";
+  const digitos = busca.replace(/\D/g, "");
+  const acc: any[] = [];
+  const vistos = new Set<string>();
+  let total: number | null = null;
+  let capped = false;
+
+  if (digitos.length === 14) {
+    const r = await buscarEmpresaPorCnpj(digitos);
+    if (r.error) return { error: r.error };
+    if (r.empresa) { acc.push(r.empresa); vistos.add(soDigitos(r.empresa.cnpj)); }
+    total = acc.length;
+  } else {
+    if (busca.length >= 3) f.termo = busca;
+    const CAP_PAGES = 20; // teto: 20 × 100 = 2.000 empresas por exportação
+    let offset = 0;
+    for (let i = 0; i < CAP_PAGES; i++) {
+      const r = await buscarEmpresas({ ...f, limit: 100, offset, contar: i === 0 });
+      if (r.error) return { error: r.error };
+      if (i === 0) total = r.total;
+      for (const e of r.rows || []) { const d = soDigitos(e.cnpj); if (d && !vistos.has(d)) { vistos.add(d); acc.push(e); } }
+      offset += (r.rows || []).length;
+      if ((r.rows || []).length < 100) break;          // fim da base
+      if (i === CAP_PAGES - 1) capped = true;           // bateu o teto
+    }
+  }
+
+  // exclui descartados (sempre) e já-cadastradas (se pediu no filtro)
+  const cnpjs = acc.map((e) => soDigitos(e.cnpj)).filter((d) => d.length === 14);
+  const remover = new Set<string>();
+  for (let i = 0; i < cnpjs.length; i += 500) {
+    const slice = cnpjs.slice(i, i + 500);
+    const [{ data: dis }, { data: accs }] = await Promise.all([
+      supabase.from("radar_dismissed").select("cnpj").eq("tenant_id", tenant_id).in("cnpj", slice),
+      input?.ocultarJaTem === true
+        ? supabase.from("accounts").select("cnpj").eq("tenant_id", tenant_id).in("cnpj", slice)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+    for (const d of (dis as any[]) || []) if (d.cnpj) remover.add(soDigitos(d.cnpj));
+    for (const a of (accs as any[]) || []) if (a.cnpj) remover.add(soDigitos(a.cnpj));
+  }
+  const rows = acc.filter((e) => !remover.has(soDigitos(e.cnpj)));
+  return { rows, total, capped };
+}
+
+// ============================================================
 // Envia as empresas escolhidas para Empresas + Contatos, JÁ ENRIQUECIDAS.
 // Como a busca já traz e-mail/telefone/CNAE/município da base, não precisa de
 // nenhuma chamada externa: grava direto. Deduplica por CNPJ.
+//
+// No modo "empresa + contato" traz a EMPRESA e UM CONTATO POR SÓCIO (não mais um
+// contato-fantasma com o nome da empresa): usa os sócios que a base já entrega na
+// linha (e.socios) e, quando a linha não traz, enriquece por CNPJ (base + BrasilAPI)
+// com teto de consultas externas por envio. Se ninguém for encontrado, cai no antigo
+// (um contato com o nome da empresa) — nunca cria zero contato.
 // ============================================================
 export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "empresa_contato" = "empresa") {
   const { supabase, tenant_id, user_id } = await ctx();
@@ -183,9 +247,13 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
   const criarContato = modo === "empresa_contato";
 
   // teto do plano só se apertar (só o modo "empresa + contato" cria contato).
+  // Guardamos o orçamento restante: como agora um envio pode criar VÁRIOS contatos
+  // (um por sócio), paramos de criar ao esgotar o limite em vez de estourar.
+  let budgetContatos = Infinity;
   if (criarContato) {
     const lim = await canCreate("contatos");
     if (!lim.permitido) return { error: mensagemLimite("contatos", lim.usado, lim.limite, lim.sugerido) };
+    if (lim.limite != null) budgetContatos = Math.max(0, lim.limite - lim.usado);
   }
 
   // 1) carrega empresas e contatos existentes do workspace (dedup em memória)
@@ -208,9 +276,31 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
   let empresasCriadas = 0;
   let contatosCriados = 0;
   let pulados = 0;
+  let limiteAtingido = false;
   const vistos = new Set<string>();
   const tagId = await tagRadarId(supabase, tenant_id); // marca as empresas como vindas do Radar
   const contasParaMarcar = new Set<string>();
+
+  // Resolve os nomes dos sócios de uma empresa para virar contato:
+  //  1) se a linha da busca já trouxe e.socios (base do VPS evoluída) → grátis;
+  //  2) senão, enriquece por CNPJ (base + BrasilAPI) com TETO por envio, para não
+  //     estourar limite/timeout das APIs públicas quando a seleção é grande.
+  const MAX_ENRIQUECER = 30;
+  let enriquecidos = 0;
+  async function sociosDaEmpresa(e: any, cnpj: string): Promise<string[]> {
+    const doRow = Array.isArray(e?.socios) ? e.socios : [];
+    const limpos = doRow.map((s: any) => (nomeProprio(String(s || "")) || String(s || "")).trim()).filter(Boolean);
+    if (limpos.length) return Array.from(new Set(limpos));
+    if (!criarContato || enriquecidos >= MAX_ENRIQUECER) return [];
+    enriquecidos++;
+    try {
+      const r = await enrichCnpj(cnpj);
+      const nomes = (r.data?.socios || []).map((s) => (s || "").trim()).filter(Boolean);
+      return Array.from(new Set(nomes));
+    } catch {
+      return [];
+    }
+  }
 
   for (const e of empresas) {
     const cnpj = soDigitos(e.cnpj);
@@ -254,32 +344,46 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
     }
     if (account_id) contasParaMarcar.add(account_id); // será marcada com a tag Radar
 
-    // 3) cria o CONTATO apenas no modo "empresa + contato". No padrão ("só empresa"),
-    //    NÃO criamos um contato-fantasma com o nome da empresa — o contato real entra
-    //    depois (descoberta de e-mail ou cadastro manual, quando houver uma pessoa).
+    // 3) cria o(s) CONTATO(s) apenas no modo "empresa + contato". No padrão ("só
+    //    empresa"), NÃO criamos contato — o contato real entra depois (descoberta de
+    //    e-mail ou cadastro manual, quando houver uma pessoa).
     if (!criarContato) continue;
     if (contatoTemCnpj.has(cnpj)) { pulados++; continue; }
-    const { error: errC } = await supabase.from("contacts").insert({
-      tenant_id,
-      assigned_to: user_id ?? null,
-      name: nomeEmpresa,
-      company: nomeProprio(e.razao_social || e.nome_fantasia) || null,
-      account_id,
-      cnpj,
-      email,
-      phone: e.telefone || null,
-      company_domain: dominio,
-      origin: "Radar",
-      status: "novo",
-      // ESTEIRA AUTOMÁTICA: com telefone da Receita → fila de verificação de WhatsApp;
-      // com domínio corporativo → fila de captura no site (busca um wa.me melhor).
-      wa_status: e.telefone ? "queued" : null,
-      web_capture: dominio ? "queued" : null,
-    });
-    if (!errC) {
-      contatoTemCnpj.add(cnpj);
-      contatosCriados++;
+    if (contatosCriados >= budgetContatos) { limiteAtingido = true; continue; }
+
+    // um contato POR SÓCIO; se a empresa não tiver sócio identificado, cai no antigo
+    // (um contato com o nome da empresa) — nunca fica sem contato nenhum.
+    const socios = await sociosDaEmpresa(e, cnpj);
+    const nomes = socios.length ? socios : [nomeEmpresa];
+    const companyNome = nomeProprio(e.razao_social || e.nome_fantasia) || null;
+    let criouAlgum = false;
+
+    for (const nome of nomes) {
+      if (contatosCriados >= budgetContatos) { limiteAtingido = true; break; }
+      // o e-mail e o telefone são DA EMPRESA (não da pessoa): só o primeiro contato os
+      // carrega — assim não duplicamos o mesmo e-mail corporativo em todos os sócios,
+      // e só uma verificação de WhatsApp é enfileirada por empresa.
+      const primeiro = !criouAlgum;
+      const { error: errC } = await supabase.from("contacts").insert({
+        tenant_id,
+        assigned_to: user_id ?? null,
+        name: nome,
+        company: companyNome,
+        account_id,
+        cnpj,
+        email: primeiro ? email : null,
+        phone: primeiro ? (e.telefone || null) : null,
+        company_domain: dominio,
+        origin: socios.length ? "Radar (sócio)" : "Radar",
+        status: "novo",
+        // ESTEIRA AUTOMÁTICA: telefone da Receita (só no 1º) → fila de verificação de
+        // WhatsApp; domínio corporativo (em todos) → fila de captura no site do sócio.
+        wa_status: primeiro && e.telefone ? "queued" : null,
+        web_capture: dominio ? "queued" : null,
+      });
+      if (!errC) { criouAlgum = true; contatosCriados++; }
     }
+    if (criouAlgum) contatoTemCnpj.add(cnpj);
   }
 
   // marca todas as empresas tocadas com a tag "Radar"
@@ -290,5 +394,5 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
 
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/contas");
-  return { ok: true, empresasCriadas, contatosCriados, pulados };
+  return { ok: true, empresasCriadas, contatosCriados, pulados, limiteAtingido };
 }

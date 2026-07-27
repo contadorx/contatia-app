@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -125,7 +126,7 @@ export async function duplicateAutomation(id: string) {
 export async function toggleAutomation(id: string, active: boolean) {
   const { supabase } = await ctx();
   const { error } = await supabase.from("automations").update({ is_active: active }).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/automacoes");
   return { ok: true };
 }
@@ -133,7 +134,7 @@ export async function toggleAutomation(id: string, active: boolean) {
 export async function deleteAutomation(id: string) {
   const { supabase } = await ctx();
   const { error } = await supabase.from("automations").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/automacoes");
   return { ok: true };
 }
@@ -193,7 +194,7 @@ export async function saveAutomationAsTemplate(automationId: string, opts?: { de
     is_global: isGlobal,
     created_by: user_id,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/automacoes");
   return { ok: true };
 }
@@ -202,7 +203,7 @@ export async function deleteAutomationTemplate(id: string) {
   const { supabase } = await ctx();
   // a RLS já restringe: tenant só apaga os seus; superadmin apaga globais
   const { error } = await supabase.from("automation_templates").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/automacoes");
   return { ok: true };
 }

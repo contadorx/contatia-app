@@ -8,6 +8,7 @@ import {
   replyEmail,
   markThreadRead,
   createContactFromThread,
+  createContactFromEmailThread,
   blockThread,
   deleteThread,
   deleteThreadsBulk,
@@ -125,7 +126,7 @@ export default function RespostasInbox({
   function send() {
     if (!active || !text.trim()) return;
     if (active.channel === "email") {
-      if (!active.contactId) { setErr("Vincule o contato para responder por e-mail."); return; }
+      if (!active.contactId) { setErr("Cadastre o contato (botão acima) para responder por e-mail."); return; }
       const subj = active.subject ? `Re: ${active.subject.replace(/^re:\s*/i, "")}` : "Re:";
       act(() => replyEmail({ contactId: active.contactId as string, subject: subj, body: text }), () => setText(""));
     } else {
@@ -237,7 +238,15 @@ export default function RespostasInbox({
                 >
                   + Cadastrar contato
                 </button>
-              ) : null}
+              ) : (
+                <button
+                  className="rounded-lg border border-brand/40 px-2 py-1 font-semibold text-brand-dark hover:bg-brand-soft"
+                  disabled={pending}
+                  onClick={() => act(() => createContactFromEmailThread({ email: active.email || "", name: active.name === active.email ? "" : active.name }))}
+                >
+                  + Cadastrar contato para responder
+                </button>
+              )}
               {/* bloquear/excluir são do WhatsApp (por número) */}
               {active.channel === "whatsapp" && (
                 <>
@@ -308,7 +317,7 @@ export default function RespostasInbox({
                   value={text}
                   onChange={setText}
                   minHeight={90}
-                  placeholder={active.contactId ? "Escreva sua resposta por e-mail…" : "Vincule o contato para responder…"}
+                  placeholder={active.contactId ? "Escreva sua resposta por e-mail…" : "Cadastre o contato (botão acima) para responder…"}
                 />
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <p className="text-[11px] text-subtle">Sai pela sua caixa (rotação/assinatura) e fica registrado aqui.</p>

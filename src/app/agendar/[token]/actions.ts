@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
 
@@ -120,7 +121,7 @@ export async function createBooking(token: string, input: { name: string; email:
     p_note: input.note || null,
   });
   const row = Array.isArray(data) ? data[0] : data;
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   if (!row || !row.ok) return { error: (row && row.msg) || "Não foi possível agendar. Tente outro horário." };
   const meetingId = row.meeting_id as string;
 

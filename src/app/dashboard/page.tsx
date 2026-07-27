@@ -3,6 +3,7 @@ import TaskQueue from "@/components/TaskQueue";
 import OnboardingChecklist from "@/components/OnboardingChecklist";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import { effectiveDailyCap } from "@/lib/warmup";
+import { Termo } from "@/components/Termo";
 
 export const dynamic = "force-dynamic";
 
@@ -130,7 +131,13 @@ export default async function Today() {
   return (
     <div>
       <h1 className="font-display text-2xl font-bold">O que precisa de você hoje</h1>
-      <p className="mt-1 text-sm text-subtle">Sua fila de cadência — quem está mais quente vem primeiro.</p>
+      <p className="mt-1 text-sm text-subtle">
+        Sua fila de{" "}
+        <Termo def="Cadência = a sua sequência de follow-ups (e-mail, WhatsApp, ligação, LinkedIn) que roda no automático.">cadência</Termo>
+        {" "}— quem está mais{" "}
+        <Termo def="Score = quão engajado o contato está (abriu, clicou, respondeu). Quente a partir de 25 pontos.">quente</Termo>
+        {" "}vem primeiro.
+      </p>
 
       {waDisconnected && (
         <a href="/dashboard/config" className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm">

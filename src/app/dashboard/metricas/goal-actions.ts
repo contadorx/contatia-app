@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -30,7 +31,7 @@ export async function setGoal(input: { period: string; mrr_target: number; touch
     },
     { onConflict: "tenant_id,user_id,period" }
   );
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/relatorios");
   return { ok: true };
 }

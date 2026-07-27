@@ -57,7 +57,7 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
   let contactsQ = supabase.from("contacts").select("id, name, company, score, assigned_to, last_activity_at, account_id, email").limit(4000);
   if (vendedor) contactsQ = contactsQ.eq("assigned_to", vendedor);
 
-  let oppsQ = supabase.from("opportunities").select("id, title, value_mrr, stage_id, status, owner_id, created_at, updated_at, account_id, loss_reason, product_id, products(name)").limit(4000);
+  let oppsQ = supabase.from("opportunities").select("id, title, value_mrr, stage_id, status, owner_id, created_at, updated_at, account_id, loss_reason, product_id, probability, expected_close, products(name)").limit(4000);
   if (vendedor) oppsQ = oppsQ.eq("owner_id", vendedor);
 
   let mtgsQ = supabase.from("meetings").select("id, assigned_to, datetime, status, created_at").gte("created_at", sinceISO).limit(4000);
@@ -246,6 +246,39 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
 
   const vgWonMrrMonth = ((monthWon as any[]) || []).reduce((s, o) => s + Number(o.value_mrr || 0), 0);
   const selectedName = vendedor ? memberName(vendedor) : "toda a equipe";
+
+  // ================= FORECAST (previsão de receita recorrente) =================
+  // Cada negócio ABERTO é ponderado pela sua probabilidade. Sem probabilidade
+  // definida, usamos a IMPLÍCITA do estágio (quanto mais avançado, maior) — assim o
+  // forecast já funciona antes de alguém preencher probabilidades.
+  const openStages = stageList.filter((s) => !s.is_won && !s.is_lost);
+  const stageRank = new Map<string, number>();
+  openStages.forEach((s, i) => stageRank.set(s.id, i));
+  const impliedProb = (stageId: string | null) => {
+    const r = stageId ? stageRank.get(stageId) : undefined;
+    if (r == null) return 0.3;
+    return (r + 1) / (openStages.length + 1); // 0..1, cresce com o avanço no funil
+  };
+  const effProb = (o: any) => { const p = Number(o.probability) || 0; return p > 0 ? p / 100 : impliedProb(o.stage_id); };
+
+  const fcWeightedOpen = vgOpen.reduce((s, o) => s + Number(o.value_mrr || 0) * effProb(o), 0);
+  const fcMonthWeighted = vgOpen
+    .filter((o) => String(o.expected_close || "").slice(0, 7) === period)
+    .reduce((s, o) => s + Number(o.value_mrr || 0) * effProb(o), 0);
+  const fcMonthTotal = vgWonMrrMonth + fcMonthWeighted;
+
+  const fcByMonth: Record<string, number> = {};
+  let fcSemData = 0;
+  for (const o of vgOpen) {
+    const w = Number(o.value_mrr || 0) * effProb(o);
+    const m = String(o.expected_close || "").slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(m)) fcByMonth[m] = (fcByMonth[m] || 0) + w;
+    else fcSemData += w;
+  }
+  const fcMonths = Object.entries(fcByMonth).sort((a, b) => a[0].localeCompare(b[0])).slice(0, 6);
+  const fcMax = Math.max(1, ...fcMonths.map((x) => x[1]));
+  const MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  const mesLabel = (ym: string) => { const [y, m] = ym.split("-"); return `${MES[Number(m) - 1]}/${y.slice(2)}`; };
   const vgCards = [
     { label: "Negócios em aberto", value: brl(vgOpenValue), sub: `${vgOpen.length} negócios` },
     { label: "Receita fechada", value: brl(vgWonValue), sub: `${vgWon.length} fechados no recorte` },
@@ -304,6 +337,7 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
           touchTarget={Number((goal as any)?.touch_target) || 0}
           wonMrr={vgWonMrrMonth}
           touchesDone={vgTouches}
+          forecastMrr={fcMonthTotal}
           targetUserId={gestor && vendedor ? vendedor : undefined}
           targetName={gestor && vendedor ? selectedName : undefined}
         />
@@ -315,6 +349,51 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
               <p className="mt-1 text-xs text-subtle">{c.sub}</p>
             </div>
           ))}
+        </div>
+
+        {/* FORECAST — previsão de receita recorrente */}
+        <div className="mt-6 card p-5">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-lg font-bold">Previsão de receita (forecast)</h2>
+            <span className="text-xs text-subtle">recorrente · R$/mês</span>
+          </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <div>
+              <p className="text-xs text-subtle">Fechado no mês</p>
+              <p className="mt-1 font-display text-2xl font-bold text-signal">{brl(vgWonMrrMonth)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-subtle">Previsão do mês (ponderada)</p>
+              <p className="mt-1 font-display text-2xl font-bold text-brand-dark">{brl(fcMonthTotal)}</p>
+              <p className="text-[11px] text-subtle">fechado + previstos p/ {mesLabel(period)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-subtle">Pipeline aberto ponderado</p>
+              <p className="mt-1 font-display text-2xl font-bold">{brl(fcWeightedOpen)}</p>
+              <p className="text-[11px] text-subtle">de {brl(vgOpenValue)} em aberto</p>
+            </div>
+          </div>
+
+          {(fcMonths.length > 0 || fcSemData > 0) && (
+            <div className="mt-5 border-t border-line pt-4">
+              <p className="mb-2 text-sm font-medium">Por mês de fechamento previsto (ponderado)</p>
+              <div className="space-y-2">
+                {fcMonths.map(([m, v]) => (
+                  <div key={m}>
+                    <div className="flex items-center justify-between text-sm"><span className="font-medium">{mesLabel(m)}</span><span className="text-subtle">{brl(v)}/mês</span></div>
+                    <div className="mt-1 h-2 rounded-full bg-muted"><div className="h-2 rounded-full bg-brand" style={{ width: `${(v / fcMax) * 100}%` }} /></div>
+                  </div>
+                ))}
+                {fcSemData > 0 && (
+                  <p className="pt-1 text-xs text-subtle">+ <b>{brl(fcSemData)}/mês</b> em negócios <b>sem data prevista</b> — defina a data no cartão do negócio para caírem no mês certo.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          <p className="mt-4 text-xs text-subtle">
+            <b>Ponderada</b> = cada negócio aberto × sua <b>probabilidade</b>. Sem probabilidade definida, usamos a <b>implícita do estágio</b> (quanto mais avançado no funil, maior). Ajuste a probabilidade e a data prevista no cartão do negócio (Pipeline) para afinar a previsão.
+          </p>
         </div>
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
           <div className="card p-5">

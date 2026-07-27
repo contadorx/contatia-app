@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { enrollContact } from "@/app/dashboard/cadencias/actions";
@@ -17,7 +18,7 @@ export async function bulkAssign(contactIds: string[], userId: string | null) {
   const { supabase } = await ctx();
   if (!contactIds.length) return { error: "Nenhum contato selecionado." };
   const { error } = await supabase.from("contacts").update({ assigned_to: userId }).in("id", contactIds);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/equipe");
   return { ok: true, count: contactIds.length };

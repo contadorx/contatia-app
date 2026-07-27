@@ -23,6 +23,7 @@ export default function GoalPanel({
   touchTarget,
   wonMrr,
   touchesDone,
+  forecastMrr,
   targetUserId,
   targetName,
 }: {
@@ -31,6 +32,7 @@ export default function GoalPanel({
   touchTarget: number;
   wonMrr: number;
   touchesDone: number;
+  forecastMrr?: number;
   targetUserId?: string;
   targetName?: string;
 }) {
@@ -80,6 +82,12 @@ export default function GoalPanel({
             <span className="text-sm text-subtle">{brl(wonMrr)} / {brl(mrrTarget)}</span>
           </div>
           <div className="mt-1"><Bar done={wonMrr} target={mrrTarget} hue="var(--tw-brand,#4A3AFF)" /></div>
+          {forecastMrr != null && (
+            <p className="mt-1 text-xs text-brand-dark">
+              Previsão do mês: <b>{brl(forecastMrr)}</b>
+              {mrrTarget > 0 && <span className="text-subtle"> · {Math.round((forecastMrr / mrrTarget) * 100)}% da meta</span>}
+            </p>
+          )}
         </div>
         <div>
           <div className="flex items-baseline justify-between">

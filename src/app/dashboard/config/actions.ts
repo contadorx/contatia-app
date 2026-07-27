@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { canCreate, mensagemLimite } from "@/lib/plan";
 
 import { revalidatePath } from "next/cache";
@@ -78,7 +79,7 @@ export async function saveSmtpAccount(input: {
     verified: check.ok,
     verified_at: check.ok ? new Date().toISOString() : null,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true, verified: check.ok };
 }
@@ -148,7 +149,7 @@ export async function updateEmailAccount(id: string, input: {
   if (input.smtp_pass?.trim()) patch.smtp_pass = input.smtp_pass;
 
   const { error } = await supabase.from("email_accounts").update(patch).eq("id", id).eq("tenant_id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true, verified };
 }
@@ -178,7 +179,7 @@ async function verifySmtpConnection(input: {
 export async function toggleAccount(id: string, active: boolean) {
   const { supabase } = await ctx();
   const { error } = await supabase.from("email_accounts").update({ is_active: active }).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
@@ -186,7 +187,7 @@ export async function toggleAccount(id: string, active: boolean) {
 export async function deleteAccount(id: string) {
   const { supabase } = await ctx();
   const { error } = await supabase.from("email_accounts").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
@@ -214,7 +215,7 @@ export async function saveAiSettings(input: { model: string; apiKey: string }) {
   const patch: Record<string, unknown> = { ai_model: input.model.trim() || null };
   if (input.apiKey.trim()) patch.ai_api_key = input.apiKey.trim();
   const { error } = await supabase.from("tenants").update(patch).eq("id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
@@ -246,7 +247,7 @@ export async function saveBusinessProfile(input: {
       brand_color: clean(input.brand_color),
     })
     .eq("id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
@@ -256,7 +257,7 @@ export async function saveSignature(signature: string) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const { error } = await supabase.from("tenants").update({ email_signature: signature.trim() || null }).eq("id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
@@ -272,7 +273,7 @@ export async function saveDailyCap(accountId: string, cap: number, warmup: boole
     .update({ daily_cap: c, warmup_stage: warmup ? 0 : -1 })
     .eq("id", accountId)
     .eq("tenant_id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
@@ -286,7 +287,7 @@ export async function saveBoxSignature(accountId: string, signature: string) {
     .update({ signature: signature.trim() || null })
     .eq("id", accountId)
     .eq("tenant_id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
@@ -319,7 +320,7 @@ export async function saveBookingSettings(input: {
     booking_end_hour: endHour,
     booking_title: input.title?.trim() || null,
   }).eq("id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }

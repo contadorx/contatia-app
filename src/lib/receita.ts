@@ -24,6 +24,9 @@ export type EmpresaReceita = {
   email: string | null;
   porte: string | null;
   matriz: boolean;
+  // Sócios (nomes) quando a base/API já os traz no resultado da busca. Opcional:
+  // se a API do VPS ainda não expõe sócios, fica indefinido e o app enriquece por CNPJ.
+  socios?: string[] | null;
 };
 
 export type FiltroReceita = {

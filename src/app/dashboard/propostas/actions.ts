@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -44,7 +45,7 @@ export async function uploadDocument(form: FormData) {
     storage_path: path,
     created_by: user_id,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/propostas");
   return { ok: true };
 }
@@ -60,7 +61,7 @@ export async function deleteDocument(documentId: string) {
     await supabase.storage.from("proposals").remove([path]);
   }
   const { error } = await supabase.from("documents").delete().eq("id", documentId);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/propostas");
   return { ok: true };
 }
@@ -91,7 +92,7 @@ export async function createDocument(input: { name: string; type: string; url: s
     url: input.url.trim(),
     created_by: user_id,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/propostas");
   return { ok: true };
 }
@@ -108,7 +109,7 @@ export async function createShare(documentId: string, contactId: string) {
     contact_id: contactId,
     token,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/propostas");
   return { ok: true, token };
 }

@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
@@ -31,7 +32,7 @@ function podeConvidar(role?: string, team_role?: string) {
 export async function assignContact(contactId: string, userId: string | null) {
   const { supabase } = await ctx();
   const { error } = await supabase.from("contacts").update({ assigned_to: userId }).eq("id", contactId);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/equipe");
   return { ok: true };
@@ -121,7 +122,7 @@ export async function createInvite(email: string, teamRole?: string) {
     .insert({ tenant_id, email: email.trim().toLowerCase(), role: "partner", team_role: papel, created_by: user_id })
     .select("token")
     .single();
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/equipe");
   return { ok: true, token: (data as any).token as string };
 }
@@ -130,7 +131,7 @@ export async function revokeInvite(id: string) {
   const { supabase, role, team_role } = await ctx();
   if (!podeConvidar(role, team_role)) return { error: "Apenas dono ou admin removem convites." };
   const { error } = await supabase.from("tenant_invites").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/equipe");
   return { ok: true };
 }
@@ -157,7 +158,7 @@ export async function setTeamRole(memberId: string, teamRole: string) {
   }
 
   const { error } = await admin.from("profiles").update({ team_role: teamRole }).eq("id", memberId);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   // deixou de ser SDR? as liberações de agenda dele perdem sentido — limpa
   // (hygiene que o antigo setRole fazia; agora vive aqui, no editor canônico)

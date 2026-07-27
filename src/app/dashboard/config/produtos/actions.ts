@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -35,7 +36,7 @@ export async function createProduct(input: { name: string; kind: string; billing
     // caixa única legada fica nula — o pool (abaixo) é a fonte da verdade
     email_account_id: null,
   }).select("id").single();
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   await setPool(supabase, tenant_id, (data as any).id, input.email_account_ids || []);
   revalidatePath("/dashboard/config/produtos");
   return { ok: true };
@@ -52,7 +53,7 @@ export async function updateProduct(id: string, patch: { name?: string; kind?: s
   if (patch.active !== undefined) clean.active = patch.active;
   if (Object.keys(clean).length) {
     const { error } = await supabase.from("products").update(clean).eq("id", id);
-    if (error) return { error: error.message };
+    if (error) return { error: msgErro(error) };
   }
   // ao editar o pool, zera a caixa única legada (evita ambiguidade de fonte)
   if (patch.email_account_ids !== undefined) {
@@ -66,7 +67,7 @@ export async function updateProduct(id: string, patch: { name?: string; kind?: s
 export async function deleteProduct(id: string) {
   const { supabase } = await ctx();
   const { error } = await supabase.from("products").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config/produtos");
   return { ok: true };
 }

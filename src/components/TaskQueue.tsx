@@ -176,10 +176,13 @@ export default function TaskQueue({
   if (!allTasks.length)
     return (
       <div className="card p-10 text-center text-sm text-subtle">
-        <p>Nada na fila hoje. Os toques aparecem aqui quando contatos entram numa cadência.</p>
+        <p className="font-medium text-ink">Nada na fila hoje.</p>
+        <p className="mt-1">Reabasteça: traga novos leads ou resgate quem esfriou — e inscreva numa cadência.</p>
         <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-          <a href="/dashboard/contatos" className="btn-brand py-1.5 text-xs">Inscrever contatos</a>
-          <a href="/dashboard/cadencias" className="btn-ghost py-1.5 text-xs">Criar uma cadência</a>
+          <a href="/dashboard/contatos?view=prontos" className="btn-brand py-1.5 text-xs">Inscrever contatos</a>
+          <a href="/dashboard/radar" className="btn-ghost py-1.5 text-xs">Buscar no Radar</a>
+          <a href="/dashboard/contatos?view=resgatar" className="btn-ghost py-1.5 text-xs">Resgatar frios</a>
+          <a href="/dashboard/cadencias" className="btn-ghost py-1.5 text-xs">Criar cadência</a>
         </div>
       </div>
     );

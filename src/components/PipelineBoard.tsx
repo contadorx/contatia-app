@@ -21,6 +21,8 @@ type Opp = {
   last_activity?: string | null;
   active_cadence?: string | null;
   product_id?: string | null;
+  probability?: number;
+  expected_close?: string | null;
   tags?: { id: string; name: string; color: string }[];
 };
 type Contact = { id: string; name: string };
@@ -55,12 +57,12 @@ export default function PipelineBoard({
     if (!openOppId) return;
     const o = opportunities.find((x) => x.id === openOppId);
     if (!o) return;
-    setEditOpp({ id: o.id, title: o.title, value_mrr: String(o.value_mrr || ""), contact_id: (o as any).contact_id || "", account_id: (o as any).account_id || "", product_id: (o as any).product_id || "" });
+    setEditOpp({ id: o.id, title: o.title, value_mrr: String(o.value_mrr || ""), contact_id: (o as any).contact_id || "", account_id: (o as any).account_id || "", product_id: (o as any).product_id || "", probability: (o as any).probability ? String((o as any).probability) : "", expected_close: (o as any).expected_close || "" });
     setTimeout(() => document.getElementById(`opp-${openOppId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 120);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openOppId]);
   const [showForm, setShowForm] = useState(false);
-  const [editOpp, setEditOpp] = useState<{ id: string; title: string; value_mrr: string; contact_id: string; account_id: string; product_id: string } | null>(null);
+  const [editOpp, setEditOpp] = useState<{ id: string; title: string; value_mrr: string; contact_id: string; account_id: string; product_id: string; probability: string; expected_close: string } | null>(null);
   const [pending, start] = useTransition();
 
   // filtros
@@ -300,7 +302,7 @@ export default function PipelineBoard({
                         className="text-[11px] text-subtle opacity-0 transition hover:text-brand-dark group-hover:opacity-100"
                         title="Editar"
                         onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => { e.stopPropagation(); setEditOpp({ id: o.id, title: o.title, value_mrr: String(o.value_mrr || ""), contact_id: o.contact_id || "", account_id: (o as any).account_id || "", product_id: (o as any).product_id || "" }); }}
+                        onClick={(e) => { e.stopPropagation(); setEditOpp({ id: o.id, title: o.title, value_mrr: String(o.value_mrr || ""), contact_id: o.contact_id || "", account_id: (o as any).account_id || "", product_id: (o as any).product_id || "", probability: (o as any).probability ? String((o as any).probability) : "", expected_close: (o as any).expected_close || "" }); }}
                       >✎</button>
                     </div>
                   </div>
@@ -334,10 +336,15 @@ export default function PipelineBoard({
                           options={products.map((p): SmartOption => ({ value: p.id, label: p.name }))}
                         />
                       )}
+                      {/* forecast: probabilidade de fechar + data prevista */}
+                      <div className="mt-1 grid grid-cols-2 gap-1">
+                        <input className="input py-1 text-xs" type="number" min={0} max={100} value={editOpp.probability} onChange={(e) => setEditOpp({ ...editOpp, probability: e.target.value })} placeholder="Prob. %" title="Chance de fechar (0–100%). Em branco, o forecast usa a probabilidade implícita do estágio." />
+                        <input className="input py-1 text-xs" type="date" value={editOpp.expected_close} onChange={(e) => setEditOpp({ ...editOpp, expected_close: e.target.value })} title="Data prevista de fechamento (entra no forecast por mês)." />
+                      </div>
                       <div className="mt-2 flex items-center gap-2">
                         <button className="btn-brand py-1 text-[11px]" disabled={pending} onClick={() => start(async () => {
-                          await updateOpportunity(o.id, { title: editOpp.title, value_mrr: Number(editOpp.value_mrr), primary_contact_id: editOpp.contact_id || null, account_id: editOpp.account_id || null, product_id: editOpp.product_id || null });
-                          setOpps((prev) => prev.map((x) => x.id === o.id ? { ...x, title: editOpp.title, value_mrr: Number(editOpp.value_mrr) || 0, contact_id: editOpp.contact_id || null, product_id: editOpp.product_id || null } as any : x));
+                          await updateOpportunity(o.id, { title: editOpp.title, value_mrr: Number(editOpp.value_mrr), primary_contact_id: editOpp.contact_id || null, account_id: editOpp.account_id || null, product_id: editOpp.product_id || null, probability: editOpp.probability === "" ? 0 : Number(editOpp.probability), expected_close: editOpp.expected_close || null });
+                          setOpps((prev) => prev.map((x) => x.id === o.id ? { ...x, title: editOpp.title, value_mrr: Number(editOpp.value_mrr) || 0, contact_id: editOpp.contact_id || null, product_id: editOpp.product_id || null, probability: editOpp.probability === "" ? 0 : Number(editOpp.probability), expected_close: editOpp.expected_close || null } as any : x));
                           setEditOpp(null);
                         })}>Salvar</button>
                         <button className="text-[11px] text-subtle hover:text-ink" onClick={() => setEditOpp(null)}>cancelar</button>

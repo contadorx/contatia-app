@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -32,7 +33,7 @@ export async function seedDefaultStages() {
     { tenant_id, name: "Fechado", position: 5, is_won: true, is_lost: false },
     { tenant_id, name: "Perdido", position: 6, is_won: false, is_lost: true },
   ]);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/pipeline");
   return { ok: true };
 }
@@ -60,7 +61,7 @@ export async function createOpportunity(input: {
     product_id: input.product_id || null,
     status: "open",
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/pipeline");
   return { ok: true };
 }
@@ -68,6 +69,7 @@ export async function createOpportunity(input: {
 // Edita os dados de uma oportunidade (título, valor, contato, empresa).
 export async function updateOpportunity(id: string, patch: {
   title?: string; value_mrr?: number; primary_contact_id?: string | null; account_id?: string | null; product_id?: string | null;
+  probability?: number; expected_close?: string | null;
 }) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
@@ -80,8 +82,10 @@ export async function updateOpportunity(id: string, patch: {
   if (patch.primary_contact_id !== undefined) clean.primary_contact_id = patch.primary_contact_id || null;
   if (patch.account_id !== undefined) clean.account_id = patch.account_id || null;
   if (patch.product_id !== undefined) clean.product_id = patch.product_id || null;
+  if (patch.probability !== undefined) clean.probability = Math.max(0, Math.min(100, Math.round(Number(patch.probability) || 0)));
+  if (patch.expected_close !== undefined) clean.expected_close = patch.expected_close || null;
   const { error } = await supabase.from("opportunities").update(clean).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/pipeline");
   return { ok: true };
 }
@@ -90,7 +94,7 @@ export async function deleteOpportunity(id: string) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const { error } = await supabase.from("opportunities").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/pipeline");
   return { ok: true };
 }
@@ -111,7 +115,7 @@ export async function moveOpportunity(id: string, stageId: string) {
     .from("opportunities")
     .update({ stage_id: stageId, status })
     .eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/pipeline");
   return { ok: true };
 }

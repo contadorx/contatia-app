@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { createClient } from "@/lib/supabase/server";
 
 export async function submitFeedback(score: number, comment: string) {
@@ -16,6 +17,6 @@ export async function submitFeedback(score: number, comment: string) {
     score,
     comment: (comment || "").trim().slice(0, 1000) || null,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   return { ok: true };
 }

@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -25,7 +26,7 @@ export async function verifyContactEmail(contactId: string) {
 
   const custom = { ...((c as any).custom || {}), email_check: { ...result, checked_at: new Date().toISOString() } };
   const { error } = await supabase.from("contacts").update({ custom }).eq("id", contactId);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contatos/${contactId}`);
   return { ok: true, result };
 }
@@ -99,7 +100,7 @@ export async function aplicarEmailContato(contactId: string, email: string) {
   const { data: c } = await supabase.from("contacts").select("custom").eq("id", contactId).maybeSingle();
   const custom = { ...(((c as any)?.custom) || {}), email_check: { ...result, checked_at: new Date().toISOString() } };
   const { error } = await supabase.from("contacts").update({ email: addr, custom }).eq("id", contactId);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contatos/${contactId}`);
   return { ok: true, result };
 }

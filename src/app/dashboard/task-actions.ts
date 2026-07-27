@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { scoreEvent } from "@/lib/scoring";
@@ -25,7 +26,7 @@ export async function completeTask(id: string, contactId?: string) {
     .from("tasks")
     .update({ status: "done", completed_at: new Date().toISOString() })
     .eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   if (tenant_id && contactId) await scoreEvent(supabase, { tenant_id, contact_id: contactId, type: "task_done" });
   revalidatePath("/dashboard");
   return { ok: true };
@@ -34,7 +35,7 @@ export async function completeTask(id: string, contactId?: string) {
 export async function skipTask(id: string) {
   const { supabase } = await ctx();
   const { error } = await supabase.from("tasks").update({ status: "skipped" }).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard");
   return { ok: true };
 }
@@ -47,7 +48,7 @@ export async function snoozeTask(id: string, days: number) {
     .from("tasks")
     .update({ due_date: d.toISOString().slice(0, 10) })
     .eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard");
   return { ok: true };
 }
@@ -339,7 +340,7 @@ export async function completeTasks(ids: string[]) {
     .update({ status: "done", completed_at: new Date().toISOString() })
     .in("id", list)
     .eq("status", "pending");
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   if (tenant_id) {
     for (const t of ((tks as any[]) || [])) {
       if (t.contact_id) await scoreEvent(supabase, { tenant_id, contact_id: t.contact_id, type: "task_done" });

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import SmartSelect from "@/components/SmartSelect";
-import { atividadesReceita, buscarNaBase, enviarParaCadastro, descartarCnpjs, reincluirCnpjs } from "@/app/dashboard/radar/actions";
+import { atividadesReceita, buscarNaBase, enviarParaCadastro, descartarCnpjs, reincluirCnpjs, exportarRadar } from "@/app/dashboard/radar/actions";
 
 const UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
 
@@ -44,6 +44,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   const [buscando, startBusca] = useTransition();
   const [enviando, startEnvio] = useTransition();
   const [descartando, startDescarte] = useTransition();
+  const [exportando, startExport] = useTransition();
   // como salvar do Radar: "empresa" (padrão, sem contato-fantasma) ou "empresa_contato".
   const [modoSalvar, setModoSalvar] = useState<"empresa" | "empresa_contato">("empresa");
 
@@ -139,7 +140,9 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       if (modoSalvar === "empresa_contato") partes.push(`${r.contatosCriados} contato(s) e ${r.empresasCriadas} empresa(s) criadas`);
       else partes.push(`${r.empresasCriadas} empresa(s) criadas`);
       if (r.pulados) partes.push(`${r.pulados} já existia(m)`);
-      setMsg(partes.join(" · ") + (modoSalvar === "empresa_contato" ? ". Veja em Empresas e Contatos." : ". Veja em Empresas."));
+      let sufixo = modoSalvar === "empresa_contato" ? ". Veja em Empresas e Contatos." : ". Veja em Empresas.";
+      if (r.limiteAtingido) sufixo += " (parei ao atingir o limite de contatos do seu plano.)";
+      setMsg(partes.join(" · ") + sufixo);
       setSel(new Set());
     });
   }
@@ -171,6 +174,57 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   }
 
   const ocupado = buscando || enviando;
+
+  // ---------- EXPORTAR CSV ----------
+  // Exporta as selecionadas (se houver seleção) ou todas as carregadas. Usa BOM +
+  // separador ";" — o padrão do Excel em português, que abre acentos e colunas certos.
+  function csvCell(v: any) {
+    const s = v == null ? "" : String(v);
+    return /[";,\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+  function baixarCsv(linhas: any[]) {
+    if (!linhas.length) return;
+    const headers = ["CNPJ", "Razão social", "Nome fantasia", "CNAE", "Atividade", "UF", "Município", "Bairro", "CEP", "E-mail", "Telefone", "Telefone 2", "Porte", "Tipo"];
+    const corpo = linhas.map((r) => [
+      r.cnpj, r.razao_social, r.nome_fantasia, r.cnae, r.cnae_descricao, r.uf, r.municipio,
+      r.bairro, r.cep, r.email, r.telefone, r.telefone2, r.porte,
+      r.matriz === true ? "Matriz" : r.matriz === false ? "Filial" : "",
+    ].map(csvCell).join(";"));
+    const csv = "﻿" + [headers.join(";"), ...corpo].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const hoje = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `radar-contatia-${hoje}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+  function exportarCsv() {
+    const linhas = (sel.size > 0 ? resultados.filter((r) => sel.has(r.cnpj)) : resultados) as any[];
+    if (!linhas.length) return;
+    baixarCsv(linhas);
+    setMsg(`${linhas.length} empresa(s) exportadas para CSV.`);
+  }
+  // Exporta TODAS as empresas da busca (não só as carregadas) — puxa várias páginas
+  // da base no servidor, com teto de 2.000 por exportação.
+  function exportarTodos() {
+    setErro(null);
+    setMsg(null);
+    startExport(async () => {
+      const r: any = await exportarRadar(montarInput());
+      if (r.error) { setErro(r.error); return; }
+      const linhas = (r.rows || []) as any[];
+      if (!linhas.length) { setMsg("Nada para exportar com esses filtros."); return; }
+      baixarCsv(linhas);
+      const totalTxt = typeof r.total === "number" ? ` de ${r.total.toLocaleString("pt-BR")}` : "";
+      setMsg(r.capped
+        ? `Exportadas ${linhas.length} empresas (teto de 2.000${totalTxt}). Refine os filtros para pegar o restante.`
+        : `${linhas.length} empresa(s)${totalTxt} exportadas para CSV.`);
+    });
+  }
 
   return (
     <div>
@@ -286,6 +340,27 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
             {casadas.length > 0 && (
               <p className="text-xs text-subtle">· atividades: {casadas.slice(0, 4).map((a) => a.descricao).join(" · ")}{casadas.length > 4 ? ` (+${casadas.length - 4})` : ""}</p>
             )}
+            {resultados.length > 0 && (
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  className="btn-outline py-1.5 text-xs"
+                  onClick={exportarCsv}
+                  title="Baixa um CSV (abre no Excel/Sheets) com as empresas — as selecionadas, ou todas as carregadas na tela."
+                >
+                  ⬇ Exportar {sel.size > 0 ? `selecionadas (${sel.size})` : `carregadas (${resultados.length})`}
+                </button>
+                {sel.size === 0 && (temMais || total === null) && (
+                  <button
+                    className="btn-brand py-1.5 text-xs"
+                    onClick={exportarTodos}
+                    disabled={exportando}
+                    title="Puxa todas as empresas da busca (não só as carregadas) e baixa o CSV. Teto de 2.000 por exportação."
+                  >
+                    {exportando ? "Exportando…" : "⬇ Exportar todos"}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* barra de ação em lote */}
@@ -300,8 +375,8 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
                 </button>
                 <button type="button" onClick={() => setModoSalvar("empresa_contato")}
                   className={`px-2.5 py-1 font-medium ${modoSalvar === "empresa_contato" ? "bg-brand text-white" : "bg-white text-brand-dark hover:bg-brand-soft"}`}
-                  title="Cria a empresa e também um contato (leva o nome da empresa).">
-                  Empresa + contato
+                  title="Cria a empresa e um contato POR SÓCIO (quando a Receita identifica os sócios). Sem sócio, cria um contato com o nome da empresa.">
+                  Empresa + sócios
                 </button>
               </div>
               <button className="text-xs text-subtle hover:text-danger" onClick={() => descartar(Array.from(sel))} disabled={descartando}>

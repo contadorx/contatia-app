@@ -15,7 +15,7 @@ export default async function Pipeline({ searchParams }: { searchParams: { opp?:
 
   let oppsQuery = supabase
     .from("opportunities")
-    .select("id, title, value_mrr, stage_id, status, primary_contact_id, account_id, product_id, contacts:primary_contact_id(name, score, last_activity_at)")
+    .select("id, title, value_mrr, stage_id, status, primary_contact_id, account_id, product_id, probability, expected_close, contacts:primary_contact_id(name, score, last_activity_at)")
     .order("created_at", { ascending: false });
   if (!gerente) oppsQuery = oppsQuery.eq("owner_id", user?.id ?? "");
 
@@ -72,6 +72,8 @@ export default async function Pipeline({ searchParams }: { searchParams: { opp?:
       status: o.status,
       account_id: o.account_id ?? null,
       product_id: o.product_id ?? null,
+      probability: Number(o.probability) || 0,
+      expected_close: o.expected_close ?? null,
       contact_id: cid,
       contact_name: o.contacts?.name ?? null,
       contact_score: o.contacts?.score ?? 0,

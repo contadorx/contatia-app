@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -29,7 +30,7 @@ export async function createTag(name: string, color?: string) {
     .single();
   if (error) {
     if (error.code === "23505") return { error: "Já existe uma tag com esse nome." };
-    return { error: error.message };
+    return { error: msgErro(error) };
   }
   revalidatePath("/dashboard/contatos");
   return { ok: true, tag: data };
@@ -61,7 +62,7 @@ export async function addTagToContact(contactId: string, tagId: string) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const { error } = await supabase.from("contact_tags").insert({ tenant_id, contact_id: contactId, tag_id: tagId });
-  if (error && error.code !== "23505") return { error: error.message };
+  if (error && error.code !== "23505") return { error: msgErro(error) };
   if (!error) await fireTagAutomation(supabase, tenant_id, contactId, tagId);
   revalidatePath("/dashboard/contatos");
   return { ok: true };
@@ -70,7 +71,7 @@ export async function addTagToContact(contactId: string, tagId: string) {
 export async function removeTagFromContact(contactId: string, tagId: string) {
   const { supabase } = await ctx();
   const { error } = await supabase.from("contact_tags").delete().eq("contact_id", contactId).eq("tag_id", tagId);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/contatos");
   return { ok: true };
 }
@@ -101,7 +102,7 @@ export async function addTagToAccount(accountId: string, tagId: string) {
     { tenant_id, account_id: accountId, tag_id: tagId },
     { onConflict: "account_id,tag_id", ignoreDuplicates: true }
   );
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contas/${accountId}`);
   revalidatePath("/dashboard/contas");
   return { ok: true };
@@ -110,7 +111,7 @@ export async function addTagToAccount(accountId: string, tagId: string) {
 export async function removeTagFromAccount(accountId: string, tagId: string) {
   const { supabase } = await ctx();
   const { error } = await supabase.from("account_tags").delete().eq("account_id", accountId).eq("tag_id", tagId);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contas/${accountId}`);
   revalidatePath("/dashboard/contas");
   return { ok: true };

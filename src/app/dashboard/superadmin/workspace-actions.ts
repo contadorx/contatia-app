@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
@@ -38,7 +39,7 @@ export async function deleteWorkspace(tenantId: string) {
   } catch { /* não bloqueia a exclusão */ }
 
   const { error } = await admin.from("tenants").delete().eq("id", tenantId);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   revalidatePath("/dashboard/superadmin");
   return { ok: true };

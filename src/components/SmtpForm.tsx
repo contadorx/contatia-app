@@ -27,6 +27,56 @@ const PRESETS: { id: string; label: string; host: string; port: number; secure: 
 
 const PRESET_OPTS: SmartOption[] = PRESETS.map((p) => ({ value: p.id, label: p.label }));
 
+// Guias de "como conseguir a senha" — o maior atrito do onboarding. Passo a passo
+// por provedor + link direto. A chave vem do domínio do e-mail ou do preset escolhido.
+const GUIDES: Record<string, { label: string; link: string; steps: string[] }> = {
+  gmail: {
+    label: "Gmail / Google Workspace",
+    link: "https://myaccount.google.com/apppasswords",
+    steps: [
+      "Ative a verificação em 2 etapas na sua Conta Google (Segurança).",
+      "Abra a página de Senhas de app e crie uma nova (nomeie “Contatia”).",
+      "Copie os 16 caracteres e cole aqui — sem espaços.",
+      "Dica: se aparecer o botão “Conectar Gmail” nesta tela, use-o — conecta sem senha.",
+    ],
+  },
+  outlook: {
+    label: "Outlook / Microsoft 365",
+    link: "https://account.microsoft.com/security",
+    steps: [
+      "Ative a verificação em 2 etapas na sua conta Microsoft.",
+      "Em Segurança → Opções avançadas → Senhas de aplicativo, crie uma nova.",
+      "Cole a senha gerada aqui (usuário = seu e-mail completo).",
+      "Se der erro de autenticação, peça ao admin para habilitar o SMTP AUTH.",
+    ],
+  },
+  brevo: {
+    label: "Brevo",
+    link: "https://app.brevo.com/settings/keys/smtp",
+    steps: [
+      "No Brevo, abra SMTP & API → aba SMTP.",
+      "Clique em “Generate a new SMTP key” e copie a chave.",
+      "Usuário = seu e-mail de login do Brevo; Senha = a chave gerada.",
+      "O remetente precisa ser de um domínio verificado no Brevo.",
+    ],
+  },
+  hostgator: {
+    label: "HostGator / cPanel",
+    link: "https://www.hostgator.com.br/",
+    steps: [
+      "No cPanel → Contas de E-mail, use a senha da própria caixa (ou redefina-a).",
+      "Host: mail.seudominio.com.br · Porta 465 (SSL) ou 587.",
+      "Reputação/limite são baixos — para cadência em volume, prefira o Brevo.",
+    ],
+  },
+};
+function guideForDomain(domain: string): string | null {
+  if (/gmail|googlemail|google\./.test(domain)) return "gmail";
+  if (/outlook|hotmail|live\.|msn|office365|microsoft/.test(domain)) return "outlook";
+  return null;
+}
+const PRESET_TO_GUIDE: Record<string, string> = { gmail_smtp: "gmail", outlook: "outlook", brevo: "brevo", hostgator: "hostgator" };
+
 export default function SmtpForm({ editAccount }: { editAccount?: EditAccount }) {
   const isEdit = !!editAccount;
   const [open, setOpen] = useState(false);
@@ -48,6 +98,8 @@ export default function SmtpForm({ editAccount }: { editAccount?: EditAccount })
   const [test, setTest] = useState<{ ok?: boolean; error?: string; hint?: string } | null>(null);
   const [detected, setDetected] = useState<Detected | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(isEdit); // ao editar, mostra os valores reais
+  const [manualGuide, setManualGuide] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [pending, start] = useTransition();
   const [detecting, startDetect] = useTransition();
 
@@ -82,6 +134,7 @@ export default function SmtpForm({ editAccount }: { editAccount?: EditAccount })
     if (!p) { setPresetHint(null); return; }
     setF((s) => ({ ...s, smtp_host: p.host, smtp_port: p.port, smtp_secure: p.secure }));
     setPresetHint(p.hint);
+    setManualGuide(PRESET_TO_GUIDE[id] || null);
     setDetected(null);
     setTest(null);
   }
@@ -161,6 +214,32 @@ export default function SmtpForm({ editAccount }: { editAccount?: EditAccount })
           {presetHint && !showAdvanced && <p className="mt-1 text-xs text-subtle">{presetHint}</p>}
         </div>
       </div>
+
+      {/* GUIA "como conseguir a senha" — o maior atrito do onboarding */}
+      {(() => {
+        const domain = f.from_email.split("@")[1]?.toLowerCase() || "";
+        const key = manualGuide || guideForDomain(domain);
+        if (!key) return null;
+        const g = GUIDES[key];
+        return (
+          <div className="mt-3 rounded-xl border border-brand/25 bg-brand-soft/40 p-3 text-xs">
+            <button type="button" className="flex w-full items-center justify-between font-semibold text-brand-dark" onClick={() => setGuideOpen((o) => !o)}>
+              <span>Não sabe a senha? Veja como conseguir — {g.label}</span>
+              <span>{guideOpen ? "▴" : "▾"}</span>
+            </button>
+            {guideOpen && (
+              <div className="mt-2">
+                <ol className="list-decimal space-y-1 pl-4 text-subtle">
+                  {g.steps.map((s, i) => <li key={i}>{s}</li>)}
+                </ol>
+                <a href={g.link} target="_blank" rel="noreferrer" className="mt-2 inline-block font-medium text-brand-dark underline">
+                  Abrir a página do provedor ↗
+                </a>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Ajustes manuais — só aparecem para provedor desconhecido, ao editar, ou se você abrir. */}
       {showAdvanced && (
@@ -246,6 +325,12 @@ export default function SmtpForm({ editAccount }: { editAccount?: EditAccount })
           </button>
         )}
       </div>
+
+      {!isEdit && (
+        <p className="mt-3 text-[11px] text-subtle">
+          Sem e-mail agora? Você pode começar pela prospecção (Radar) e pelo WhatsApp — conectar a caixa só é preciso para <b>disparar e-mails</b>.
+        </p>
+      )}
     </div>
   );
 }

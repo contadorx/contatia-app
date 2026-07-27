@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
@@ -26,7 +27,7 @@ export async function saveBusinessMessage(
   if ("body" in patch) upd.body = patch.body;
   if ("trigger_days" in patch) upd.trigger_days = Math.trunc(Number(patch.trigger_days) || 0); // negativo = antes de vencer
   const { error } = await admin.from("business_messages").update(upd).eq("key", key);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin/comunicacao");
   return { ok: true };
 }

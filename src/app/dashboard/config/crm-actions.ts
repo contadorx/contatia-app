@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import crypto from "crypto";
@@ -32,7 +33,7 @@ export async function saveWebhookConnection(formData: FormData) {
     is_active: true,
   } as any, { onConflict: "tenant_id,provider" });
 
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true, secret };
 }
@@ -63,7 +64,7 @@ export async function savePipedriveConnection(formData: FormData) {
     is_active: true,
   } as any, { onConflict: "tenant_id,provider" });
 
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
@@ -74,7 +75,7 @@ export async function disconnectCrm(provider: string) {
   if (role !== "owner") return { error: "Apenas o dono do workspace." };
 
   const { error } = await supabase.from("crm_connections").delete().eq("tenant_id", tenant_id).eq("provider", provider);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
@@ -134,7 +135,7 @@ export async function saveHubspotConnection(formData: FormData) {
     tenant_id, provider: "hubspot", api_token, pipeline_id, stage_id, push_on, pull_enabled, is_active: true,
   } as any, { onConflict: "tenant_id,provider" });
 
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
@@ -155,7 +156,7 @@ export async function saveRdstationConnection(formData: FormData) {
     tenant_id, provider: "rdstation", api_token, stage_id, push_on, pull_enabled, is_active: true,
   } as any, { onConflict: "tenant_id,provider" });
 
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }

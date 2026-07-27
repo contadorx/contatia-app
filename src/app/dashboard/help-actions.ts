@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { createClient } from "@/lib/supabase/server";
 
 // Busca artigos publicados por termo (título, categoria, keywords, corpo).
@@ -21,6 +22,6 @@ export async function searchKb(query: string) {
   }
 
   const { data, error } = await q;
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   return { ok: true, articles: (data as any[]) || [] };
 }

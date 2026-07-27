@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { canCreate, mensagemLimite } from "@/lib/plan";
@@ -44,7 +45,7 @@ export async function createAccount(input: {
     phone: input.phone?.trim() || null,
     website: input.website?.trim() || null,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/contas");
   return { ok: true };
 }
@@ -53,7 +54,7 @@ export async function setContactAccount(contactId: string, accountId: string | n
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const { error } = await supabase.from("contacts").update({ account_id: accountId }).eq("id", contactId);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/contas");
   return { ok: true };
 }
@@ -69,7 +70,7 @@ export async function updateAccount(id: string, patch: {
   }
   if (clean.name === null) return { error: "O nome não pode ficar vazio." };
   const { error } = await supabase.from("accounts").update(clean).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contas/${id}`);
   revalidatePath("/dashboard/contas");
   return { ok: true };
@@ -138,7 +139,7 @@ export async function enrichAccount(id: string) {
   patch.custom = custom;
 
   const { error } = await supabase.from("accounts").update(patch as any).eq("id", id).eq("tenant_id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contas/${id}`);
   revalidatePath("/dashboard/contas");
   return { ok: true, fontes: r.fontes };
@@ -173,7 +174,7 @@ export async function createContactForAccount(
     origin: "Empresa",
     status: "novo",
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contas/${accountId}`);
   revalidatePath("/dashboard/contatos");
   return { ok: true };
@@ -185,7 +186,7 @@ export async function deleteAccountCompany(id: string) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const { error } = await supabase.from("accounts").delete().eq("id", id).eq("tenant_id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/contas");
   revalidatePath("/dashboard/contatos");
   return { ok: true };
@@ -205,7 +206,7 @@ export async function bulkTagAccounts(accountIds: string[], tags: string | strin
   if (!ids.length || !tagIds.length) return { error: "Selecione empresas e ao menos uma tag." };
   const rows = ids.flatMap((account_id) => tagIds.map((tag_id) => ({ tenant_id, account_id, tag_id })));
   const { error } = await supabase.from("account_tags").upsert(rows, { onConflict: "account_id,tag_id", ignoreDuplicates: true });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/contas");
   return { ok: true, count: ids.length, tags: tagIds.length };
 }
@@ -217,7 +218,7 @@ export async function bulkAssignAccounts(accountIds: string[], userId: string | 
   const ids = (accountIds || []).filter(Boolean);
   if (!ids.length) return { error: "Nenhuma empresa selecionada." };
   const { error } = await supabase.from("accounts").update({ owner_id: userId }).eq("tenant_id", tenant_id).in("id", ids);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/contas");
   revalidatePath("/dashboard/equipe");
   return { ok: true, count: ids.length };
@@ -230,7 +231,7 @@ export async function bulkDeleteAccounts(accountIds: string[]) {
   const ids = (accountIds || []).filter(Boolean);
   if (!ids.length) return { error: "Nenhuma empresa selecionada." };
   const { error } = await supabase.from("accounts").delete().eq("tenant_id", tenant_id).in("id", ids);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/contas");
   revalidatePath("/dashboard/contatos");
   return { ok: true, count: ids.length };
@@ -248,7 +249,7 @@ export async function createTagAccounts(name: string, color?: string) {
     .single();
   if (error) {
     if (error.code === "23505") return { error: "Já existe uma tag com esse nome." };
-    return { error: error.message };
+    return { error: msgErro(error) };
   }
   revalidatePath("/dashboard/contas");
   return { ok: true, tag: data };
@@ -280,7 +281,7 @@ export async function criarContatoSocio(accountId: string, nomeSocio: string) {
     origin: "Sócio",
     status: "novo",
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contas/${accountId}`);
   revalidatePath("/dashboard/contatos");
   return { ok: true };
@@ -359,7 +360,7 @@ export async function createOpportunityForAccount(
     status: "open",
     value_mrr: Number(input.value_mrr) || 0,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contas/${accountId}`);
   revalidatePath("/dashboard/pipeline");
   return { ok: true };

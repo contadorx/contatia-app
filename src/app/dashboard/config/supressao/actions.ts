@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -21,7 +22,7 @@ export async function addSuppression(email: string, reason = "manual") {
     { tenant_id, email: e, reason },
     { onConflict: "tenant_id,email", ignoreDuplicates: true }
   );
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config/supressao");
   return { ok: true };
 }
@@ -29,7 +30,7 @@ export async function addSuppression(email: string, reason = "manual") {
 export async function removeSuppression(id: string) {
   const { supabase } = await ctx();
   const { error } = await supabase.from("email_suppressions").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config/supressao");
   return { ok: true };
 }

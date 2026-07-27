@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -64,7 +65,7 @@ export async function enrichBatch(batchId: string) {
     .update({ items: enriquecidos } as any)
     .eq("id", batchId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   revalidatePath(`/dashboard/contatos/lote/${batchId}`);
   const achados = enriquecidos.filter((i) => i.cnpj).length;

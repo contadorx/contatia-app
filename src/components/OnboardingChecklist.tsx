@@ -17,23 +17,19 @@ export default async function OnboardingChecklist() {
   // dispensada pelo usuário → não aparece mais (em nenhum dispositivo)
   if ((me as any)?.onboarding_hidden) return null;
 
+  // Ordem por VALOR primeiro: o usuário vê resultado no Radar (zero config) antes de
+  // topar o muro de conectar e-mail — que fica por último e reenquadrado como opcional.
   const steps = [
     {
-      done: (email.count ?? 0) > 0,
-      label: "Conecte um e-mail para enviar",
-      hint: "Só e-mail e senha — detectamos o provedor pra você.",
-      href: "/dashboard/config?tab=canais",
-    },
-    {
       done: (contacts.count ?? 0) > 0,
-      label: "Traga contatos",
-      hint: "Importe um CSV ou garimpe empresas no Radar.",
-      href: "/dashboard/contatos",
+      label: "Traga seus primeiros contatos",
+      hint: "Garimpe empresas na base da Receita (Radar) — sem configurar nada — ou importe um CSV.",
+      href: "/dashboard/radar",
     },
     {
       done: (sequences.count ?? 0) > 0,
       label: "Crie uma cadência",
-      hint: "Monte manualmente ou gere com IA em segundos.",
+      hint: "Use um modelo pronto, monte do zero ou gere com IA em segundos.",
       href: "/dashboard/cadencias",
     },
     {
@@ -41,6 +37,12 @@ export default async function OnboardingChecklist() {
       label: "Inscreva contatos na cadência",
       hint: "Selecione vários e inscreva em lote — os toques caem aqui no Hoje.",
       href: "/dashboard/contatos",
+    },
+    {
+      done: (email.count ?? 0) > 0,
+      label: "Conecte um e-mail para enviar",
+      hint: "Só pra disparar e-mails automáticos — o WhatsApp assistido já funciona sem isso.",
+      href: "/dashboard/config?tab=canais",
     },
   ];
 

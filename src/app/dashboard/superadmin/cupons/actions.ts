@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -44,7 +45,7 @@ export async function toggleCoupon(id: string, active: boolean) {
   const { supabase, ok } = await assertSuper();
   if (!ok) return { error: "Apenas superadmin gerencia cupons." };
   const { error } = await supabase.from("platform_coupons").update({ is_active: active }).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin/cupons");
   return { ok: true };
 }

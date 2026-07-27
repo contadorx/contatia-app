@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
@@ -25,7 +26,7 @@ export async function saveAssistant(
     if (k in patch) upd[k] = (patch as any)[k];
   });
   const { error } = await admin.from("ai_assistants").update(upd).eq("kind", kind);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin/ia");
   return { ok: true };
 }
@@ -47,7 +48,7 @@ export async function setConversation(id: string, patch: { handled?: boolean; st
   const admin = createAdminClient();
   if (!admin) return { error: "Indisponível." };
   const { error } = await admin.from("ai_conversations").update(patch).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin/ia");
   return { ok: true };
 }

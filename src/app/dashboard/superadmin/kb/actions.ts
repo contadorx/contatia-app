@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -25,10 +26,10 @@ export async function saveArticle(input: { id?: string; title: string; category:
   };
   if (input.id) {
     const { error } = await supabase.from("kb_articles").update(patch).eq("id", input.id);
-    if (error) return { error: error.message };
+    if (error) return { error: msgErro(error) };
   } else {
     const { error } = await supabase.from("kb_articles").insert(patch);
-    if (error) return { error: error.message };
+    if (error) return { error: msgErro(error) };
   }
   revalidatePath("/dashboard/superadmin/kb");
   return { ok: true };
@@ -38,7 +39,7 @@ export async function deleteArticle(id: string) {
   const { supabase, ok } = await guard();
   if (!ok) return { error: "Apenas administradores da plataforma." };
   const { error } = await supabase.from("kb_articles").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin/kb");
   return { ok: true };
 }

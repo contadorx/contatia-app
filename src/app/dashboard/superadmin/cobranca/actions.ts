@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -29,7 +30,7 @@ export async function setTenantPlan(input: {
   if (input.asaas_customer_id !== undefined) patch.asaas_customer_id = input.asaas_customer_id || null;
   if (input.asaas_subscription_id !== undefined) patch.asaas_subscription_id = input.asaas_subscription_id || null;
   const { error } = await supabase.from("tenants").update(patch).eq("id", input.tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin/cobranca");
   return { ok: true };
 }

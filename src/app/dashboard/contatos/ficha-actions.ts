@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { scoreEvent } from "@/lib/scoring";
@@ -62,7 +63,7 @@ export async function createOpportunityForContact(contactId: string, input: { ti
     status: "open",
     value_mrr: Number(input.value_mrr) || 0,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   revalidatePath(`/dashboard/contatos/${contactId}`);
   revalidatePath("/dashboard/pipeline");

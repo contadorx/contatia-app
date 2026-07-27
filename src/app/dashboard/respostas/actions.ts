@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -25,10 +26,32 @@ export async function createContactFromThread(input: { phone: string; name?: str
     .insert({ tenant_id, assigned_to: user_id, name, phone, origin: "WhatsApp", status: "novo" })
     .select("id")
     .single();
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   // vincula as mensagens desse número ao novo contato
   await supabase.from("whatsapp_messages").update({ contact_id: (created as any).id }).eq("tenant_id", tenant_id).eq("phone", phone).is("contact_id", null);
+
+  revalidatePath("/dashboard/respostas");
+  return { ok: true, contactId: (created as any).id };
+}
+
+// Cadastra um contato a partir de uma conversa de E-MAIL (remetente desconhecido) e
+// vincula as mensagens — habilita responder por e-mail em 1 clique, sem passo à parte.
+export async function createContactFromEmailThread(input: { email: string; name?: string }) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const email = (input.email || "").trim().toLowerCase();
+  if (!email || !email.includes("@")) return { error: "Conversa sem e-mail válido." };
+  const name = (input.name || "").trim() || email.split("@")[0];
+
+  const { data: created, error } = await supabase
+    .from("contacts")
+    .insert({ tenant_id, assigned_to: user_id, name, email, origin: "E-mail", status: "novo" })
+    .select("id")
+    .single();
+  if (error) return { error: msgErro(error) };
+
+  await supabase.from("email_messages").update({ contact_id: (created as any).id }).eq("tenant_id", tenant_id).eq("email", email).is("contact_id", null);
 
   revalidatePath("/dashboard/respostas");
   return { ok: true, contactId: (created as any).id };
@@ -57,7 +80,7 @@ export async function deleteThread(input: { phone: string; contactId?: string | 
   if (input.contactId) q = q.eq("contact_id", input.contactId);
   else q = q.eq("phone", (input.phone || "").trim()).is("contact_id", null);
   const { error } = await q;
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/respostas");
   return { ok: true };
 }
@@ -75,11 +98,11 @@ export async function deleteThreadsBulk(threads: { phone: string; contactId?: st
 
   if (contactIds.length) {
     const { error } = await supabase.from("whatsapp_messages").delete().eq("tenant_id", tenant_id).in("contact_id", contactIds);
-    if (error) return { error: error.message };
+    if (error) return { error: msgErro(error) };
   }
   if (phones.length) {
     const { error } = await supabase.from("whatsapp_messages").delete().eq("tenant_id", tenant_id).in("phone", phones).is("contact_id", null);
-    if (error) return { error: error.message };
+    if (error) return { error: msgErro(error) };
   }
   revalidatePath("/dashboard/respostas");
   return { ok: true, count: list.length };

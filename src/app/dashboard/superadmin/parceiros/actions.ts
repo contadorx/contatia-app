@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -41,7 +42,7 @@ export async function createPartner(input: { name: string; email?: string; ref_c
     commission_rate: rate,
     pix_key: input.pix_key?.trim() || null,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin/parceiros");
   return { ok: true };
 }
@@ -50,7 +51,7 @@ export async function togglePartner(id: string, active: boolean) {
   const { supabase, ok } = await guard();
   if (!ok) return { error: "Apenas o dono da plataforma." };
   const { error } = await supabase.from("platform_partners").update({ is_active: active }).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin/parceiros");
   return { ok: true };
 }
@@ -66,7 +67,7 @@ export async function recordReferral(input: { partner_id: string; tenant_id?: st
     mrr: Number(input.mrr) || 0,
     status: input.status || "active",
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   // se vinculou a um tenant, marca a atribuição
   if (input.tenant_id) await supabase.from("tenants").update({ referred_by: input.partner_id }).eq("id", input.tenant_id);
   revalidatePath("/dashboard/superadmin/parceiros");
@@ -77,7 +78,7 @@ export async function setReferralStatus(id: string, status: string) {
   const { supabase, ok } = await guard();
   if (!ok) return { error: "Apenas o dono da plataforma." };
   const { error } = await supabase.from("platform_referrals").update({ status }).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin/parceiros");
   return { ok: true };
 }

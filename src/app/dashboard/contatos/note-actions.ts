@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -23,7 +24,7 @@ export async function addNote(contactId: string, text: string) {
     type: "note",
     meta: { text: text.trim() },
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   await supabase.from("contacts").update({ last_activity_at: new Date().toISOString() }).eq("id", contactId);
   revalidatePath(`/dashboard/contatos/${contactId}`);
   return { ok: true };

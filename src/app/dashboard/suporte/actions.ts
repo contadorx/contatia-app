@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -23,7 +24,7 @@ export async function openTicket(input: { subject: string; body: string; priorit
     .insert({ tenant_id, opened_by: user_id, subject: input.subject.trim(), priority: input.priority || "normal", status: "open" })
     .select("id")
     .single();
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   await supabase.from("support_messages").insert({ ticket_id: (ticket as any).id, author_id: user_id, from_staff: false, body: input.body.trim() });
   revalidatePath("/dashboard/suporte");
@@ -40,7 +41,7 @@ export async function sendTicketMessage(ticketId: string, body: string) {
     from_staff: is_superadmin,
     body: body.trim(),
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   // atualiza carimbo + status: cliente responde → volta pra "open"; staff responde → "pending"
   await supabase.from("support_tickets").update({ last_message_at: new Date().toISOString(), status: is_superadmin ? "pending" : "open" }).eq("id", ticketId);
   revalidatePath("/dashboard/suporte");
@@ -51,7 +52,7 @@ export async function sendTicketMessage(ticketId: string, body: string) {
 export async function setTicketStatus(ticketId: string, status: string) {
   const { supabase } = await ctx();
   const { error } = await supabase.from("support_tickets").update({ status }).eq("id", ticketId);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/suporte");
   revalidatePath("/dashboard/superadmin/suporte");
   return { ok: true };

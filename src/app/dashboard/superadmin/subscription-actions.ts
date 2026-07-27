@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -10,7 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 export async function getSubscription(tenantId: string) {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("superadmin_get_subscription", { p_tenant: tenantId });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   const row = Array.isArray(data) ? data[0] : data;
   return { data: row };
 }
@@ -43,7 +44,7 @@ export async function saveSubscription(tenantId: string, fd: FormData) {
     p_asaas_subscription: txt("asaas_subscription"),
   });
 
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin");
   return { ok: true };
 }

@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -11,7 +12,7 @@ export async function startImpersonation(tenantId: string) {
   if (!(prof as any)?.is_superadmin) return { error: "Apenas superadmin." };
 
   const { error } = await supabase.rpc("impersonate_start", { p_tenant: tenantId });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   revalidatePath("/dashboard", "layout");
   redirect("/dashboard");

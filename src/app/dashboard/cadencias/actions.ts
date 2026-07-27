@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { canCreate, mensagemLimite } from "@/lib/plan";
 
 import { revalidatePath } from "next/cache";
@@ -68,7 +69,7 @@ export async function createSequence(input: {
     })
     .select()
     .single();
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   const steps = input.steps.map((s, i) => ({
     sequence_id: seq.id,
@@ -81,7 +82,7 @@ export async function createSequence(input: {
     body_template: s.body || null,
   }));
   const { error: e2 } = await supabase.from("sequence_steps").insert(steps);
-  if (e2) return { error: e2.message };
+  if (e2) return { error: msgErro(e2) };
 
   revalidatePath("/dashboard/cadencias");
   return { ok: true };
@@ -134,7 +135,7 @@ export async function updateSequence(id: string, input: { name: string; audience
     })
     .eq("id", id)
     .eq("tenant_id", tenant_id);
-  if (e1) return { error: e1.message };
+  if (e1) return { error: msgErro(e1) };
 
   // M2: delete + insert dos passos numa ÚNICA transação (RPC) — se algo falhar, os
   // passos antigos NÃO se perdem (antes o delete commitava antes do insert).
@@ -151,7 +152,7 @@ export async function updateSequence(id: string, input: { name: string; audience
     p_tenant: tenant_id,
     p_steps: stepsJson,
   });
-  if (e2) return { error: e2.message };
+  if (e2) return { error: msgErro(e2) };
 
   revalidatePath("/dashboard/cadencias");
   return { ok: true };
@@ -221,7 +222,7 @@ export async function enrollContact(contactId: string, sequenceId: string) {
     .insert({ tenant_id, contact_id: contactId, sequence_id: sequenceId, assigned_to: assigned, status: "active" })
     .select()
     .single();
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   const today = new Date();
   let offset = 0;
@@ -256,7 +257,7 @@ export async function enrollContact(contactId: string, sequenceId: string) {
     return { error: "O contato não tem os dados necessários para os passos desta cadência.", missingData: true };
   }
   const { error: e2 } = await supabase.from("tasks").insert(tasks);
-  if (e2) return { error: e2.message };
+  if (e2) return { error: msgErro(e2) };
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/contatos");
@@ -385,7 +386,7 @@ export async function saveAiContext(context: Record<string, unknown>) {
   const tenant_id = profile?.tenant_id as string | undefined;
   if (!tenant_id) return { error: "Sem workspace." };
   const { error } = await supabase.from("tenants").update({ ai_context: context }).eq("id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   return { ok: true };
 }
 
@@ -447,7 +448,7 @@ export async function saveAsTemplate(sequenceId: string, description?: string) {
     is_global: false,
     created_by: user_id,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/cadencias");
   return { ok: true };
 }
@@ -493,7 +494,7 @@ export async function deleteSequence(id: string, force = false) {
   // (e as tasks pendentes deles) são removidos em cascata pelo banco (FK on delete cascade),
   // ou seja, esses contatos saem da cadência e da fila de toques automaticamente.
   const { error } = await supabase.from("sequences").delete().eq("id", id).eq("tenant_id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/cadencias");
   revalidatePath("/dashboard");
   return { ok: true, removed: ativos };

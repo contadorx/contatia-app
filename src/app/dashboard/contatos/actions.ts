@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { canCreate, mensagemLimite } from "@/lib/plan";
 import { dominioDe } from "@/lib/emailFinder";
 
@@ -150,7 +151,7 @@ export async function addContact(formData: FormData) {
     .insert({ ...payload, account_id })
     .select("id")
     .single();
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/contas");
   return { ok: true, id: (inserted as any)?.id as string | undefined };
@@ -298,7 +299,7 @@ export async function updateContact(id: string, patch: {
   }
 
   const { error } = await supabase.from("contacts").update(clean).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contatos/${id}`);
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/contas");
@@ -326,7 +327,7 @@ export async function saveContactExtra(id: string, input: { linkedin?: string; r
     else delete custom.rapport;
   }
   const { error } = await supabase.from("contacts").update({ custom } as any).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contatos/${id}`);
   return { ok: true };
 }
@@ -370,7 +371,7 @@ export async function enrichContact(id: string) {
   if (!(c as any).cnpj) patch.cnpj = cnpj;
 
   const { error } = await supabase.from("contacts").update(patch as any).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   // propaga para a empresa também
   const accId = (c as any).account_id;
@@ -437,7 +438,7 @@ export async function addSocioContact(sourceContactId: string, socioName: string
     // no site) — e o que for achado cai sozinho na fila de verificação.
     web_capture: dominioSocio ? "queued" : null,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contatos/${sourceContactId}`);
   revalidatePath("/dashboard/contatos");
   return { ok: true };
@@ -448,7 +449,7 @@ export async function deleteContact(id: string) {
   const { supabase, tenant_id } = await tenantId();
   if (!tenant_id) return { error: "Sem workspace." };
   const { error } = await supabase.from("contacts").delete().eq("id", id).eq("tenant_id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/contas");
   return { ok: true };
@@ -461,7 +462,7 @@ export async function bulkDeleteContacts(ids: string[]) {
   const clean = (ids || []).filter(Boolean);
   if (!clean.length) return { error: "Nenhum contato selecionado." };
   const { error } = await supabase.from("contacts").delete().eq("tenant_id", tenant_id).in("id", clean);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/contatos");
   return { ok: true, count: clean.length };
 }

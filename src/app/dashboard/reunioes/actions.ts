@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { scoreEvent } from "@/lib/scoring";
@@ -85,7 +86,7 @@ export async function scheduleMeeting(input: {
     })
     .select()
     .single();
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   // gera as tarefas de lembrete como toques na fila (reusa o motor de cadência)
   const reminders: { channel: string; due: string; label: string }[] = [];
@@ -165,7 +166,7 @@ export async function saveRecording(id: string, url: string) {
   const clean = (url || "").trim();
   if (clean && !/^https?:\/\//i.test(clean)) return { error: "Cole um link válido (começa com http)." };
   const { error } = await supabase.from("meetings").update({ recording_url: clean || null }).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/reunioes/${id}`);
   return { ok: true };
 }
@@ -175,7 +176,7 @@ export async function setMeetingStatus(id: string, status: string, contactId?: s
   const patch: Record<string, unknown> = { status };
   if (status === "confirmada") patch.confirmed_at = new Date().toISOString();
   const { error } = await supabase.from("meetings").update(patch).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   // remarcada/no-show: o evento naquele horário não vale mais → remove do Google Calendar
   if (status === "no_show" || status === "remarcada") {
@@ -226,7 +227,7 @@ export async function recordOutcome(input: {
     .from("meetings")
     .update({ status, outcome_status: input.outcome_status, outcome: input.outcome?.trim() || null })
     .eq("id", input.id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   // remarcar/sem interesse/faltou: a reunião naquele horário não vale mais → remove do Google Calendar
   if (["remarcar", "sem_interesse", "no_show"].includes(input.outcome_status)) {
@@ -279,7 +280,7 @@ export async function deleteMeeting(id: string) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const { error } = await supabase.from("meetings").delete().eq("id", id).eq("tenant_id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/reunioes");
   return { ok: true };
 }

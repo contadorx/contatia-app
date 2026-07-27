@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { platformEvolution } from "@/lib/whatsapp";
@@ -29,7 +30,7 @@ export async function setWhatsAppMode(mode: "assistido" | "evolution", ackRisk?:
 
   if (mode === "assistido") {
     const { error } = await supabase.from("tenants").update({ whatsapp_mode: "assistido" }).eq("id", tenant_id);
-    if (error) return { error: error.message };
+    if (error) return { error: msgErro(error) };
     revalidatePath("/dashboard/config");
     revalidatePath("/dashboard");
     return { ok: true };
@@ -46,7 +47,7 @@ export async function setWhatsAppMode(mode: "assistido" | "evolution", ackRisk?:
     patch.whatsapp_risk_ack_by = user_id ?? null;
   }
   const { error } = await supabase.from("tenants").update(patch).eq("id", tenant_id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
 
   // registra o aceite na trilha de auditoria (events)
   if (!jaAceitou && ackRisk) {
@@ -91,7 +92,7 @@ export async function saveWhatsApp(input: { evolution_url: string; api_key: stri
     instance: input.instance.trim(),
     is_active: true,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }
@@ -113,7 +114,7 @@ export async function deleteWhatsApp(id: string) {
   }
 
   const { error } = await supabase.from("whatsapp_accounts").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
   return { ok: true };
 }

@@ -1,5 +1,6 @@
 "use server";
 
+import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
@@ -57,7 +58,7 @@ export async function createInvoice(input: {
     asaas_payment_id: payId,
     status: "pending",
   });
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin/cobranca");
   return { ok: true, generated: !input.payment_link && !!link };
 }
@@ -113,7 +114,7 @@ export async function setInvoiceStatus(invoiceId: string, status: string) {
   const patch: any = { status };
   if (status === "paid") patch.paid_at = new Date().toISOString();
   const { error } = await supabase.from("platform_invoices").update(patch).eq("id", invoiceId);
-  if (error) return { error: error.message };
+  if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin/cobranca");
   return { ok: true };
 }
