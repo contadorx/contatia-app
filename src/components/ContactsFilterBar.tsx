@@ -1,7 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import SmartSelect from "@/components/SmartSelect";
+import { paraUrl, contarFacetas } from "@/lib/filtros";
 
 type Opt = { id: string; name: string };
 
@@ -19,18 +21,30 @@ export default function ContactsFilterBar({
   view, q, tag, produto, cadencia, frio,
   tags, produtos, cadencias,
 }: {
-  view: string; q: string; tag: string; produto: string; cadencia: string; frio: string;
+  // tag/produto/cadencia agora são MULTI (arrays); frio segue single (faixas
+  // aninhadas: "+30d" já contém "+15d", marcar as duas não quer dizer nada).
+  view: string; q: string; tag: string[]; produto: string[]; cadencia: string[]; frio: string;
   tags: Opt[]; produtos: Opt[]; cadencias: Opt[];
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [busca, setBusca] = useState(q);
-  const detailedCount = [tag, produto, cadencia, frio].filter(Boolean).length;
+  const detailedCount = contarFacetas(tag, produto, cadencia, frio);
   const [open, setOpen] = useState(detailedCount > 0);
 
+  // Escreve a URL com listas separadas por vírgula (?tag=a,b) — a página lê com
+  // comoLista(), que também aceita o formato antigo de valor único.
+  //
+  // A BASE é a URL ATUAL, não as props: marcar duas caixas em sequência (antes do
+  // servidor responder a primeira) chegava com props velhas e apagava o filtro
+  // anterior. searchParams reflete o que já foi para a URL.
   function go(next: Record<string, string>) {
-    const cur: Record<string, string> = { q: busca.trim(), view, tag, produto, cadencia, frio, ...next };
-    const p = new URLSearchParams();
-    for (const [k, v] of Object.entries(cur)) if (v) p.set(k, v);
+    const p = new URLSearchParams(searchParams?.toString() || "");
+    const base: Record<string, string> = { q: busca.trim(), view, ...next };
+    for (const [k, v] of Object.entries(base)) {
+      if (v) p.set(k, v);
+      else p.delete(k);
+    }
     router.push(`/dashboard/contatos${p.toString() ? `?${p}` : ""}`);
   }
 
@@ -75,31 +89,60 @@ export default function ContactsFilterBar({
       {open && (
         <div className="flex flex-wrap items-end gap-3 rounded-xl border border-line bg-surface p-3">
           <Field label="Tag">
-            <select value={tag} onChange={(e) => go({ tag: e.target.value })} className="input py-1.5 text-sm">
-              <option value="">Todas</option>
-              {tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
+            <div className="w-[200px]">
+              <SmartSelect
+                multiple
+                placeholder="Todas"
+                className="py-1.5 text-sm"
+                values={tag}
+                onValuesChange={(v) => go({ tag: paraUrl(v) })}
+                options={tags.map((t) => ({ value: t.id, label: t.name }))}
+              />
+            </div>
           </Field>
           <Field label="Produto">
-            <select value={produto} onChange={(e) => go({ produto: e.target.value })} className="input py-1.5 text-sm">
-              <option value="">Todos</option>
-              {produtos.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            <div className="w-[200px]">
+              <SmartSelect
+                multiple
+                placeholder="Todos"
+                className="py-1.5 text-sm"
+                values={produto}
+                onValuesChange={(v) => go({ produto: paraUrl(v) })}
+                options={produtos.map((p) => ({ value: p.id, label: p.name }))}
+              />
+            </div>
           </Field>
           <Field label="Cadência">
-            <select value={cadencia} onChange={(e) => go({ cadencia: e.target.value })} className="input py-1.5 text-sm">
-              <option value="">Todas</option>
-              {cadencias.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <div className="w-[200px]">
+              <SmartSelect
+                multiple
+                placeholder="Todas"
+                className="py-1.5 text-sm"
+                values={cadencia}
+                onValuesChange={(v) => go({ cadencia: paraUrl(v) })}
+                options={cadencias.map((c) => ({ value: c.id, label: c.name }))}
+              />
+            </div>
           </Field>
           <Field label="Último toque">
-            <select value={frio} onChange={(e) => go({ frio: e.target.value })} className="input py-1.5 text-sm">
-              <option value="">Todos</option>
-              <option value="15">Frios +15d</option>
-              <option value="30">Frios +30d</option>
-              <option value="nunca">Nunca tocados</option>
-            </select>
+            <div className="w-[160px]">
+              <SmartSelect
+                clearable
+                placeholder="Todos"
+                className="py-1.5 text-sm"
+                value={frio}
+                onValueChange={(v) => go({ frio: v })}
+                options={[
+                  { value: "15", label: "Frios +15d" },
+                  { value: "30", label: "Frios +30d" },
+                  { value: "nunca", label: "Nunca tocados" },
+                ]}
+              />
+            </div>
           </Field>
+          <p className="w-full text-[11px] text-subtle">
+            Marcar vários numa mesma caixa é <b>ou</b> (tag A ou B); caixas diferentes se somam (<b>e</b>).
+          </p>
           {detailedCount > 0 && (
             <button type="button" className="pb-1.5 text-xs text-subtle hover:text-danger" onClick={() => go({ tag: "", produto: "", cadencia: "", frio: "" })}>
               limpar filtros

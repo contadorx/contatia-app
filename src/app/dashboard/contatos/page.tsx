@@ -5,6 +5,7 @@ import ContactsFilterBar from "@/components/ContactsFilterBar";
 import { isManager } from "@/lib/permissions";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import { produtosPorContatos, contatoIdsPorProduto } from "@/lib/produtos";
+import { comoLista } from "@/lib/filtros";
 
 export const dynamic = "force-dynamic";
 // A captura no site raspa vários domínios por ação (HTTP); 60s cobre o lote inline.
@@ -12,11 +13,24 @@ export const maxDuration = 60;
 
 const NENHUM = "00000000-0000-0000-0000-000000000000";
 
-export default async function Contatos({ searchParams }: { searchParams: { tag?: string; q?: string; frio?: string; produto?: string; cadencia?: string; semcontato?: string; view?: string } }) {
+export default async function Contatos({
+  searchParams,
+}: {
+  searchParams: {
+    tag?: string | string[];
+    q?: string;
+    frio?: string;
+    produto?: string | string[];
+    cadencia?: string | string[];
+    semcontato?: string;
+    view?: string;
+  };
+}) {
   const supabase = createClient();
-  const tagFilter = searchParams.tag || "";
-  const produtoFilter = searchParams.produto || "";
-  const cadenciaFilter = searchParams.cadencia || "";
+  // Filtros MULTI (?tag=a,b): dentro da mesma caixa é OU, entre caixas é E.
+  const tagFilter = comoLista(searchParams.tag);
+  const produtoFilter = comoLista(searchParams.produto);
+  const cadenciaFilter = comoLista(searchParams.cadencia);
   const frio = searchParams.frio || ""; // "15" | "30" | "nunca"
   // visão rápida: completar | prontos | resgatar | quentes (vazio = todos). semcontato=1 vira "completar".
   const view = searchParams.view || (searchParams.semcontato === "1" ? "completar" : "");
@@ -32,15 +46,15 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
 
   // Filtros detalhados que restringem por lista de IDs (tag, produto, cadência). Intersectamos.
   const idConstraints: string[][] = [];
-  if (tagFilter) {
-    const { data: ct } = await supabase.from("contact_tags").select("contact_id").eq("tag_id", tagFilter);
+  if (tagFilter.length) {
+    const { data: ct } = await supabase.from("contact_tags").select("contact_id").in("tag_id", tagFilter);
     idConstraints.push(((ct as any[]) || []).map((r) => r.contact_id));
   }
-  if (produtoFilter) {
+  if (produtoFilter.length) {
     idConstraints.push(await contatoIdsPorProduto(supabase, produtoFilter));
   }
-  if (cadenciaFilter) {
-    const { data: en } = await supabase.from("enrollments").select("contact_id").eq("sequence_id", cadenciaFilter).in("status", ["active", "paused"]);
+  if (cadenciaFilter.length) {
+    const { data: en } = await supabase.from("enrollments").select("contact_id").in("sequence_id", cadenciaFilter).in("status", ["active", "paused"]);
     idConstraints.push(((en as any[]) || []).map((r) => r.contact_id));
   }
   let idsFiltro: string[] | null = null;

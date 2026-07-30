@@ -3,6 +3,7 @@
 import { msgErro } from "@/lib/erros";
 import { canCreate, mensagemLimite } from "@/lib/plan";
 import { dominioDe } from "@/lib/emailFinder";
+import { logAction, recortarItens } from "@/lib/actionLog";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -446,10 +447,18 @@ export async function addSocioContact(sourceContactId: string, socioName: string
 
 // Exclui um contato (FKs são cascade/set null — não deixa órfãos).
 export async function deleteContact(id: string) {
-  const { supabase, tenant_id } = await tenantId();
+  const { supabase, tenant_id, user_id } = await tenantId();
   if (!tenant_id) return { error: "Sem workspace." };
+  // foto antes do delete: depois não há como saber quem era.
+  const { data: antes } = await supabase
+    .from("contacts").select("name, company, email").eq("id", id).eq("tenant_id", tenant_id).maybeSingle();
   const { error } = await supabase.from("contacts").delete().eq("id", id).eq("tenant_id", tenant_id);
   if (error) return { error: msgErro(error) };
+  await logAction(supabase, {
+    tenant_id, user_id, action: "contact_delete", entity: "contact", entity_id: id, qtd: 1,
+    detail: `Excluiu o contato ${antes?.name || "(sem nome)"}${antes?.company ? ` — ${antes.company}` : ""}.`,
+    meta: { itens: antes ? [{ id, nome: antes.name, empresa: antes.company, email: antes.email }] : [] },
+  });
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/contas");
   return { ok: true };
@@ -457,12 +466,30 @@ export async function deleteContact(id: string) {
 
 // Exclui vários contatos de uma vez (barra de lote).
 export async function bulkDeleteContacts(ids: string[]) {
-  const { supabase, tenant_id } = await tenantId();
+  const { supabase, tenant_id, user_id } = await tenantId();
   if (!tenant_id) return { error: "Sem workspace." };
   const clean = (ids || []).filter(Boolean);
   if (!clean.length) return { error: "Nenhum contato selecionado." };
-  const { error } = await supabase.from("contacts").delete().eq("tenant_id", tenant_id).in("id", clean);
+  const { data: antes } = await supabase
+    .from("contacts").select("id, name, company, email").eq("tenant_id", tenant_id).in("id", clean);
+  // .select("id"): o log tem que dizer quantos SAÍRAM, não quantos foram pedidos (a
+  // RLS pode barrar contato de outro vendedor).
+  const { data: apagados, error } = await supabase
+    .from("contacts").delete().eq("tenant_id", tenant_id).in("id", clean).select("id");
   if (error) return { error: msgErro(error) };
+  const n = ((apagados as any[]) || []).length;
+  if (!n) return { error: "Nada foi excluído — talvez esses contatos não sejam seus." };
+  const idsApagados = new Set(((apagados as any[]) || []).map((r) => r.id));
+  const { itens, truncado } = recortarItens(
+    ((antes as any[]) || [])
+      .filter((c) => idsApagados.has(c.id))
+      .map((c) => ({ id: c.id, nome: c.name, empresa: c.company, email: c.email }))
+  );
+  await logAction(supabase, {
+    tenant_id, user_id, action: "contact_delete_bulk", entity: "contact", qtd: n,
+    detail: `${n} contato(s) excluído(s) em lote.`,
+    meta: { itens, truncado, selecionados: clean.length },
+  });
   revalidatePath("/dashboard/contatos");
-  return { ok: true, count: clean.length };
+  return { ok: true, count: n };
 }

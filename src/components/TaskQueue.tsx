@@ -1,7 +1,8 @@
 "use client";
 
 import { useTransition, useState, useEffect, useRef } from "react";
-import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask, sendAllEmailTasks, completeTasks } from "@/app/dashboard/task-actions";
+import { useRouter } from "next/navigation";
+import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask, sendAllEmailTasks, completeTasks, skipTasks, deleteTasks } from "@/app/dashboard/task-actions";
 import { channelLabel, waLink, type Channel } from "@/lib/cadence";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import RichTextEditor from "@/components/RichTextEditor";
@@ -62,6 +63,7 @@ export default function TaskQueue({
   allTags?: Tag[];
   waMode?: string;
 }) {
+  const router = useRouter();
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
@@ -69,9 +71,13 @@ export default function TaskQueue({
   const [editing, setEditing] = useState<Record<string, { subject: string; body: string }>>({});
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
 
+  // seleção em lote (checkbox por linha) — vazio = nada selecionado
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [confirmando, setConfirmando] = useState(false);
+
   // filtros
   const [periodo, setPeriodo] = useState<"hoje" | "3dias" | "todos">("hoje");
-  const [canal, setCanal] = useState<string>("todos");
+  const [canalFilters, setCanalFilters] = useState<string[]>([]); // vazio = todos os canais
   const [busca, setBusca] = useState("");                        // busca por contato/empresa
   const [tagFilters, setTagFilters] = useState<string[]>([]);   // filtro por VÁRIAS tags
 
@@ -80,7 +86,7 @@ export default function TaskQueue({
 
   const tasks = allTasks.filter((t) => {
     if (periodo === "hoje" && t.is_future) return false;
-    if (canal !== "todos" && t.channel !== canal) return false;
+    if (canalFilters.length && !canalFilters.includes(t.channel)) return false;
     if (tagFilters.length && !(t.tags || []).some((tg) => tagFilters.includes(tg.id))) return false;
     if (cadFilters.length && !cadFilters.includes(t.cadence || "")) return false;
     if (busca) {
@@ -96,6 +102,40 @@ export default function TaskQueue({
   useEffect(() => {
     if (focus > tasks.length - 1) setFocus(Math.max(0, tasks.length - 1));
   }, [tasks.length, focus]);
+
+  // ---------- seleção em lote ----------
+  const idsVisiveis = tasks.map((t) => t.id);
+  const selVisiveis = idsVisiveis.filter((id) => sel.has(id));
+  const todosMarcados = idsVisiveis.length > 0 && selVisiveis.length === idsVisiveis.length;
+
+  function toggleSel(id: string) {
+    setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  function toggleTodos() {
+    setSel((s) => {
+      const n = new Set(s);
+      if (todosMarcados) idsVisiveis.forEach((id) => n.delete(id));
+      else idsVisiveis.forEach((id) => n.add(id));
+      return n;
+    });
+  }
+  function limparSel() { setSel(new Set()); setConfirmando(false); }
+
+  // Roda a ação em lote sobre o que está SELECIONADO E VISÍVEL — nunca sobre algo que
+  // saiu da visão por filtro (evita apagar o que o operador não está vendo).
+  function emLote(fn: (ids: string[]) => Promise<any>, sucesso: (n: number) => string) {
+    setErr(null); setBulkMsg(null);
+    const ids = selVisiveis;
+    if (!ids.length) return;
+    start(async () => {
+      const res = (await fn(ids)) as { count?: number; done?: number; error?: string };
+      if (res?.error) { setErr(res.error); return; }
+      const n = res.count ?? res.done ?? ids.length;
+      setBulkMsg(sucesso(n));
+      limparSel();
+      router.refresh();
+    });
+  }
 
   function sendAll() {
     setErr(null);
@@ -115,9 +155,13 @@ export default function TaskQueue({
     start(async () => {
       const res = (await completeTasks(ids)) as { done?: number; error?: string };
       if (res?.error) setErr(res.error);
-      else setBulkMsg(`✓ ${res.done} toque(s) marcados como feitos.`);
+      else { setBulkMsg(`✓ ${res.done} toque(s) marcados como feitos.`); router.refresh(); }
     });
   }
+  // rótulo do botão "marcar todos como feitos" quando há filtro de canal sem e-mail
+  const canaisSemEmail = canalFilters.filter((c) => c !== "email");
+  const mostrarConcluirVisiveis =
+    canalFilters.length > 0 && !canalFilters.includes("email") && tasks.length > 0;
   function act(fn: () => Promise<unknown>) {
     start(async () => { await fn(); });
   }
@@ -149,8 +193,14 @@ export default function TaskQueue({
   // navegação por teclado
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const tag = (e.target as HTMLElement)?.tagName;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      // O corpo do e-mail é um editor contentEditable (div), não um <textarea>: sem
+      // esta linha, digitar espaço no e-mail marcava/desmarcava a linha em vez de
+      // escrever. Botão/link em foco também mantêm o comportamento nativo do teclado.
+      if (el?.isContentEditable || tag === "BUTTON" || tag === "A") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (!tasks.length) return;
       const t = tasks[focus];
       if (e.key === "ArrowDown" || e.key === "j") { e.preventDefault(); setFocus((f) => Math.min(tasks.length - 1, f + 1)); }
@@ -159,6 +209,8 @@ export default function TaskQueue({
       else if (e.key === "r") { if (t?.contact_id) { e.preventDefault(); act(() => markReplied(t.contact_id as string)); } }
       else if (e.key === "z") { if (t) { e.preventDefault(); act(() => snoozeTask(t.id, 1)); } }
       else if (e.key === "x") { if (t) { e.preventDefault(); act(() => skipTask(t.id)); } }
+      // Espaço marca/desmarca a linha em foco — é como se seleciona em lote sem mouse.
+      else if (e.key === " ") { if (t) { e.preventDefault(); toggleSel(t.id); } }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -208,13 +260,14 @@ export default function TaskQueue({
           placeholder="Buscar contato/empresa…"
           className="input w-[190px] shrink-0 grow-0 py-1 text-xs"
         />
-        <div className="w-[150px] shrink-0 grow-0">
+        <div className="w-[160px] shrink-0 grow-0">
           <SmartSelect
+            multiple
             className="py-1 text-xs"
-            value={canal}
-            onValueChange={(v) => setCanal(v)}
+            placeholder="Todos os canais"
+            values={canalFilters}
+            onValuesChange={setCanalFilters}
             options={[
-              { value: "todos", label: "Todos os canais" },
               { value: "email", label: "E-mail" },
               { value: "whatsapp", label: "WhatsApp" },
               { value: "call", label: "Ligação" },
@@ -246,11 +299,73 @@ export default function TaskQueue({
             />
           </div>
         )}
+        {tasks.length > 0 && (
+          <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-subtle">
+            <input type="checkbox" className="h-4 w-4 accent-brand" checked={todosMarcados} onChange={toggleTodos} />
+            Marcar todas
+          </label>
+        )}
         <span className="shrink-0 text-xs text-subtle">{tasks.length} na visão</span>
       </div>
 
       {tasks.length === 0 && (
         <div className="card p-8 text-center text-sm text-subtle">Nenhum toque nesta visão. Ajuste os filtros acima.</div>
+      )}
+
+      {/* ---------- barra de AÇÕES EM LOTE (só aparece com seleção) ---------- */}
+      {selVisiveis.length > 0 && (
+        <div className="sticky top-2 z-10 rounded-xl border border-brand/30 bg-brand-soft/60 p-3 shadow-sm backdrop-blur">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-brand-dark">
+              {selVisiveis.length} tarefa(s) selecionada(s)
+            </span>
+            <button className="btn-ghost py-1 text-xs" onClick={limparSel} disabled={pending}>Limpar seleção</button>
+            <span className="mx-1 h-4 w-px bg-line" />
+            <button
+              className="btn-ghost py-1 text-xs"
+              disabled={pending}
+              onClick={() => emLote(completeTasks, (n) => `✓ ${n} tarefa(s) concluída(s).`)}
+            >
+              Concluir
+            </button>
+            <button
+              className="btn-ghost py-1 text-xs"
+              disabled={pending}
+              onClick={() => emLote(skipTasks, (n) => `✓ ${n} tarefa(s) pulada(s).`)}
+            >
+              Pular
+            </button>
+            {!confirmando ? (
+              <button
+                className="rounded-lg border border-danger/40 px-2.5 py-1 text-xs font-medium text-danger hover:bg-danger/10"
+                disabled={pending}
+                onClick={() => setConfirmando(true)}
+              >
+                Excluir…
+              </button>
+            ) : (
+              <span className="flex items-center gap-2 rounded-lg border border-danger/40 bg-danger/5 px-2 py-1">
+                <span className="text-xs text-danger">
+                  Excluir {selVisiveis.length} de vez? Não tem como desfazer.
+                </span>
+                <button
+                  className="rounded-lg bg-danger px-2 py-0.5 text-xs font-semibold text-white"
+                  disabled={pending}
+                  onClick={() => emLote(deleteTasks, (n) => `✓ ${n} tarefa(s) excluída(s). Ficou registrado em Resultados → Registro.`)}
+                >
+                  {pending ? "Excluindo…" : "Sim, excluir"}
+                </button>
+                <button className="text-xs text-subtle underline" onClick={() => setConfirmando(false)} disabled={pending}>
+                  cancelar
+                </button>
+              </span>
+            )}
+          </div>
+          <p className="mt-1.5 text-[11px] text-subtle">
+            <b>Concluir</b> marca como feito (pontua o contato). <b>Pular</b> dispensa o toque, mas mantém o histórico da
+            cadência. <b>Excluir</b> apaga a tarefa do banco — tudo fica registrado em Resultados → Registro.
+          </p>
+        </div>
       )}
 
       {/* barra de atalhos + envio em lote */}
@@ -260,13 +375,13 @@ export default function TaskQueue({
             {pending ? "Enviando..." : `Enviar todos os e-mails (${pendingEmails})`}
           </button>
         )}
-        {canal !== "todos" && canal !== "email" && tasks.length > 0 && (
+        {mostrarConcluirVisiveis && (
           <button className="btn-ghost py-1.5 text-sm" onClick={completeVisible} disabled={pending}>
-            Marcar todos os {canal === "whatsapp" ? "WhatsApp" : canal === "call" ? "de ligação" : "de LinkedIn"} como feitos ({tasks.length})
+            Marcar como feitos os {canaisSemEmail.map((c) => channelLabel[c as Channel] || c).join(" / ")} ({tasks.length})
           </button>
         )}
         <span className="text-xs text-subtle">
-          Teclado: <b>↑/↓</b> navegar · <b>Enter</b> enviar/concluir · <b>r</b> respondeu · <b>z</b> adiar · <b>x</b> pular
+          Teclado: <b>↑/↓</b> navegar · <b>Enter</b> enviar/concluir · <b>Espaço</b> marcar · <b>r</b> respondeu · <b>z</b> adiar · <b>x</b> pular
         </span>
         {bulkMsg && <span className="text-sm text-signal">{bulkMsg}</span>}
       </div>
@@ -289,9 +404,17 @@ export default function TaskQueue({
             key={t.id}
             ref={(el) => { rowRefs.current[i] = el; }}
             onClick={() => setFocus(i)}
-            className={`card p-4 transition ${t.hot_now ? "ring-2 ring-warn bg-warn/5" : hot ? "ring-1 ring-warn/40" : ""} ${focused ? "ring-2 ring-brand" : ""}`}
+            className={`card p-4 transition ${t.hot_now ? "ring-2 ring-warn bg-warn/5" : hot ? "ring-1 ring-warn/40" : ""} ${focused ? "ring-2 ring-brand" : ""} ${sel.has(t.id) ? "bg-brand-soft/30" : ""}`}
           >
             <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                className="h-4 w-4 shrink-0 accent-brand"
+                checked={sel.has(t.id)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={() => toggleSel(t.id)}
+                aria-label="Selecionar tarefa"
+              />
               <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${chanStyle[t.channel]}`}>
                 {channelLabel[t.channel]}
               </span>

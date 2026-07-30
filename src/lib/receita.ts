@@ -32,9 +32,15 @@ export type EmpresaReceita = {
 export type FiltroReceita = {
   atividade?: string;
   cnae?: string[];
+  // uf/porte SINGLE continuam existindo por COMPATIBILIDADE: a API v2 no VPS só
+  // entende um valor. Quando o operador marca vários, mandamos `ufs`/`portes`
+  // (arrays, entendidos pela v3) E o primeiro valor em `uf`/`porte` — assim uma
+  // API antiga devolve um resultado mais estreito em vez de quebrar.
   uf?: string;
+  ufs?: string[];
   municipio?: string;
   porte?: "ME" | "EPP" | "Demais";
+  portes?: string[];
   matriz?: boolean;
   com_email?: boolean;
   email_corporativo?: boolean;
@@ -102,9 +108,11 @@ export async function buscarEmpresaPorCnpj(cnpj: string): Promise<{ empresa: Emp
 }
 
 // Busca empresas ativas por filtros. Retorna a página + total (se contar=true) + os CNAEs que casaram.
+// `multi` = a API do VPS confirmou que entende listas de UF/porte (v3). Se vier false
+// e o operador marcou vários, a tela avisa que só o primeiro valor foi considerado.
 export async function buscarEmpresas(
   f: FiltroReceita
-): Promise<{ rows: EmpresaReceita[]; total: number | null; atividades: { cnae: string; descricao: string }[]; error?: string }> {
+): Promise<{ rows: EmpresaReceita[]; total: number | null; atividades: { cnae: string; descricao: string }[]; multi?: boolean; error?: string }> {
   const { url, token } = cfg();
   if (!url || !token) return { rows: [], total: null, atividades: [], error: "Base da Receita não configurada." };
   try {
@@ -124,6 +132,7 @@ export async function buscarEmpresas(
       rows: Array.isArray(j.rows) ? j.rows : [],
       total: typeof j.total === "number" ? j.total : null,
       atividades: Array.isArray(j.atividades) ? j.atividades : [],
+      multi: j?.multi === true,
     };
   } catch (e: any) {
     return { rows: [], total: null, atividades: [], error: e?.name === "AbortError" ? "Base demorou a responder." : "Base indisponível." };

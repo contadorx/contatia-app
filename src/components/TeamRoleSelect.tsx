@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { setTeamRole } from "@/app/dashboard/equipe/actions";
+import SmartSelect from "@/components/SmartSelect";
 
 const ROLES = [
   { v: "admin", l: "Admin" },
@@ -18,16 +19,16 @@ export default function TeamRoleSelect({ memberId, current, canManage }: { membe
     return <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-subtle">{label}</span>;
   }
 
+  // single de propósito: um membro tem UM papel.
   return (
-    <select
-      className="input py-1 text-xs"
-      value={current || "vendedor"}
-      disabled={pending}
-      onChange={(e) => start(async () => void (await setTeamRole(memberId, e.target.value)))}
-    >
-      {ROLES.map((r) => (
-        <option key={r.v} value={r.v}>{r.l}</option>
-      ))}
-    </select>
+    <div className="w-[130px]">
+      <SmartSelect
+        className="py-1 text-xs"
+        value={current || "vendedor"}
+        disabled={pending}
+        onValueChange={(v) => start(async () => void (await setTeamRole(memberId, v)))}
+        options={ROLES.map((r) => ({ value: r.v, label: r.l }))}
+      />
+    </div>
   );
 }

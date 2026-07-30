@@ -132,11 +132,12 @@ export default function SmartSelect(props: Props) {
     setOpen(false);
   }
   function toggleMulti(v: string) {
-    setSel((prev) => {
-      const next = prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v];
-      (props as MultiProps).onValuesChange?.(next);
-      return next;
-    });
+    // O callback fica FORA do updater de propósito: o React pode executar o updater
+    // duas vezes (StrictMode/render concorrente) e um onValuesChange que navega
+    // dispararia dois router.push por clique.
+    const next = sel.includes(v) ? sel.filter((x) => x !== v) : [...sel, v];
+    setSel(next);
+    (props as MultiProps).onValuesChange?.(next);
   }
   function choose(o: SmartOption) {
     if (o.disabled) return;

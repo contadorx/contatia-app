@@ -1,7 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
+import SmartSelect from "@/components/SmartSelect";
+import { paraUrl, contarFacetas } from "@/lib/filtros";
 
 type Opt = { id: string; name: string };
 
@@ -15,17 +17,24 @@ const VIEWS: { v: string; label: string; tone?: "danger" | "warn" }[] = [
 export default function AccountsFilterBar({
   view, q, tag, produto, tags, produtos,
 }: {
-  view: string; q: string; tag: string; produto: string; tags: Opt[]; produtos: Opt[];
+  // tag/produto são MULTI: dentro da caixa é OU, entre caixas é E.
+  view: string; q: string; tag: string[]; produto: string[]; tags: Opt[]; produtos: Opt[];
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [busca, setBusca] = useState(q);
-  const detailedCount = [tag, produto].filter(Boolean).length;
+  const detailedCount = contarFacetas(tag, produto);
   const [open, setOpen] = useState(detailedCount > 0);
 
+  // base = URL atual (não as props): dois cliques rápidos em caixas diferentes não
+  // podem apagar o filtro que acabou de entrar.
   function go(next: Record<string, string>) {
-    const cur: Record<string, string> = { q: busca.trim(), view, tag, produto, ...next };
-    const p = new URLSearchParams();
-    for (const [k, v] of Object.entries(cur)) if (v) p.set(k, v);
+    const p = new URLSearchParams(searchParams?.toString() || "");
+    const base: Record<string, string> = { q: busca.trim(), view, ...next };
+    for (const [k, v] of Object.entries(base)) {
+      if (v) p.set(k, v);
+      else p.delete(k);
+    }
     router.push(`/dashboard/contas${p.toString() ? `?${p}` : ""}`);
   }
 
@@ -66,17 +75,32 @@ export default function AccountsFilterBar({
       {open && (
         <div className="flex flex-wrap items-end gap-3 rounded-xl border border-line bg-surface p-3">
           <Field label="Tag">
-            <select value={tag} onChange={(e) => go({ tag: e.target.value })} className="input py-1.5 text-sm">
-              <option value="">Todas</option>
-              {tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
+            <div className="w-[200px]">
+              <SmartSelect
+                multiple
+                placeholder="Todas"
+                className="py-1.5 text-sm"
+                values={tag}
+                onValuesChange={(v) => go({ tag: paraUrl(v) })}
+                options={tags.map((t) => ({ value: t.id, label: t.name }))}
+              />
+            </div>
           </Field>
           <Field label="Produto">
-            <select value={produto} onChange={(e) => go({ produto: e.target.value })} className="input py-1.5 text-sm">
-              <option value="">Todos</option>
-              {produtos.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            <div className="w-[200px]">
+              <SmartSelect
+                multiple
+                placeholder="Todos"
+                className="py-1.5 text-sm"
+                values={produto}
+                onValuesChange={(v) => go({ produto: paraUrl(v) })}
+                options={produtos.map((p) => ({ value: p.id, label: p.name }))}
+              />
+            </div>
           </Field>
+          <p className="w-full text-[11px] text-subtle">
+            Marcar vários numa mesma caixa é <b>ou</b>; caixas diferentes se somam (<b>e</b>).
+          </p>
           {detailedCount > 0 && (
             <button type="button" className="pb-1.5 text-xs text-subtle hover:text-danger" onClick={() => go({ tag: "", produto: "" })}>limpar filtros</button>
           )}

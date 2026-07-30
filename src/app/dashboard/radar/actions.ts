@@ -7,6 +7,7 @@ import { canCreate, mensagemLimite } from "@/lib/plan";
 import { buscarAtividades, buscarEmpresas, buscarEmpresaPorCnpj, receitaConfigurada, type FiltroReceita } from "@/lib/receita";
 import { nomeProprio, enrichCnpj } from "@/lib/cnpj";
 import { dominioCorporativo } from "@/lib/emailFinder";
+import { logAction } from "@/lib/actionLog";
 
 async function ctx() {
   const supabase = createClient();
@@ -30,15 +31,32 @@ function pareceEmpresa(nome: string): boolean {
   return /\b(ltda|s\/a|s a|sa|eireli|mei|epp|me|cia|s\.a|associacao|instituto|fundacao|igreja|condominio|municipio|prefeitura|ltda\.)\b/.test(n);
 }
 
+// Aceita string ("SP"), array (["SP","RJ"]) ou lista por vírgula, e devolve limpo.
+function listaValida(v: any, valida: (s: string) => boolean, transforma: (s: string) => string = (s) => s): string[] {
+  const bruto = Array.isArray(v) ? v : String(v ?? "").split(",");
+  const out: string[] = [];
+  for (const item of bruto) {
+    const s = transforma(String(item ?? "").trim());
+    if (s && valida(s) && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
 // Monta o filtro da API a partir do que a tela envia (validação básica).
+// UF e porte aceitam VÁRIOS valores: mandamos a lista (`ufs`/`portes`, v3 da API) e
+// também o primeiro valor no campo antigo (`uf`/`porte`), para a v2 não quebrar.
 function montarFiltro(input: any): FiltroReceita {
   const cnae = Array.isArray(input?.cnae) ? input.cnae.map(soDigitos).filter((c: string) => /^\d{7}$/.test(c)) : [];
+  const ufs = listaValida(input?.ufs ?? input?.uf, (s) => /^[A-Z]{2}$/.test(s), (s) => s.toUpperCase()).slice(0, 27);
+  const portes = listaValida(input?.portes ?? input?.porte, (s) => ["ME", "EPP", "Demais"].includes(s)).slice(0, 3);
   return {
     atividade: typeof input?.atividade === "string" && input.atividade.trim().length >= 3 ? input.atividade.trim() : undefined,
     cnae: cnae.length ? cnae : undefined,
-    uf: typeof input?.uf === "string" && /^[A-Za-z]{2}$/.test(input.uf.trim()) ? input.uf.trim().toUpperCase() : undefined,
+    uf: ufs[0],
+    ufs: ufs.length > 1 ? ufs : undefined,
     municipio: typeof input?.municipio === "string" && input.municipio.trim() ? input.municipio.trim() : undefined,
-    porte: ["ME", "EPP", "Demais"].includes(input?.porte) ? input.porte : undefined,
+    porte: portes[0] as FiltroReceita["porte"],
+    portes: portes.length > 1 ? portes : undefined,
     com_email: input?.com_email === true,
     email_corporativo: input?.email_corporativo === true,
     com_telefone: input?.com_telefone === true,
@@ -148,13 +166,20 @@ export async function buscarNaBase(input: any, offset = 0) {
     return { error: "Escolha uma atividade/UF, ou digite um nome ou CNPJ para buscar." };
   }
   const off = Math.max(Number(offset) || 0, 0);
+  // Marcou vários estados/portes mas a API do VPS ainda é a v2? Então só o primeiro
+  // valor entrou no filtro — a tela avisa em vez de mentir um resultado "completo".
+  const pediuMulti = (f.ufs?.length || 0) > 1 || (f.portes?.length || 0) > 1;
 
   // Caminho normal (sem ocultar): uma página de 100 direto da base.
   if (!ocultar) {
     const r = await buscarEmpresas({ ...f, limit: 100, offset: off, contar: off === 0 });
     if (r.error) return { error: r.error };
     const rows = await marcarJaTem(r.rows);
-    return { ok: true, total: r.total, atividades: r.atividades, rows, offset: off, nextOffset: off + r.rows.length, temMais: r.rows.length === 100 };
+    return {
+      ok: true, total: r.total, atividades: r.atividades, rows, offset: off,
+      nextOffset: off + r.rows.length, temMais: r.rows.length === 100,
+      avisoMulti: pediuMulti && !r.multi ? avisoApiAntiga(f) : undefined,
+    };
   }
 
   // Ocultar já cadastradas: a base não sabe do seu cadastro, então filtramos aqui.
@@ -166,11 +191,13 @@ export async function buscarNaBase(input: any, offset = 0) {
   let atividades: any[] = [];
   const acumulado: any[] = [];
   let temMais = false;
+  let multiOk = true;
   for (let i = 0; i < 6; i++) {
     const contar = off === 0 && i === 0;
     const r = await buscarEmpresas({ ...f, limit: 100, offset: cursor, contar });
     if (r.error) return { error: r.error };
     if (contar) { total = r.total; atividades = r.atividades || []; }
+    if (!r.multi) multiOk = false;
     const marc = await marcarJaTem(r.rows);
     for (const x of marc) if (!x.jaTem) acumulado.push(x);
     cursor += r.rows.length;
@@ -178,7 +205,18 @@ export async function buscarNaBase(input: any, offset = 0) {
     temMais = true;
     if (acumulado.length >= 100) break; // já juntamos uma página cheia de novas
   }
-  return { ok: true, total, atividades, rows: acumulado, offset: off, nextOffset: cursor, temMais };
+  return {
+    ok: true, total, atividades, rows: acumulado, offset: off, nextOffset: cursor, temMais,
+    avisoMulti: pediuMulti && !multiOk ? avisoApiAntiga(f) : undefined,
+  };
+}
+
+// Mensagem única do aviso de API antiga (usada nos dois caminhos da busca).
+function avisoApiAntiga(f: FiltroReceita): string {
+  const partes: string[] = [];
+  if ((f.ufs?.length || 0) > 1) partes.push(`estados (só ${f.uf} entrou)`);
+  if ((f.portes?.length || 0) > 1) partes.push(`portes (só ${f.porte} entrou)`);
+  return `A API da Receita no seu VPS ainda é a v2: ela aceita um valor por filtro, então vários ${partes.join(" e ")}. Rode o script da API v3 no servidor para liberar a seleção múltipla.`;
 }
 
 // ============================================================
@@ -265,21 +303,60 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
     if (lim.limite != null) budgetContatos = Math.max(0, lim.limite - lim.usado);
   }
 
-  // 1) carrega empresas e contatos existentes do workspace (dedup em memória)
-  const { data: accs } = await supabase.from("accounts").select("id, name, cnpj").eq("tenant_id", tenant_id);
+  // 1) dedup: carrega o que já existe no workspace.
+  //
+  // ATENÇÃO ao detalhe que já mordeu: o PostgREST devolve no máximo ~1.000 linhas por
+  // consulta. Ler "todos os contatos com CNPJ" numa base de 22 mil trazia só os 1.000
+  // primeiros — e o dedup passava a deixar contato duplicado. Por isso o CNPJ é
+  // consultado SÓ para os CNPJs desta seleção (dezenas/centenas), em fatias: exato,
+  // independente do tamanho da base.
+  const cnpjsSelecionados = Array.from(
+    new Set(empresas.map((e: any) => soDigitos(e?.cnpj)).filter((d: string) => d.length === 14))
+  );
+  const emFatias = <T,>(arr: T[], n = 200): T[][] => {
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+    return out;
+  };
+
   const contaPorCnpj = new Map<string, string>();
   const contaPorNome = new Map<string, string>();
-  for (const a of (accs as any[]) || []) {
-    const d = soDigitos(a.cnpj);
-    if (d.length === 14) contaPorCnpj.set(d, a.id);
-    const n = normNome(a.name);
-    if (n && !contaPorNome.has(n)) contaPorNome.set(n, a.id);
-  }
-  const { data: cts } = await supabase.from("contacts").select("cnpj").eq("tenant_id", tenant_id).not("cnpj", "is", null);
   const contatoTemCnpj = new Set<string>();
-  for (const c of (cts as any[]) || []) {
-    const d = soDigitos(c.cnpj);
-    if (d.length === 14) contatoTemCnpj.add(d);
+
+  for (const fatia of emFatias(cnpjsSelecionados)) {
+    const [{ data: accsCnpj }, { data: ctsCnpj }] = await Promise.all([
+      supabase.from("accounts").select("id, name, cnpj").eq("tenant_id", tenant_id).in("cnpj", fatia),
+      supabase.from("contacts").select("cnpj").eq("tenant_id", tenant_id).in("cnpj", fatia),
+    ]);
+    for (const a of (accsCnpj as any[]) || []) {
+      const d = soDigitos(a.cnpj);
+      if (d.length === 14) contaPorCnpj.set(d, a.id);
+      const n = normNome(a.name);
+      if (n && !contaPorNome.has(n)) contaPorNome.set(n, a.id);
+    }
+    for (const c of (ctsCnpj as any[]) || []) {
+      const d = soDigitos(c.cnpj);
+      if (d.length === 14) contatoTemCnpj.add(d);
+    }
+  }
+
+  // dedup por NOME (empresa sem CNPJ cadastrado): consulta pelos nomes desta seleção.
+  // Não é exato quando o nome está gravado com acento/caixa diferente — o CNPJ acima é
+  // a trava confiável; esta é só uma segunda rede.
+  const nomesSelecionados = Array.from(
+    new Set(
+      empresas
+        .map((e: any) => nomeProprio((e?.nome_fantasia || e?.razao_social || "").trim()))
+        .filter((n: any): n is string => !!n)
+    )
+  );
+  for (const fatia of emFatias(nomesSelecionados)) {
+    const { data: accsNome } = await supabase
+      .from("accounts").select("id, name").eq("tenant_id", tenant_id).in("name", fatia);
+    for (const a of (accsNome as any[]) || []) {
+      const n = normNome(a.name);
+      if (n && !contaPorNome.has(n)) contaPorNome.set(n, a.id);
+    }
   }
 
   let empresasCriadas = 0;
@@ -287,6 +364,11 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
   let pulados = 0;
   let limiteAtingido = false;
   const vistos = new Set<string>();
+  // ids do que ACABOU de ser criado — é isso que o passo a passo (Prospectar) usa
+  // para rodar a descoberta de canais só no que entrou agora.
+  const contatoIds: string[] = [];
+  const contaIds: string[] = [];
+  const nomesEmpresas: string[] = [];
   // fila de descoberta de e-mail (SMTP): cada contato com NOME de pessoa + domínio e
   // SEM e-mail vira um job. É o que dá e-mail próprio ao sócio na esteira do Radar.
   const filaEmail: { tenant_id: string; contact_id: string; name: string; domain: string }[] = [];
@@ -351,6 +433,8 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
       } else {
         account_id = (nova as any).id;
         empresasCriadas++;
+        contaIds.push(account_id as string);
+        if (nomesEmpresas.length < 50) nomesEmpresas.push(nomeEmpresa);
       }
       if (account_id) contaPorCnpj.set(cnpj, account_id);
     }
@@ -397,6 +481,7 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
       if (!errC && novoContato) {
         criouAlgum = true;
         contatosCriados++;
+        contatoIds.push((novoContato as any).id as string);
         // sem e-mail + domínio + nome de pessoa → entra na descoberta de e-mail (SMTP)
         if (!emailContato && dominio && !pareceEmpresa(nome)) {
           filaEmail.push({ tenant_id, contact_id: (novoContato as any).id, name: nome, domain: dominio });
@@ -414,11 +499,32 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
 
   // enfileira a descoberta de e-mail dos sócios (o cron /email-discovery drena de
   // hora em hora). Falha aqui não derruba o envio — os contatos já foram criados.
+  // UPSERT, não insert: edq_contact_idx é UNIQUE em contact_id, então um contato que
+  // já passou pela fila faria o lote inteiro estourar num insert simples.
   if (filaEmail.length) {
-    await supabase.from("email_discovery_queue").insert(filaEmail);
+    await supabase
+      .from("email_discovery_queue")
+      .upsert(
+        filaEmail.map((j) => ({ ...j, status: "pending", attempts: 0, result: null, last_error: null, processed_at: null })),
+        { onConflict: "contact_id" }
+      );
   }
+
+  await logAction(supabase, {
+    tenant_id,
+    user_id,
+    action: "radar_import",
+    entity: "account",
+    qtd: empresasCriadas,
+    detail:
+      `Gravou ${empresasCriadas} empresa(s) e ${contatosCriados} contato(s) a partir do Radar` +
+      (pulados ? `; ${pulados} pulada(s) por já existirem` : "") +
+      (limiteAtingido ? "; parou no limite do plano" : "") +
+      ".",
+    meta: { empresas: nomesEmpresas, contatosCriados, pulados, limiteAtingido, modo },
+  });
 
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/contas");
-  return { ok: true, empresasCriadas, contatosCriados, pulados, limiteAtingido };
+  return { ok: true, empresasCriadas, contatosCriados, pulados, limiteAtingido, contatoIds, contaIds };
 }

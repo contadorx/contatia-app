@@ -4,6 +4,7 @@ import { useMemo, useState, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Papa from "papaparse";
 import { addContact, importContacts } from "@/app/dashboard/contatos/actions";
+import SmartSelect from "@/components/SmartSelect";
 
 // Campos de destino + apelidos comuns de coluna (usados no chute do mapeamento).
 const TARGETS = [
@@ -188,16 +189,17 @@ export default function ContactTools() {
                 {TARGETS.map((t) => (
                   <div key={t.key}>
                     <label className="label">{t.label}{t.key === "name" ? "" : " (opcional)"}</label>
-                    <select
-                      className="input mt-1 py-1.5 text-sm"
-                      value={mapping[t.key]}
-                      onChange={(e) => setMapping((m) => ({ ...m, [t.key]: e.target.value }))}
-                    >
-                      <option value="">— não importar —</option>
-                      {parsed.headers.map((h) => (
-                        <option key={h} value={h}>{h}</option>
-                      ))}
-                    </select>
+                    <div className="mt-1">
+                      {/* single de propósito: um campo do Contatia recebe UMA coluna do arquivo */}
+                      <SmartSelect
+                        className="py-1.5 text-sm"
+                        clearable
+                        placeholder="— não importar —"
+                        value={mapping[t.key]}
+                        onValueChange={(v) => setMapping((m) => ({ ...m, [t.key]: v }))}
+                        options={parsed.headers.map((h) => ({ value: h, label: h }))}
+                      />
+                    </div>
                   </div>
                 ))}
               </div>

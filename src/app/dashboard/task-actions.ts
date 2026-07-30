@@ -4,6 +4,7 @@ import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { scoreEvent } from "@/lib/scoring";
+import { logAction, recortarItens } from "@/lib/actionLog";
 import { renderTemplate } from "@/lib/cadence";
 import { buildEmailHtml } from "@/lib/richtext";
 
@@ -330,22 +331,132 @@ export async function sendAllEmailTasks() {
 
 // Conclui várias tarefas de uma vez (fila sequencial por tipo — ex.: todos os LinkedIn).
 export async function completeTasks(ids: string[]) {
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id } = await ctx();
   if (!ids.length) return { ok: true, done: 0 };
   const list = ids.slice(0, 300);
   // pega os contatos para pontuar
   const { data: tks } = await supabase.from("tasks").select("id, contact_id").in("id", list);
-  const { error } = await supabase
+  // .select("id") no fim: precisamos do que REALMENTE mudou. A RLS pode barrar tarefa
+  // de outra pessoa e o .eq("status","pending") pode não casar — logar o número pedido
+  // em vez do número afetado deixaria o registro mentindo.
+  const { data: afetadas, error } = await supabase
     .from("tasks")
     .update({ status: "done", completed_at: new Date().toISOString() })
     .in("id", list)
-    .eq("status", "pending");
+    .eq("status", "pending")
+    .select("id");
   if (error) return { error: msgErro(error) };
+  const feitas = new Set(((afetadas as any[]) || []).map((r) => r.id));
   if (tenant_id) {
     for (const t of ((tks as any[]) || [])) {
-      if (t.contact_id) await scoreEvent(supabase, { tenant_id, contact_id: t.contact_id, type: "task_done" });
+      if (t.contact_id && feitas.has(t.id)) await scoreEvent(supabase, { tenant_id, contact_id: t.contact_id, type: "task_done" });
     }
   }
+  if (feitas.size) {
+    await logAction(supabase, {
+      tenant_id,
+      user_id,
+      action: "task_complete_bulk",
+      entity: "task",
+      qtd: feitas.size,
+      detail: `${feitas.size} tarefa(s) concluída(s) em lote.`,
+    });
+  }
   revalidatePath("/dashboard");
-  return { ok: true, done: list.length };
+  return { ok: true, done: feitas.size };
+}
+
+// ------------------------------------------------------------------
+// Ações em LOTE da caixa de hoje (seleção por checkbox)
+// ------------------------------------------------------------------
+const LOTE_MAX = 300;
+
+// Foto das tarefas ANTES de mexer nelas — é o que sobra no log depois do delete.
+async function fotoTarefas(supabase: any, list: string[], tenant_id: string) {
+  const { data } = await supabase
+    .from("tasks")
+    .select("id, title, channel, due_date, contact_id, contacts(name, company)")
+    .eq("tenant_id", tenant_id)
+    .in("id", list);
+  return ((data as any[]) || []).map((t) => ({
+    id: t.id,
+    titulo: t.title || null,
+    canal: t.channel || null,
+    vencimento: t.due_date || null,
+    contato: t.contacts?.name || null,
+    empresa: t.contacts?.company || null,
+  }));
+}
+
+// PULAR em lote: mantém a linha no banco com status 'skipped' (some da caixa, mas o
+// relatório de cadência continua sabendo que o toque existiu e foi dispensado).
+export async function skipTasks(ids: string[]) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const list = Array.from(new Set((ids || []).filter(Boolean))).slice(0, LOTE_MAX);
+  if (!list.length) return { error: "Nenhuma tarefa selecionada." };
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({ status: "skipped" })
+    .eq("tenant_id", tenant_id)
+    .in("id", list)
+    .eq("status", "pending")
+    .select("id");
+  if (error) return { error: msgErro(error) };
+  const n = ((data as any[]) || []).length;
+  // nada mudou = as tarefas já saíram da fila (outra aba, cron, cadência). Avisar é
+  // melhor do que dizer "✓ 0 puladas" e gravar um registro vazio no log.
+  if (!n) return { error: "Nada foi alterado — as tarefas já tinham saído da fila." };
+
+  await logAction(supabase, {
+    tenant_id,
+    user_id,
+    action: "task_skip_bulk",
+    entity: "task",
+    qtd: n,
+    detail: `${n} tarefa(s) pulada(s) em lote.`,
+  });
+  revalidatePath("/dashboard");
+  return { ok: true, count: n };
+}
+
+// EXCLUIR em lote: apaga a linha de verdade (DELETE). Não tem volta — por isso a
+// foto vai inteira para o action_log antes, com título, canal, contato e vencimento.
+export async function deleteTasks(ids: string[]) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const list = Array.from(new Set((ids || []).filter(Boolean))).slice(0, LOTE_MAX);
+  if (!list.length) return { error: "Nenhuma tarefa selecionada." };
+
+  const foto = await fotoTarefas(supabase, list, tenant_id);
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .delete()
+    .eq("tenant_id", tenant_id)
+    .in("id", list)
+    .select("id");
+  if (error) return { error: msgErro(error) };
+  const n = ((data as any[]) || []).length;
+  if (!n) return { error: "Nada foi excluído — as tarefas podem já ter saído da fila." };
+
+  const apagadas = new Set(((data as any[]) || []).map((r) => r.id));
+  const { itens, truncado } = recortarItens(foto.filter((f) => apagadas.has(f.id)));
+  const canais = Array.from(new Set(itens.map((i) => i.canal).filter(Boolean)));
+
+  await logAction(supabase, {
+    tenant_id,
+    user_id,
+    action: "task_delete",
+    entity: "task",
+    qtd: n,
+    detail:
+      `${n} tarefa(s) excluída(s) da caixa de hoje` +
+      (canais.length ? ` (${canais.join(", ")})` : "") +
+      ".",
+    meta: { itens, truncado, selecionadas: list.length },
+  });
+  revalidatePath("/dashboard");
+  return { ok: true, count: n };
 }

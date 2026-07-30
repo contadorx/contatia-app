@@ -22,9 +22,10 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   const [buscandoSug, setBuscandoSug] = useState(false);
   const [escolhidas, setEscolhidas] = useState<Atividade[]>([]);
   const [cnaeManual, setCnaeManual] = useState("");
-  const [uf, setUf] = useState("");
+  // UF e porte aceitam VÁRIOS (ex.: SP + RJ + MG; ME + EPP)
+  const [ufs, setUfs] = useState<string[]>([]);
   const [municipio, setMunicipio] = useState("");
-  const [porte, setPorte] = useState("");
+  const [portes, setPortes] = useState<string[]>([]);
   const [comEmail, setComEmail] = useState(true);
   const [emailCorp, setEmailCorp] = useState(false);
   const [ocultarJaTem, setOcultarJaTem] = useState(false);
@@ -41,6 +42,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
 
   const [msg, setMsg] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null); // API v2 no VPS ignorou multi
   const [buscando, startBusca] = useTransition();
   const [enviando, startEnvio] = useTransition();
   const [descartando, startDescarte] = useTransition();
@@ -79,9 +81,11 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       busca: busca.trim() || undefined,
       cnae: cnaes.length ? cnaes : undefined,
       atividade: !cnaes.length && termo.trim().length >= 3 ? termo.trim() : undefined,
-      uf: uf || undefined,
+      // ufs/portes = listas (API v3). O servidor manda também o 1º valor em uf/porte
+      // para a API v2 continuar respondendo em vez de quebrar.
+      ufs: ufs.length ? ufs : undefined,
       municipio: municipio.trim() || undefined,
-      porte: porte || undefined,
+      portes: portes.length ? portes : undefined,
       com_email: comEmail,
       email_corporativo: comEmail && emailCorp,
       ocultarJaTem,
@@ -89,14 +93,16 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   }
   const buscaDigitos = busca.replace(/\D/g, "");
   const temBusca = busca.trim().length >= 3 || buscaDigitos.length === 14;
-  const temFiltro = temBusca || escolhidas.length > 0 || cnaeManual.replace(/\D/g, "").length >= 7 || termo.trim().length >= 3 || !!uf;
+  const temFiltro = temBusca || escolhidas.length > 0 || cnaeManual.replace(/\D/g, "").length >= 7 || termo.trim().length >= 3 || ufs.length > 0;
 
   function buscar(offset = 0) {
     setErro(null);
     setMsg(null);
+    setAviso(null);
     startBusca(async () => {
       const r: any = await buscarNaBase(montarInput(), offset);
       if (r.error) { setErro(r.error); return; }
+      setAviso(r.avisoMulti || null);
       const novas: Empresa[] = r.rows || [];
       if (offset === 0) {
         setResultados(novas);
@@ -285,16 +291,17 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
         {/* região / porte */}
         <div className="mt-3 grid gap-3 sm:grid-cols-4">
           <div>
-            <label className="text-xs font-medium text-subtle">UF</label>
-            <SmartSelect placeholder="Todas" clearable value={uf} onValueChange={setUf} options={UFS.map((u) => ({ value: u, label: u }))} />
+            <label className="text-xs font-medium text-subtle">UF (pode marcar várias)</label>
+            <SmartSelect multiple placeholder="Todas" values={ufs} onValuesChange={setUfs} maxTagsShown={4}
+              options={UFS.map((u) => ({ value: u, label: u }))} />
           </div>
           <div className="sm:col-span-2">
             <label className="text-xs font-medium text-subtle">Município</label>
             <input className="input mt-1 w-full" placeholder="Ex.: Santo André" value={municipio} onChange={(e) => setMunicipio(e.target.value)} />
           </div>
           <div>
-            <label className="text-xs font-medium text-subtle">Porte</label>
-            <SmartSelect placeholder="Qualquer" clearable value={porte} onValueChange={setPorte}
+            <label className="text-xs font-medium text-subtle">Porte (pode marcar vários)</label>
+            <SmartSelect multiple placeholder="Qualquer" values={portes} onValuesChange={setPortes}
               options={[{ value: "ME", label: "ME" }, { value: "EPP", label: "EPP" }, { value: "Demais", label: "Demais" }]} />
           </div>
         </div>
@@ -326,6 +333,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       </div>
 
       {erro && <p className="mt-3 text-sm text-red-600">{erro}</p>}
+      {aviso && <p className="mt-3 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-sm text-warn">{aviso}</p>}
       {msg && <p className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{msg}</p>}
 
       {/* ---------- RESULTADOS ---------- */}

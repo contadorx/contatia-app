@@ -17,6 +17,9 @@ const groups: { title?: string; items: { href: string; label: string; primary?: 
   {
     title: "Dados",
     items: [
+      // Prospectar = o passo a passo (achar → gravar → descobrir canais → cadenciar).
+      // O Radar continua sendo a ferramenta de garimpo avulso (exportar, descartar).
+      { href: "/dashboard/prospectar", label: "Prospectar" },
       { href: "/dashboard/contatos", label: "Contatos" },
       { href: "/dashboard/contas", label: "Empresas" },
       { href: "/dashboard/radar", label: "Radar" },

@@ -3,6 +3,7 @@
 import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { logAction } from "@/lib/actionLog";
 
 async function ctx() {
   const supabase = createClient();
@@ -10,7 +11,7 @@ async function ctx() {
     data: { user },
   } = await supabase.auth.getUser();
   const { data } = await supabase.from("profiles").select("tenant_id").eq("id", user?.id ?? "").maybeSingle();
-  return { supabase, tenant_id: (data?.tenant_id as string) || null };
+  return { supabase, tenant_id: (data?.tenant_id as string) || null, user_id: user?.id };
 }
 
 export async function listTags() {
@@ -79,7 +80,7 @@ export async function removeTagFromContact(contactId: string, tagId: string) {
 // Aplica uma tag a vários contatos (lote) — dispara automação em cada um.
 // Aplica UMA OU VÁRIAS tags a vários contatos de uma vez. Aceita string (compat) ou array.
 export async function bulkTag(contactIds: string[], tags: string | string[]) {
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const tagIds = (Array.isArray(tags) ? tags : [tags]).filter(Boolean);
   if (!contactIds.length || !tagIds.length) return { error: "Selecione contatos e ao menos uma tag." };
@@ -90,6 +91,19 @@ export async function bulkTag(contactIds: string[], tags: string | string[]) {
   for (const id of contactIds.slice(0, 500)) {
     for (const tagId of tagIds) await fireTagAutomation(supabase, tenant_id, id, tagId);
   }
+  const { data: nomes } = await supabase.from("tags").select("name").in("id", tagIds);
+  await logAction(supabase, {
+    tenant_id,
+    user_id,
+    action: "contact_tag_bulk",
+    entity: "contact",
+    qtd: contactIds.length,
+    detail:
+      `Aplicou ${tagIds.length} tag(s) em ${contactIds.length} contato(s)` +
+      (((nomes as any[]) || []).length ? `: ${((nomes as any[]) || []).map((t) => t.name).join(", ")}` : "") +
+      ".",
+    meta: { tags: ((nomes as any[]) || []).map((t) => t.name) },
+  });
   revalidatePath("/dashboard/contatos");
   return { ok: true, count: contactIds.length, tags: tagIds.length };
 }

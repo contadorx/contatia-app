@@ -5,6 +5,10 @@ import { HOT_THRESHOLD } from "@/lib/scoring";
 import { UltimoToque, diasSemToque } from "@/lib/lastTouch";
 import ReportTabs from "@/components/ReportTabs";
 import GoalPanel from "@/components/GoalPanel";
+import SmartSelect from "@/components/SmartSelect";
+import LogFilterBar from "@/components/LogFilterBar";
+import { comoLista } from "@/lib/filtros";
+import { ACAO_LABEL, ACOES_DESTRUTIVAS, labelAcao } from "@/lib/actionLog";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +35,17 @@ function Secao({ id, titulo, desc, children }: { id: string; titulo: string; des
   );
 }
 
-export default async function Relatorios({ searchParams }: { searchParams: { dias?: string; frio?: string; vendedor?: string } }) {
+export default async function Relatorios({
+  searchParams,
+}: {
+  searchParams: {
+    dias?: string;
+    frio?: string;
+    vendedor?: string | string[];
+    logAcao?: string | string[];
+    logUser?: string | string[];
+  };
+}) {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const { data: me } = await supabase.from("profiles").select("role, team_role").eq("id", user?.id ?? "").maybeSingle();
@@ -39,7 +53,12 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
 
   const dias = Number(searchParams.dias) || 30;
   const frio = Number(searchParams.frio) || 30;
-  const vendedor = gestor ? (searchParams.vendedor || "") : (user?.id ?? "");
+  // vendedor segue SINGLE (meta/forecast/ticket são por pessoa); comoLista só protege
+  // contra ?vendedor=a&vendedor=b vindo de um link antigo ou colado à mão.
+  const vendedor = gestor ? (comoLista(searchParams.vendedor)[0] || "") : (user?.id ?? "");
+  // aba Registro: filtros MULTI (várias ações, vários usuários)
+  const logAcoes = comoLista(searchParams.logAcao);
+  const logUsers = gestor ? comoLista(searchParams.logUser) : [];
 
   const sinceISO = new Date(Date.now() - dias * 86400000).toISOString();
   const frioISO = new Date(Date.now() - frio * 86400000).toISOString();
@@ -288,42 +307,112 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
   // filtro (form GET)
   const memberOpts = ((members as any[]) || []);
 
+  // ================= REGISTRO DE AÇÕES (action_log) =================
+  // Quem apagou/mexeu em lote, quando e o quê. Recorte de visibilidade: gestor vê o
+  // workspace inteiro; quem não é gestor vê só as próprias ações (a RLS libera o
+  // workspace, o recorte de papel é feito aqui — igual às outras seções).
+  let logQ = supabase
+    .from("action_log")
+    .select("id, created_at, user_id, user_name, action, entity, qtd, detail, meta")
+    .gte("created_at", sinceISO)
+    .order("created_at", { ascending: false })
+    .limit(300);
+  if (!gestor) logQ = logQ.eq("user_id", user?.id ?? "");
+  else if (logUsers.length) logQ = logQ.in("user_id", logUsers);
+  else if (vendedor) logQ = logQ.eq("user_id", vendedor);
+  if (logAcoes.length) logQ = logQ.in("action", logAcoes);
+  const { data: logRows } = await logQ;
+  const logs = (logRows as any[]) || [];
+
+  const logDestrutivos = logs.filter((l) => ACOES_DESTRUTIVAS.includes(l.action));
+  const logRegistrosApagados = logDestrutivos.reduce((s, l) => s + (Number(l.qtd) || 0), 0);
+  // opções do filtro de ação: as conhecidas + qualquer ação nova que já apareça no log
+  const acoesNoLog = Array.from(new Set(logs.map((l) => l.action as string)));
+  const acaoOpts = Array.from(new Set([...Object.keys(ACAO_LABEL), ...acoesNoLog])).map((a) => ({
+    value: a,
+    label: labelAcao(a),
+  }));
+  // resumo "quem mais apagou" — o único número que um gestor olha primeiro
+  const logPorPessoa = Object.entries(
+    logDestrutivos.reduce((acc: Record<string, number>, l) => {
+      const nome = l.user_name || memberName(l.user_id) || "—";
+      acc[nome] = (acc[nome] || 0) + (Number(l.qtd) || 0);
+      return acc;
+    }, {})
+  ).sort((a, b) => b[1] - a[1]).slice(0, 6);
+
+  // Resumo dos itens atingidos, quando o log guardou a foto (meta.itens).
+  const resumoItens = (l: any): string => {
+    const itens = Array.isArray(l?.meta?.itens) ? l.meta.itens : [];
+    if (!itens.length) return "—";
+    const nomes = itens
+      .map((i: any) => i.titulo || i.nome || i.contato || i.empresa || null)
+      .filter(Boolean)
+      .slice(0, 3);
+    const extra = Math.max(0, (Number(l.qtd) || itens.length) - nomes.length);
+    if (!nomes.length) return `${itens.length} item(ns)`;
+    return nomes.join(" · ") + (extra > 0 ? ` +${extra}` : "");
+  };
+
   return (
     <div>
       <h1 className="font-display text-2xl font-bold">Resultados</h1>
       <p className="mt-1 text-sm text-subtle">Sua operação em números e em listas para agir: comece pela <b>Visão geral</b> e vá fundo nas listas quando algo pedir ação.</p>
 
-      {/* filtros */}
+      {/* filtros — SmartSelect com busca; o form segue GET puro (hidden inputs) */}
       <form className="mt-4 flex flex-wrap items-end gap-3">
-        <div>
+        <div className="w-[170px]">
           <label className="label">Período (produtividade)</label>
-          <select name="dias" defaultValue={String(dias)} className="input mt-1 py-1.5 text-sm">
-            <option value="7">7 dias</option>
-            <option value="15">15 dias</option>
-            <option value="30">30 dias</option>
-            <option value="90">90 dias</option>
-          </select>
+          <div className="mt-1">
+            <SmartSelect
+              name="dias"
+              defaultValue={String(dias)}
+              className="py-1.5 text-sm"
+              options={[
+                { value: "7", label: "7 dias" },
+                { value: "15", label: "15 dias" },
+                { value: "30", label: "30 dias" },
+                { value: "90", label: "90 dias" },
+              ]}
+            />
+          </div>
         </div>
-        <div>
+        <div className="w-[190px]">
           <label className="label">Considerar frio após</label>
-          <select name="frio" defaultValue={String(frio)} className="input mt-1 py-1.5 text-sm">
-            <option value="7">7 dias sem toque</option>
-            <option value="15">15 dias sem toque</option>
-            <option value="30">30 dias sem toque</option>
-            <option value="60">60 dias sem toque</option>
-          </select>
+          <div className="mt-1">
+            <SmartSelect
+              name="frio"
+              defaultValue={String(frio)}
+              className="py-1.5 text-sm"
+              options={[
+                { value: "7", label: "7 dias sem toque" },
+                { value: "15", label: "15 dias sem toque" },
+                { value: "30", label: "30 dias sem toque" },
+                { value: "60", label: "60 dias sem toque" },
+              ]}
+            />
+          </div>
         </div>
         {gestor && (
-          <div>
+          <div className="w-[210px]">
             <label className="label">Vendedor</label>
-            <select name="vendedor" defaultValue={vendedor} className="input mt-1 py-1.5 text-sm">
-              <option value="">Toda a equipe</option>
-              {memberOpts.map((m) => (
-                <option key={m.id} value={m.id}>{m.full_name || m.email}</option>
-              ))}
-            </select>
+            <div className="mt-1">
+              {/* single de propósito: meta, forecast e ticket médio são por PESSOA.
+                  Para cruzar vários vendedores, use a aba Registro (filtro multi). */}
+              <SmartSelect
+                name="vendedor"
+                defaultValue={vendedor}
+                clearable
+                placeholder="Toda a equipe"
+                className="py-1.5 text-sm"
+                options={memberOpts.map((m) => ({ value: m.id, label: m.full_name || m.email }))}
+              />
+            </div>
           </div>
         )}
+        {/* mantém os filtros da aba Registro ao reaplicar o filtro geral */}
+        {logAcoes.map((a) => <input key={a} type="hidden" name="logAcao" value={a} />)}
+        {logUsers.map((u) => <input key={u} type="hidden" name="logUser" value={u} />)}
         <button className="btn-brand px-4 py-1.5 text-sm" type="submit">Aplicar</button>
       </form>
 
@@ -629,6 +718,68 @@ export default async function Relatorios({ searchParams }: { searchParams: { dia
               }))}
             />
           </div>
+        </div>
+      </Secao>
+          ) },
+          { id: "registro", label: "Registro", node: (
+      <Secao
+        id="registro"
+        titulo="Registro de ações"
+        desc={`Trilha de auditoria do que a equipe fez de destrutivo ou em lote — exclusões de tarefas, contatos e empresas, tags e atribuições em massa. Últimos ${dias} dias. ${gestor ? "Como gestor, você vê o workspace inteiro." : "Você vê apenas as suas próprias ações."}`}
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Tile label="Ações registradas" value={String(logs.length)} sub={`nos últimos ${dias} dias`} />
+          <Tile label="Exclusões" value={String(logDestrutivos.length)} sub="ações que apagaram algo" />
+          <Tile label="Registros apagados" value={String(logRegistrosApagados)} sub="soma das linhas excluídas" />
+        </div>
+
+        {/* filtros MULTI da aba — navegação suave, para não perder a aba */}
+        <LogFilterBar
+          gestor={gestor}
+          acoes={logAcoes}
+          usuarios={logUsers}
+          acaoOpts={acaoOpts}
+          membroOpts={memberOpts.map((m) => ({ value: m.id, label: m.full_name || m.email }))}
+        />
+        {gestor && vendedor && !logUsers.length && (
+          <p className="mt-2 text-xs text-warn">
+            Mostrando só as ações de <b>{memberName(vendedor)}</b>, por causa do filtro <b>Vendedor</b> no topo da
+            página. Para ver o workspace inteiro, limpe aquele filtro (ou escolha as pessoas em “Quem fez”).
+          </p>
+        )}
+
+        {logPorPessoa.length > 0 && (
+          <div className="mt-4">
+            <p className="label mb-1">Quem apagou mais (registros)</p>
+            <div className="card flex flex-wrap gap-4 p-4">
+              {logPorPessoa.map(([nome, n]) => (
+                <Metric key={nome} label={nome} value={n} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4">
+          <Tabela
+            vazio="Nada registrado neste período. O registro passa a gravar a partir desta versão."
+            nota={`Mostra até 300 ações. O log guarda a foto do que foi apagado (nome, título, contato) — por isso a linha sobrevive à exclusão do registro. Ninguém edita nem apaga o log.`}
+            head={["Quando", "Quem", "Ação", "Qtd", "O que", "Detalhe"]}
+            rows={logs.map((l) => ({
+              key: String(l.id),
+              cells: [
+                <span className="whitespace-nowrap text-subtle">
+                  {new Date(l.created_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                </span>,
+                <span className="font-medium">{l.user_name || memberName(l.user_id)}</span>,
+                <span className={ACOES_DESTRUTIVAS.includes(l.action) ? "font-semibold text-danger" : "font-medium"}>
+                  {labelAcao(l.action)}
+                </span>,
+                <span className="font-semibold">{Number(l.qtd) || 0}</span>,
+                <span className="block max-w-[280px] truncate text-subtle" title={resumoItens(l)}>{resumoItens(l)}</span>,
+                <span className="block max-w-[320px] text-subtle">{l.detail || "—"}</span>,
+              ],
+            }))}
+          />
         </div>
       </Secao>
           ) },

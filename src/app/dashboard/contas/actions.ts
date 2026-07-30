@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { canCreate, mensagemLimite } from "@/lib/plan";
 import { nomeProprio } from "@/lib/cnpj";
+import { logAction, recortarItens } from "@/lib/actionLog";
 
 const soDig = (s: any) => String(s || "").replace(/\D/g, "");
 const normNome = (s: any) =>
@@ -183,10 +184,17 @@ export async function createContactForAccount(
 // Exclui uma empresa. contacts.account_id / opportunities.account_id são 'on delete set null'
 // (não apaga contatos/negócios, só desvincula); account_tags é cascade.
 export async function deleteAccountCompany(id: string) {
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
+  const { data: antes } = await supabase
+    .from("accounts").select("name, cnpj").eq("id", id).eq("tenant_id", tenant_id).maybeSingle();
   const { error } = await supabase.from("accounts").delete().eq("id", id).eq("tenant_id", tenant_id);
   if (error) return { error: msgErro(error) };
+  await logAction(supabase, {
+    tenant_id, user_id, action: "account_delete", entity: "account", entity_id: id, qtd: 1,
+    detail: `Excluiu a empresa ${antes?.name || "(sem nome)"}${antes?.cnpj ? ` — CNPJ ${antes.cnpj}` : ""}.`,
+    meta: { itens: antes ? [{ id, nome: antes.name, cnpj: antes.cnpj }] : [] },
+  });
   revalidatePath("/dashboard/contas");
   revalidatePath("/dashboard/contatos");
   return { ok: true };
@@ -199,7 +207,7 @@ export async function deleteAccountCompany(id: string) {
 
 // Aplica UMA ou VÁRIAS tags a várias empresas de uma vez.
 export async function bulkTagAccounts(accountIds: string[], tags: string | string[]) {
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const ids = (accountIds || []).filter(Boolean);
   const tagIds = (Array.isArray(tags) ? tags : [tags]).filter(Boolean);
@@ -207,18 +215,33 @@ export async function bulkTagAccounts(accountIds: string[], tags: string | strin
   const rows = ids.flatMap((account_id) => tagIds.map((tag_id) => ({ tenant_id, account_id, tag_id })));
   const { error } = await supabase.from("account_tags").upsert(rows, { onConflict: "account_id,tag_id", ignoreDuplicates: true });
   if (error) return { error: msgErro(error) };
+  const { data: nomes } = await supabase.from("tags").select("name").in("id", tagIds);
+  await logAction(supabase, {
+    tenant_id, user_id, action: "account_tag_bulk", entity: "account", qtd: ids.length,
+    detail: `Aplicou ${tagIds.length} tag(s) em ${ids.length} empresa(s).`,
+    meta: { tags: ((nomes as any[]) || []).map((t) => t.name), truncado: 0 },
+  });
   revalidatePath("/dashboard/contas");
   return { ok: true, count: ids.length, tags: tagIds.length };
 }
 
 // Atribui responsável (owner) a várias empresas.
 export async function bulkAssignAccounts(accountIds: string[], userId: string | null) {
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const ids = (accountIds || []).filter(Boolean);
   if (!ids.length) return { error: "Nenhuma empresa selecionada." };
   const { error } = await supabase.from("accounts").update({ owner_id: userId }).eq("tenant_id", tenant_id).in("id", ids);
   if (error) return { error: msgErro(error) };
+  let nomeDono = "sem dono";
+  if (userId) {
+    const { data: p } = await supabase.from("profiles").select("full_name, email").eq("id", userId).maybeSingle();
+    nomeDono = (p?.full_name as string) || (p?.email as string) || "outro membro";
+  }
+  await logAction(supabase, {
+    tenant_id, user_id, action: "account_assign_bulk", entity: "account", qtd: ids.length,
+    detail: `Atribuiu ${ids.length} empresa(s) a ${nomeDono}.`,
+  });
   revalidatePath("/dashboard/contas");
   revalidatePath("/dashboard/equipe");
   return { ok: true, count: ids.length };
@@ -226,15 +249,31 @@ export async function bulkAssignAccounts(accountIds: string[], userId: string | 
 
 // Exclui várias empresas. Os contatos vinculados ficam órfãos (account_id → null), não são apagados.
 export async function bulkDeleteAccounts(accountIds: string[]) {
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const ids = (accountIds || []).filter(Boolean);
   if (!ids.length) return { error: "Nenhuma empresa selecionada." };
-  const { error } = await supabase.from("accounts").delete().eq("tenant_id", tenant_id).in("id", ids);
+  const { data: antes } = await supabase
+    .from("accounts").select("id, name, cnpj").eq("tenant_id", tenant_id).in("id", ids);
+  const { data: apagadas, error } = await supabase
+    .from("accounts").delete().eq("tenant_id", tenant_id).in("id", ids).select("id");
   if (error) return { error: msgErro(error) };
+  const n = ((apagadas as any[]) || []).length;
+  if (!n) return { error: "Nada foi excluído — talvez essas empresas não sejam suas." };
+  const idsApagados = new Set(((apagadas as any[]) || []).map((r) => r.id));
+  const { itens, truncado } = recortarItens(
+    ((antes as any[]) || [])
+      .filter((a) => idsApagados.has(a.id))
+      .map((a) => ({ id: a.id, nome: a.name, cnpj: a.cnpj }))
+  );
+  await logAction(supabase, {
+    tenant_id, user_id, action: "account_delete_bulk", entity: "account", qtd: n,
+    detail: `${n} empresa(s) excluída(s) em lote.`,
+    meta: { itens, truncado, selecionadas: ids.length },
+  });
   revalidatePath("/dashboard/contas");
   revalidatePath("/dashboard/contatos");
-  return { ok: true, count: ids.length };
+  return { ok: true, count: n };
 }
 
 // Cria uma tag (para o criador inline na lista de Empresas).

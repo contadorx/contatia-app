@@ -4,10 +4,15 @@ import AccountImport from "@/components/AccountImport";
 import AccountsCockpit from "@/components/AccountsCockpit";
 import AccountsFilterBar from "@/components/AccountsFilterBar";
 import { produtosPorContatos } from "@/lib/produtos";
+import { comoLista } from "@/lib/filtros";
 
 export const dynamic = "force-dynamic";
 
-export default async function Contas({ searchParams }: { searchParams: { tag?: string; q?: string; produto?: string; view?: string } }) {
+export default async function Contas({
+  searchParams,
+}: {
+  searchParams: { tag?: string | string[]; q?: string; produto?: string | string[]; view?: string };
+}) {
   const supabase = createClient();
   const q = (searchParams.q || "").trim();
   const qSafe = q.slice(0, 80).replace(/[,()%*]/g, " ").trim();
@@ -59,10 +64,11 @@ export default async function Contas({ searchParams }: { searchParams: { tag?: s
     };
   });
 
-  const tagFilter = searchParams.tag || "";
-  if (tagFilter) rows = rows.filter((a) => a.tags.some((t: any) => t.id === tagFilter));
-  const produtoFilter = searchParams.produto || "";
-  if (produtoFilter) rows = rows.filter((a) => a.produtos.some((p) => p.id === produtoFilter));
+  // Filtros MULTI: dentro da caixa é OU (tem qualquer uma das tags), entre caixas é E.
+  const tagFilter = comoLista(searchParams.tag);
+  if (tagFilter.length) rows = rows.filter((a) => a.tags.some((t: any) => tagFilter.includes(t.id)));
+  const produtoFilter = comoLista(searchParams.produto);
+  if (produtoFilter.length) rows = rows.filter((a) => a.produtos.some((p) => produtoFilter.includes(p.id)));
 
   // Visões rápidas (in-memory) — o "trabalho do dia" em Empresas
   const view = searchParams.view || "";

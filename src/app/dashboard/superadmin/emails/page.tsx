@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import SmartSelect from "@/components/SmartSelect";
+import { comoLista } from "@/lib/filtros";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +14,7 @@ const KIND: Record<string, { l: string; c: string }> = {
   outro: { l: "Outro", c: "bg-muted text-subtle" },
 };
 
-export default async function EmailsPage({ searchParams }: { searchParams: { kind?: string } }) {
+export default async function EmailsPage({ searchParams }: { searchParams: { kind?: string | string[] } }) {
   const supabase = createClient();
   const {
     data: { user },
@@ -20,17 +22,16 @@ export default async function EmailsPage({ searchParams }: { searchParams: { kin
   const { data: me } = await supabase.from("profiles").select("is_superadmin").eq("id", user?.id ?? "").maybeSingle();
   if (!(me as any)?.is_superadmin) redirect("/dashboard");
 
-  const kind = searchParams?.kind || "";
+  // filtro MULTI: dá para olhar cobrança + suporte de uma vez (?kind=cobranca,suporte)
+  const kinds = comoLista(searchParams?.kind);
   let q = supabase
     .from("email_log")
     .select("id, to_email, subject, kind, status, error, created_at, tenant_id, tenants(name)")
     .order("created_at", { ascending: false })
     .limit(200);
-  if (kind) q = q.eq("kind", kind);
+  if (kinds.length) q = q.in("kind", kinds);
   const { data: rows } = await q;
   const list = (rows as any[]) || [];
-
-  const filters = ["", "comunicacao", "cobranca", "suporte", "vendas"];
 
   return (
     <div className="max-w-4xl">
@@ -43,17 +44,25 @@ export default async function EmailsPage({ searchParams }: { searchParams: { kin
       </div>
       <p className="mt-1 text-sm text-subtle">Tudo o que a plataforma enviou automaticamente (réguas de comunicação e cobrança).</p>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        {filters.map((f) => (
-          <Link
-            key={f || "all"}
-            href={f ? `/dashboard/superadmin/emails?kind=${f}` : "/dashboard/superadmin/emails"}
-            className={`rounded-full px-3 py-1 text-xs font-medium ${kind === f ? "bg-brand text-white" : "bg-muted text-subtle hover:text-ink"}`}
-          >
-            {f ? KIND[f]?.l || f : "Todos"}
-          </Link>
-        ))}
-      </div>
+      <form className="mt-4 flex flex-wrap items-end gap-2">
+        <div className="w-[280px]">
+          <label className="label">Tipo (pode marcar vários)</label>
+          <div className="mt-1">
+            <SmartSelect
+              multiple
+              name="kind"
+              defaultValues={kinds}
+              placeholder="Todos os tipos"
+              className="py-1.5 text-sm"
+              options={Object.entries(KIND).map(([v, k]) => ({ value: v, label: k.l }))}
+            />
+          </div>
+        </div>
+        <button className="btn-brand px-4 py-1.5 text-sm" type="submit">Filtrar</button>
+        {kinds.length > 0 && (
+          <Link href="/dashboard/superadmin/emails" className="btn-ghost px-3 py-1.5 text-sm">Limpar</Link>
+        )}
+      </form>
 
       <div className="mt-4 card divide-y divide-line">
         {!list.length && <p className="p-8 text-center text-sm text-subtle">Nenhum e-mail registrado ainda. (O log passa a gravar a partir desta versão.)</p>}

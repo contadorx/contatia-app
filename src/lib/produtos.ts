@@ -59,11 +59,14 @@ export async function produtosPorContatos(supabase: any, contactIds: string[]): 
   return out;
 }
 
-// IDs de contato inscritos em UM produto (para o FILTRO da lista).
-export async function contatoIdsPorProduto(supabase: any, productId: string): Promise<string[]> {
+// IDs de contato inscritos em UM ou VÁRIOS produtos (para o FILTRO da lista).
+// Vários produtos = OU (quem está em qualquer um deles) — é o que o filtro multi espera.
+export async function contatoIdsPorProduto(supabase: any, productId: string | string[]): Promise<string[]> {
+  const ids = (Array.isArray(productId) ? productId : [productId]).filter(Boolean);
+  if (!ids.length) return [];
   const [{ data: enr }, { data: opps }] = await Promise.all([
-    supabase.from("enrollments").select("contact_id, sequences!inner(product_id)").eq("sequences.product_id", productId),
-    supabase.from("opportunities").select("primary_contact_id").eq("product_id", productId).not("primary_contact_id", "is", null),
+    supabase.from("enrollments").select("contact_id, sequences!inner(product_id)").in("sequences.product_id", ids),
+    supabase.from("opportunities").select("primary_contact_id").in("product_id", ids).not("primary_contact_id", "is", null),
   ]);
   const set = new Set<string>();
   for (const e of (enr as any[]) || []) if (e?.contact_id) set.add(e.contact_id);
