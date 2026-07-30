@@ -3,7 +3,7 @@ import AccountTools from "@/components/AccountTools";
 import AccountImport from "@/components/AccountImport";
 import AccountsCockpit from "@/components/AccountsCockpit";
 import AccountsFilterBar from "@/components/AccountsFilterBar";
-import { produtosPorContatos } from "@/lib/produtos";
+import { produtosPorEmpresas } from "@/lib/produtos";
 import { comoLista } from "@/lib/filtros";
 
 export const dynamic = "force-dynamic";
@@ -36,16 +36,19 @@ export default async function Contas({
   const produtoList = (produtos as { id: string; name: string }[]) || [];
   const memberList = (members as { id: string; full_name: string | null; email: string }[]) || [];
 
-  // produtos por contato (agregamos por empresa depois) — 2 queries no total
-  const todosContatoIds = ((accounts as any[]) || []).flatMap((a) => ((a.contacts as any[]) || []).map((c) => c.id));
-  const produtosPorId = await produtosPorContatos(supabase, todosContatoIds);
+  // Produtos por EMPRESA — 2 consultas, filtradas pelas 300 empresas da página.
+  // ANTES isto passava a lista de ids de TODOS os contatos dessas empresas (~26 mil
+  // numa base grande) num único `.in()`: requisição gigante, lenta, e candidata a
+  // estourar o limite. Agora quem filtra é o banco, pelo account_id.
+  const idsEmpresas = ((accounts as any[]) || []).map((a) => a.id);
+  const produtosPorConta = await produtosPorEmpresas(supabase, idsEmpresas);
 
   let rows = ((accounts as any[]) || []).map((a) => {
     const contacts = (a.contacts as any[]) || [];
     const opps = (a.opportunities as any[]) || [];
-    // produtos da empresa = união dos produtos dos contatos + produtos das oportunidades
+    // produtos da empresa = vínculos por cadência dos contatos dela + produtos das oportunidades
     const map = new Map<string, { id: string; name: string }>();
-    for (const c of contacts) for (const p of produtosPorId[c.id] || []) map.set(p.id, { id: p.id, name: p.name });
+    for (const p of produtosPorConta[a.id] || []) map.set(p.id, { id: p.id, name: p.name });
     for (const o of opps) if (o.products?.id) map.set(o.products.id, { id: o.products.id, name: o.products.name });
     return {
       id: a.id,

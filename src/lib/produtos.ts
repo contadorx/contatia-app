@@ -59,6 +59,48 @@ export async function produtosPorContatos(supabase: any, contactIds: string[]): 
   return out;
 }
 
+// Produtos por EMPRESA, direto (para a lista de Empresas).
+//
+// POR QUE existe: a página de Empresas montava a lista de ids de TODOS os contatos
+// das 300 empresas e chamava produtosPorContatos com ela. Numa base como a do
+// ContadorX isso vira um `.in("contact_id", [~26.000 uuids])` — uma requisição de
+// quase 1 MB só de parâmetros, que o PostgREST tem que analisar antes de tocar no
+// banco. É lenta na melhor das hipóteses e estoura o limite da requisição na pior.
+//
+// Aqui o caminho é o inverso e custa 2 consultas fixas: pergunta ao banco pelos
+// vínculos JÁ FILTRADOS pelas 300 empresas, usando o join interno com contacts.
+export async function produtosPorEmpresas(supabase: any, accountIds: string[]): Promise<Record<string, ProdutoVinculo[]>> {
+  const ids = Array.from(new Set(accountIds)).filter(Boolean);
+  if (!ids.length) return {};
+  const [{ data: enr }, { data: opps }] = await Promise.all([
+    supabase
+      .from("enrollments")
+      .select("contacts!inner(account_id), sequences(product_id, products(id, name))")
+      .in("contacts.account_id", ids),
+    supabase
+      .from("opportunities")
+      .select("account_id, product_id, products(id, name)")
+      .in("account_id", ids)
+      .not("product_id", "is", null),
+  ]);
+  const porConta = new Map<string, Map<string, ProdutoVinculo>>();
+  const garantir = (aid: string) => {
+    let m = porConta.get(aid);
+    if (!m) { m = new Map(); porConta.set(aid, m); }
+    return m;
+  };
+  for (const e of (enr as any[]) || []) {
+    const aid = e?.contacts?.account_id;
+    if (aid) acumular(garantir(aid), e?.sequences?.products, "cadencia");
+  }
+  for (const o of (opps as any[]) || []) {
+    if (o?.account_id) acumular(garantir(o.account_id), o?.products, "oportunidade");
+  }
+  const out: Record<string, ProdutoVinculo[]> = {};
+  for (const [aid, m] of porConta) out[aid] = ordenar(m);
+  return out;
+}
+
 // IDs de contato inscritos em UM ou VÁRIOS produtos (para o FILTRO da lista).
 // Vários produtos = OU (quem está em qualquer um deles) — é o que o filtro multi espera.
 export async function contatoIdsPorProduto(supabase: any, productId: string | string[]): Promise<string[]> {
