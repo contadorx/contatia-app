@@ -24,7 +24,9 @@ export default async function Contas({
     .limit(300);
   // busca por nome, CNPJ ou domínio
   if (qSafe) accountsQuery = accountsQuery.or(`name.ilike.%${qSafe}%,cnpj.ilike.%${qSafe}%,domain.ilike.%${qSafe}%`);
-  const { data: accounts } = await accountsQuery;
+  // guarda o erro: sem isso, uma consulta que estoura o tempo limite vira "nenhuma
+  // empresa" na tela — indistinguível de base vazia.
+  const { data: accounts, error: erroEmpresas } = await accountsQuery;
 
   const [{ data: allTags }, { data: produtos }, { data: members }] = await Promise.all([
     supabase.from("tags").select("id, name, color").order("name", { ascending: true }),
@@ -94,6 +96,17 @@ export default async function Contas({
         tags={(allTags as { id: string; name: string }[]) || []}
         produtos={produtoList}
       />
+
+      {erroEmpresas && (
+        <div className="mt-4 rounded-xl border border-danger/30 bg-danger/5 p-4 text-sm">
+          <p className="font-semibold text-danger">A consulta de empresas falhou — a lista abaixo NÃO reflete sua base.</p>
+          <p className="mt-1 text-subtle">
+            Seus dados continuam no banco. Normalmente é tempo limite da consulta. Recarregue; se persistir, veja o
+            número real em <a href="/dashboard/config" className="text-brand-dark underline">Configurações → Negócio</a>.
+          </p>
+          <p className="mt-2 font-mono text-[11px] text-subtle">{erroEmpresas.message}</p>
+        </div>
+      )}
 
       <div className="mt-6">
         <AccountsCockpit rows={rows} allTags={(allTags as any[]) || []} members={memberList} />

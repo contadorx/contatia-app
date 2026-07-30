@@ -12,6 +12,7 @@ import WhatsAppConnect from "@/components/WhatsAppConnect";
 import BusinessProfileForm from "@/components/BusinessProfileForm";
 import SignatureForm from "@/components/SignatureForm";
 import ConfigTabs from "@/components/ConfigTabs";
+import WorkspaceInfo from "@/components/WorkspaceInfo";
 
 export const dynamic = "force-dynamic";
 
@@ -67,14 +68,22 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  const { data: me } = await supabase.from("profiles").select("role, email").eq("id", user?.id ?? "").maybeSingle();
   const isOwner = (me as any)?.role === "owner";
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("inbound_token, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature, whatsapp_mode, whatsapp_risk_ack_at, booking_enabled, booking_duration_min, booking_days, booking_start_hour, booking_end_hour, booking_title")
+    .select("id, name, subscription_status, suspended_at, archived_at, inbound_token, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature, whatsapp_mode, whatsapp_risk_ack_at, booking_enabled, booking_duration_min, booking_days, booking_start_hour, booking_end_hour, booking_title")
     .maybeSingle();
   const inboundToken = (tenant as any)?.inbound_token as string | undefined;
+
+  // Contagem REAL no banco — é o que separa "os dados sumiram" de "a tela não mostrou".
+  // head:true devolve só o número, sem baixar as linhas.
+  const [{ count: nContatos, error: errCont }, { count: nEmpresas, error: errEmp }] = await Promise.all([
+    supabase.from("contacts").select("id", { count: "exact", head: true }),
+    supabase.from("accounts").select("id", { count: "exact", head: true }),
+  ]);
+  const erroContagem = errCont?.message || errEmp?.message || null;
 
   const { data: waAccounts } = await supabase
     .from("whatsapp_accounts")
@@ -125,6 +134,21 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
         <ConfigTabs tabs={["Negócio", "Canais", "Conexões"]} initial={initialTab}>
           {/* ===================== NEGÓCIO ===================== */}
           <div>
+            <Section title="Identificação técnica" desc="O ID do workspace (para suporte e consultas no banco) e o retrato do que existe hoje — útil quando uma lista aparece vazia e você precisa saber se é dado ou exibição.">
+              <WorkspaceInfo
+                id={((tenant as any)?.id as string) || null}
+                nome={((tenant as any)?.name as string) || null}
+                status={((tenant as any)?.subscription_status as string) || null}
+                suspensoEm={((tenant as any)?.suspended_at as string) || null}
+                arquivadoEm={((tenant as any)?.archived_at as string) || null}
+                seuEmail={((me as any)?.email as string) || user?.email || null}
+                seuPapel={((me as any)?.role as string) || null}
+                contatos={erroContagem ? null : (nContatos ?? 0)}
+                empresas={erroContagem ? null : (nEmpresas ?? 0)}
+                erroContagem={erroContagem}
+              />
+            </Section>
+
             <Section title="Identidade e marca" desc="Nome, documento e marca do workspace — usados nos entregáveis white-label (assinatura, propostas, relatórios).">
               <div className="card p-5">
                 <BusinessProfileForm biz={(tenant as any) || {}} canEdit={isOwner} />

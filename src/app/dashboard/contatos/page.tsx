@@ -108,7 +108,10 @@ export default async function Contatos({
     contactsQuery = contactsQuery.or(`last_activity_at.is.null,last_activity_at.lt.${corte.toISOString()}`);
   }
 
-  const [{ data: contacts }, { data: sequences }, { data: members }, { data: produtos }] = await Promise.all([
+  // NÃO ignore o `error` daqui. Quando a consulta estoura o tempo limite do Postgres,
+  // `data` vem null e a tela mostrava "nenhum contato" — igualzinho a uma base vazia.
+  // Isso já custou um susto de "os contatos sumiram": eram 22 mil, intactos.
+  const [{ data: contacts, error: erroContatos }, { data: sequences }, { data: members }, { data: produtos }] = await Promise.all([
     contactsQuery,
     supabase.from("sequences").select("id, name").eq("is_active", true).order("created_at", { ascending: false }),
     supabase.from("profiles").select("id, full_name, email").eq("is_active", true),
@@ -168,6 +171,18 @@ export default async function Contatos({
         produtos={produtoList}
         cadencias={seqs}
       />
+
+      {erroContatos && (
+        <div className="mt-4 rounded-xl border border-danger/30 bg-danger/5 p-4 text-sm">
+          <p className="font-semibold text-danger">A consulta de contatos falhou — a lista abaixo NÃO reflete sua base.</p>
+          <p className="mt-1 text-subtle">
+            Seus dados continuam no banco. O motivo costuma ser consulta lenta demais (tempo limite) ou queda momentânea
+            do banco. Recarregue; se persistir, tire um filtro ou confira o número real em{" "}
+            <a href="/dashboard/config" className="text-brand-dark underline">Configurações → Negócio</a>.
+          </p>
+          <p className="mt-2 font-mono text-[11px] text-subtle">{erroContatos.message}</p>
+        </div>
+      )}
 
       <div className="mt-4">
         <ContactsTable contacts={contactsComEsteira} sequences={seqs} members={memberList} tags={tagList} products={produtosContato} />
