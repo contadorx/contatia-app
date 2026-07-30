@@ -24,8 +24,22 @@ type Contact = {
   assigned_to: string | null;
   last_activity_at?: string | null;
   wa_status?: string | null;
+  web_capture?: string | null;
+  emailPendente?: boolean;
   contact_tags?: { tag_id: string; tags: { id: string; name: string; color: string } | null }[];
 };
+
+// Estágio da esteira do Radar, derivado dos campos existentes (sem query extra por linha).
+// Ordem: raspando o site → descobrindo e-mail → verificando WhatsApp → pronto → sem canal.
+function esteiraStage(c: Contact): { label: string; cls: string; pulse: boolean } | null {
+  const naEsteira = c.web_capture != null || c.emailPendente || c.wa_status != null || c.origin?.startsWith("Radar");
+  if (!naEsteira) return null; // contato manual, fora da esteira
+  if (c.web_capture === "queued") return { label: "Site", cls: "bg-amber-100 text-amber-700", pulse: true };
+  if (c.emailPendente) return { label: "E-mail", cls: "bg-amber-100 text-amber-700", pulse: true };
+  if (c.wa_status === "queued") return { label: "WhatsApp", cls: "bg-amber-100 text-amber-700", pulse: true };
+  if (c.email || c.wa_status === "valid") return { label: "Pronto", cls: "bg-emerald-100 text-emerald-700", pulse: false };
+  return { label: "Sem canal", cls: "bg-gray-100 text-gray-500", pulse: false };
+}
 type Member = { id: string; full_name: string | null; email: string };
 type Seq = { id: string; name: string };
 type Tag = { id: string; name: string; color: string };
@@ -314,6 +328,16 @@ export default function ContactsTable({
                     <Link href={`/dashboard/contatos/${c.id}`} className="text-brand-dark hover:underline">
                       {c.name}
                     </Link>
+                    {(() => {
+                      const st = esteiraStage(c);
+                      if (!st) return null;
+                      return (
+                        <span className={`ml-2 inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${st.cls}`} title="Estágio na esteira do Radar">
+                          {st.pulse && <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />}
+                          {st.label}
+                        </span>
+                      );
+                    })()}
                     {c.contact_tags && c.contact_tags.length > 0 && (
                       <div className="mt-1 flex flex-wrap gap-1">
                         {c.contact_tags.map((ct) =>

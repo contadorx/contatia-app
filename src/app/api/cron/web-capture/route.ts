@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
 import { captureContactsBatch, buildCaptureUpdate } from "@/lib/webPhone";
+import { findPublishedEmail } from "@/lib/webEmail";
 import { dominioDe } from "@/lib/emailFinder";
 
 export const dynamic = "force-dynamic";
@@ -25,13 +26,14 @@ export async function GET(req: Request) {
 
   const { data: rows } = await admin
     .from("contacts")
-    .select("id, tenant_id, phone, company_domain, wa_status, accounts(domain)")
+    .select("id, tenant_id, phone, email, company_domain, wa_status, accounts(domain)")
     .eq("web_capture", "queued")
     .limit(BATCH);
   const list = ((rows as any[]) || []).map((c) => ({
     id: c.id,
     tenant_id: c.tenant_id,
     phone: c.phone as string | null,
+    email: (c.email as string | null) || null,
     wa_status: c.wa_status as string | null,
     domain: dominioDe(c.company_domain || c.accounts?.domain || null),
   }));
@@ -49,17 +51,43 @@ export async function GET(req: Request) {
     Date.now() + 45_000
   );
 
+  // E-MAIL PUBLICADO no site (mesma etapa da esteira, HTTP puro): para os contatos
+  // que ainda não têm e-mail, busca contato@/comercial@… na home + páginas de contato.
+  // É o e-mail mais seguro em LGPD (a empresa o divulgou) e resolve muitos casos sem
+  // precisar da descoberta por SMTP. Só nos que foram alcançados nesta rodada.
+  const alcancados = new Set(results.filter((r) => !r.skipped).map((r) => r.id));
+  const semEmail = comDom.filter((c) => !c.email && alcancados.has(c.id));
+  const emailPorId = new Map<string, string>();
+  const emailDeadline = Date.now() + 40_000;
+  {
+    let j = 0;
+    const worker = async () => {
+      while (j < semEmail.length) {
+        if (Date.now() > emailDeadline) return;
+        const c = semEmail[j++];
+        try {
+          const r = await findPublishedEmail(c.domain!);
+          if (r?.email) emailPorId.set(c.id, r.email);
+        } catch { /* ignora: e-mail é bônus, não bloqueia a captura */ }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(6, semEmail.length) }, worker));
+  }
+
   const nowIso = new Date().toISOString();
-  let achou = 0, whats = 0;
+  let achou = 0, whats = 0, emails = 0;
   await Promise.all(
     results.map((r) => {
       if (r.skipped) return null; // não alcançado nesta rodada → segue 'queued'
       const cur = byId.get(r.id)!;
       if (r.whatsapp) { achou++; whats++; }
       else if (r.phone) achou++;
-      return admin.from("contacts").update(buildCaptureUpdate(r, cur, nowIso)).eq("id", r.id);
+      const upd = buildCaptureUpdate(r, cur, nowIso);
+      const mail = emailPorId.get(r.id);
+      if (mail && !cur.email) { upd.email = mail; emails++; }
+      return admin.from("contacts").update(upd).eq("id", r.id);
     })
   );
 
-  return NextResponse.json({ ok: true, capturados: comDom.length, achou, whats });
+  return NextResponse.json({ ok: true, capturados: comDom.length, achou, whats, emails });
 }

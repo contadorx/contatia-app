@@ -20,7 +20,7 @@ async function accessToken(refreshToken: string): Promise<string | null> {
 
 export async function createCalendarEvent(
   refreshToken: string,
-  input: { summary: string; startISO: string; durationMin: number; attendeeEmail?: string | null; location?: string | null; description?: string | null }
+  input: { summary: string; startISO: string; durationMin: number; attendeeEmail?: string | null; attendeeEmails?: string[]; location?: string | null; description?: string | null }
 ): Promise<{ id?: string; link?: string; error?: string }> {
   const token = await accessToken(refreshToken);
   if (!token) return { error: "Não foi possível autenticar no Google." };
@@ -34,7 +34,10 @@ export async function createCalendarEvent(
   };
   if (input.location) body.location = input.location;
   if (input.description) body.description = input.description;
-  if (input.attendeeEmail) body.attendees = [{ email: input.attendeeEmail }];
+  // aceita vários convidados (attendeeEmails) ou um só (attendeeEmail) — retrocompatível
+  const emails = (input.attendeeEmails && input.attendeeEmails.length ? input.attendeeEmails : (input.attendeeEmail ? [input.attendeeEmail] : []))
+    .map((e) => (e || "").trim()).filter(Boolean);
+  if (emails.length) body.attendees = Array.from(new Set(emails)).map((email) => ({ email }));
 
   const res = await fetch(
     "https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all",

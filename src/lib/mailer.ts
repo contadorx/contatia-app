@@ -41,11 +41,28 @@ function buildTransport(a: EmailAccount) {
 
 export async function sendEmail(
   account: EmailAccount,
-  msg: { to: string; subject: string; text: string; html?: string }
+  msg: {
+    to: string;
+    subject: string;
+    text: string;
+    html?: string;
+    // convite de calendário (.ics). O nodemailer monta o MIME certo
+    // (text/calendar; method=REQUEST) → Gmail/Outlook mostram o convite e travam a agenda.
+    icalEvent?: { method: string; content: string; filename?: string };
+  }
 ) {
   const transport = buildTransport(account);
   const from = account.display_name
     ? `${account.display_name} <${account.from_email}>`
     : account.from_email;
-  await transport.sendMail({ from, to: msg.to, subject: msg.subject, text: msg.text, ...(msg.html ? { html: msg.html } : {}) });
+  await transport.sendMail({
+    from,
+    to: msg.to,
+    subject: msg.subject,
+    text: msg.text,
+    ...(msg.html ? { html: msg.html } : {}),
+    ...(msg.icalEvent
+      ? { icalEvent: { method: msg.icalEvent.method, filename: msg.icalEvent.filename || "convite.ics", content: msg.icalEvent.content } }
+      : {}),
+  });
 }

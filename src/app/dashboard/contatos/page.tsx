@@ -57,7 +57,7 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
 
   let contactsQuery = supabase
     .from("contacts")
-    .select("id, name, email, phone, company, origin, status, score, assigned_to, created_at, last_activity_at, wa_status, contact_tags(tag_id, tags(id, name, color))")
+    .select("id, name, email, phone, company, origin, status, score, assigned_to, created_at, last_activity_at, wa_status, web_capture, contact_tags(tag_id, tags(id, name, color))")
     .order("score", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(200);
@@ -112,6 +112,19 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
   const produtosContato: Record<string, { id: string; name: string }[]> = {};
   for (const [cid, arr] of Object.entries(produtosPorId)) produtosContato[cid] = arr.map((p) => ({ id: p.id, name: p.name }));
 
+  // ESTEIRA: quais contatos ainda estão na fila de descoberta de e-mail (SMTP).
+  // 1 query só, para pintar o estágio "Buscando e-mail" na lista.
+  const emailPendente = new Set<string>();
+  if (contatoIds.length) {
+    const { data: eq } = await supabase
+      .from("email_discovery_queue")
+      .select("contact_id")
+      .eq("status", "pending")
+      .in("contact_id", contatoIds);
+    for (const r of (eq as any[]) || []) if (r.contact_id) emailPendente.add(r.contact_id);
+  }
+  const contactsComEsteira = ((contacts as any[]) || []).map((c) => ({ ...c, emailPendente: emailPendente.has(c.id) }));
+
   return (
     <div>
       <div className="flex items-start justify-between gap-3">
@@ -143,7 +156,7 @@ export default async function Contatos({ searchParams }: { searchParams: { tag?:
       />
 
       <div className="mt-4">
-        <ContactsTable contacts={(contacts as any[]) || []} sequences={seqs} members={memberList} tags={tagList} products={produtosContato} />
+        <ContactsTable contacts={contactsComEsteira} sequences={seqs} members={memberList} tags={tagList} products={produtosContato} />
       </div>
     </div>
   );

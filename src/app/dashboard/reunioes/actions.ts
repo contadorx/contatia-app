@@ -45,8 +45,12 @@ async function removeGoogleEvent(supabase: any, meetingId: string) {
   }
 }
 
+const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export async function scheduleMeeting(input: {
-  contact_id: string;
+  contact_id?: string;            // retrocompatível (1 contato)
+  contact_ids?: string[];         // vários contatos
+  guest_emails?: string[];        // convidados avulsos (sem contato cadastrado)
   title: string;
   datetime: string; // ISO local do input datetime-local
   duration_min?: number;
@@ -58,75 +62,140 @@ export async function scheduleMeeting(input: {
 }) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
-  if (!input.contact_id) return { error: "Escolha o contato." };
   if (!input.datetime) return { error: "Defina data e hora." };
 
+  // junta os contatos (contact_id único + lista) e os convidados avulsos por e-mail
+  const contactIds = Array.from(new Set([
+    ...(input.contact_id ? [input.contact_id] : []),
+    ...((input.contact_ids || []).filter(Boolean)),
+  ]));
+  const guestEmails = Array.from(new Set(
+    (input.guest_emails || []).map((e) => (e || "").trim().toLowerCase()).filter((e) => emailRe.test(e))
+  ));
+
+  let contatos: any[] = [];
+  if (contactIds.length) {
+    const { data } = await supabase
+      .from("contacts")
+      .select("id, name, company, phone, email, assigned_to")
+      .in("id", contactIds);
+    contatos = (data as any[]) || [];
+  }
+  if (!contatos.length && !guestEmails.length) {
+    return { error: "Escolha ao menos um contato ou informe o e-mail de um convidado." };
+  }
+
   const when = new Date(input.datetime);
-  const { data: contact } = await supabase
-    .from("contacts")
-    .select("id, name, company, phone, email, assigned_to")
-    .eq("id", input.contact_id)
-    .single();
-  if (!contact) return { error: "Contato não encontrado." };
-  const assigned = (contact.assigned_to as string) || user_id;
+  const primary = contatos[0] || null;                    // contato principal (pode ser nulo: só convidado avulso)
+  const assigned = (primary?.assigned_to as string) || user_id;
+  const titulo = input.title?.trim() || "Reunião";
+
+  // lista de convidados (com e-mail) para o convite: contatos + avulsos
+  const convidados = [
+    ...contatos.filter((c) => c.email).map((c) => ({ email: String(c.email).toLowerCase(), name: c.name as string })),
+    ...guestEmails.map((e) => ({ email: e, name: null as string | null })),
+  ];
+  const emailsConvite = Array.from(new Set(convidados.map((c) => c.email)));
 
   const { data: meeting, error } = await supabase
     .from("meetings")
     .insert({
       tenant_id,
-      contact_id: input.contact_id,
+      contact_id: primary?.id || null,   // meetings.contact_id é opcional → permite convidado avulso
       assigned_to: assigned,
-      title: input.title?.trim() || "Reunião",
+      title: titulo,
       datetime: when.toISOString(),
       duration_min: Number(input.duration_min) || 30,
       location: input.location?.trim() || null,
       notes: input.notes?.trim() || null,
       status: "agendada",
-      reminder_config: { "24h": input.remind_24h, "1h": input.remind_1h, canais: input.channels },
+      reminder_config: {
+        "24h": input.remind_24h, "1h": input.remind_1h, canais: input.channels,
+        // guarda todos os convidados (o meetings só tem 1 contact_id)
+        convidados,
+        contact_ids: contatos.map((c) => c.id),
+      },
     })
     .select()
     .single();
   if (error) return { error: msgErro(error) };
 
-  // gera as tarefas de lembrete como toques na fila (reusa o motor de cadência)
-  const reminders: { channel: string; due: string; label: string }[] = [];
+  // LEMBRETES: uma tarefa por contato cadastrado (o avulso não tem ficha para virar tarefa)
   const dayBefore = new Date(when);
   dayBefore.setDate(dayBefore.getDate() - 1);
   const todayISO = new Date().toISOString().slice(0, 10);
-
-  for (const canal of input.channels) {
-    if (input.remind_24h) {
-      const due = dayBefore.toISOString().slice(0, 10);
-      reminders.push({ channel: canal, due: due < todayISO ? todayISO : due, label: "Lembrete 24h" });
-    }
-    if (input.remind_1h) {
-      // 1h antes cai no mesmo dia da reunião
-      reminders.push({ channel: canal, due: when.toISOString().slice(0, 10), label: "Lembrete 1h" });
-    }
-  }
-
-  if (reminders.length) {
-    const dt = when.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  const dt = when.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  const tasks: any[] = [];
+  for (const c of contatos) {
     const body = renderTemplate(
       `Olá {{primeiro_nome}}, confirmando nossa reunião em ${dt}. Responda SIM para confirmar. Qualquer coisa, me avise para remarcar.`,
-      contact
+      c
     );
-    const tasks = reminders.map((r) => ({
-      tenant_id,
-      contact_id: input.contact_id,
-      assigned_to: assigned,
-      channel: r.channel,
-      title: `${r.label} — ${input.title || "Reunião"}`,
-      generated_content: body,
-      due_date: r.due,
-      status: "pending",
-    }));
-    await supabase.from("tasks").insert(tasks);
+    for (const canal of input.channels) {
+      if (input.remind_24h) {
+        const due = dayBefore.toISOString().slice(0, 10);
+        tasks.push({ tenant_id, contact_id: c.id, assigned_to: assigned, channel: canal,
+          title: `Lembrete 24h — ${titulo}`, generated_content: body, due_date: due < todayISO ? todayISO : due, status: "pending" });
+      }
+      if (input.remind_1h) {
+        tasks.push({ tenant_id, contact_id: c.id, assigned_to: assigned, channel: canal,
+          title: `Lembrete 1h — ${titulo}`, generated_content: body, due_date: when.toISOString().slice(0, 10), status: "pending" });
+      }
+    }
+  }
+  if (tasks.length) await supabase.from("tasks").insert(tasks);
+
+  for (const c of contatos) {
+    await scoreEvent(supabase, { tenant_id, contact_id: c.id, type: "meeting", meta: { meeting_id: meeting.id } });
   }
 
-  await scoreEvent(supabase, { tenant_id, contact_id: input.contact_id, type: "meeting", meta: { meeting_id: meeting.id } });
+  // ============================================================
+  // CONVITE DE CALENDÁRIO (.ics) — trava a agenda do outro lado, com ou sem Google.
+  // Envia UM e-mail com o convite para todos os convidados, pela caixa ativa do workspace.
+  // ============================================================
+  let conviteEnviado = false;
+  let conviteErro: string | null = null;
+  if (emailsConvite.length) {
+    try {
+      const { data: box } = await supabase
+        .from("email_accounts")
+        .select("provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token")
+        .eq("is_active", true)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (!box) {
+        conviteErro = "Convite não enviado: conecte uma caixa de e-mail em Config para mandar o convite de agenda.";
+      } else {
+        const { buildIcs } = await import("@/lib/ics");
+        const { sendEmail } = await import("@/lib/mailer");
+        const organizer = { email: (box as any).from_email as string, name: (box as any).display_name as string | null };
+        const ics = buildIcs({
+          uid: `${meeting.id}@contatia`,
+          summary: titulo,
+          startISO: when.toISOString(),
+          durationMin: Number(input.duration_min) || 30,
+          organizer,
+          attendees: convidados,
+          location: input.location?.trim() || null,
+          description: input.notes?.trim() || null,
+        });
+        const linha = input.location?.trim() ? `\nLocal/link: ${input.location.trim()}` : "";
+        const texto = `Você foi convidado para: ${titulo}\nQuando: ${dt} (${Number(input.duration_min) || 30} min)${linha}\n\nO convite está anexado — aceite para bloquear na sua agenda.`;
+        await sendEmail(box as any, {
+          to: emailsConvite.join(", "),
+          subject: `Convite: ${titulo} — ${dt}`,
+          text: texto,
+          icalEvent: { method: "REQUEST", content: ics, filename: "convite.ics" },
+        });
+        conviteEnviado = true;
+      }
+    } catch (e: any) {
+      conviteErro = `Convite não enviado: ${msgErro(e)}`;
+    }
+  }
 
-  // Google Calendar: se houver conta Google conectada, cria o evento + convite
+  // Google Calendar: se houver conta Google conectada, cria o evento com todos os convidados
   try {
     const { data: acct } = await supabase
       .from("email_accounts")
@@ -141,10 +210,10 @@ export async function scheduleMeeting(input: {
     if (refresh) {
       const { createCalendarEvent } = await import("@/lib/gcal");
       const ev = await createCalendarEvent(refresh, {
-        summary: input.title?.trim() || "Reunião",
+        summary: titulo,
         startISO: when.toISOString(),
         durationMin: Number(input.duration_min) || 30,
-        attendeeEmail: (contact as any).email || null,
+        attendeeEmails: emailsConvite,
         location: input.location?.trim() || null,
         description: input.notes?.trim() || null,
       });
@@ -158,7 +227,7 @@ export async function scheduleMeeting(input: {
 
   revalidatePath("/dashboard/reunioes");
   revalidatePath("/dashboard");
-  return { ok: true, googleConnected: true };
+  return { ok: true, conviteEnviado, conviteErro, convidados: emailsConvite.length };
 }
 
 export async function saveRecording(id: string, url: string) {

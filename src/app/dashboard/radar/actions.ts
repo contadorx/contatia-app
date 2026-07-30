@@ -21,6 +21,15 @@ const soDigitos = (s: string | null | undefined) => (s || "").replace(/\D/g, "")
 const normNome = (s: string | null | undefined) =>
   (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
+// Sócio pessoa jurídica não tem "e-mail do decisor" descoberto por nome: pula a fila
+// SMTP para não gastar conversa à toa (razão social com LTDA/S.A/EIRELI, dígitos, etc.).
+function pareceEmpresa(nome: string): boolean {
+  const n = normNome(nome);
+  if (!n) return true;
+  if (/\d/.test(n)) return true;
+  return /\b(ltda|s\/a|s a|sa|eireli|mei|epp|me|cia|s\.a|associacao|instituto|fundacao|igreja|condominio|municipio|prefeitura|ltda\.)\b/.test(n);
+}
+
 // Monta o filtro da API a partir do que a tela envia (validação básica).
 function montarFiltro(input: any): FiltroReceita {
   const cnae = Array.isArray(input?.cnae) ? input.cnae.map(soDigitos).filter((c: string) => /^\d{7}$/.test(c)) : [];
@@ -278,6 +287,9 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
   let pulados = 0;
   let limiteAtingido = false;
   const vistos = new Set<string>();
+  // fila de descoberta de e-mail (SMTP): cada contato com NOME de pessoa + domínio e
+  // SEM e-mail vira um job. É o que dá e-mail próprio ao sócio na esteira do Radar.
+  const filaEmail: { tenant_id: string; contact_id: string; name: string; domain: string }[] = [];
   const tagId = await tagRadarId(supabase, tenant_id); // marca as empresas como vindas do Radar
   const contasParaMarcar = new Set<string>();
 
@@ -364,14 +376,15 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
       // carrega — assim não duplicamos o mesmo e-mail corporativo em todos os sócios,
       // e só uma verificação de WhatsApp é enfileirada por empresa.
       const primeiro = !criouAlgum;
-      const { error: errC } = await supabase.from("contacts").insert({
+      const emailContato = primeiro ? email : null;
+      const { data: novoContato, error: errC } = await supabase.from("contacts").insert({
         tenant_id,
         assigned_to: user_id ?? null,
         name: nome,
         company: companyNome,
         account_id,
         cnpj,
-        email: primeiro ? email : null,
+        email: emailContato,
         phone: primeiro ? (e.telefone || null) : null,
         company_domain: dominio,
         origin: socios.length ? "Radar (sócio)" : "Radar",
@@ -380,8 +393,15 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
         // WhatsApp; domínio corporativo (em todos) → fila de captura no site do sócio.
         wa_status: primeiro && e.telefone ? "queued" : null,
         web_capture: dominio ? "queued" : null,
-      });
-      if (!errC) { criouAlgum = true; contatosCriados++; }
+      }).select("id").single();
+      if (!errC && novoContato) {
+        criouAlgum = true;
+        contatosCriados++;
+        // sem e-mail + domínio + nome de pessoa → entra na descoberta de e-mail (SMTP)
+        if (!emailContato && dominio && !pareceEmpresa(nome)) {
+          filaEmail.push({ tenant_id, contact_id: (novoContato as any).id, name: nome, domain: dominio });
+        }
+      }
     }
     if (criouAlgum) contatoTemCnpj.add(cnpj);
   }
@@ -390,6 +410,12 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
   if (tagId && contasParaMarcar.size) {
     const rows = Array.from(contasParaMarcar).map((account_id) => ({ tenant_id, account_id, tag_id: tagId }));
     await supabase.from("account_tags").upsert(rows, { onConflict: "account_id,tag_id", ignoreDuplicates: true });
+  }
+
+  // enfileira a descoberta de e-mail dos sócios (o cron /email-discovery drena de
+  // hora em hora). Falha aqui não derruba o envio — os contatos já foram criados.
+  if (filaEmail.length) {
+    await supabase.from("email_discovery_queue").insert(filaEmail);
   }
 
   revalidatePath("/dashboard/contatos");
