@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import MeetingStatusButtons from "@/components/MeetingStatusButtons";
 import MeetingOutcome from "@/components/MeetingOutcome";
+import MeetingReschedule from "@/components/MeetingReschedule";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,10 @@ export default async function ReuniaoDetalhe({ params }: { params: { id: string 
   const M = m as any;
   const st = STATUS[M.status] || STATUS.agendada;
   const isPast = new Date(M.datetime) < new Date();
+
+  // a agenda pública ligada é o que permite mandar o link de remarcação no e-mail
+  const { data: tCfg } = await supabase.from("tenants").select("booking_enabled, inbound_token").maybeSingle();
+  const agendaPublicaOn = !!((tCfg as any)?.booking_enabled && (tCfg as any)?.inbound_token);
 
   // eventos da timeline do contato relacionados a reunião
   const { data: evs } = M.contact_id
@@ -111,7 +116,10 @@ export default async function ReuniaoDetalhe({ params }: { params: { id: string 
         {/* Ações de status */}
         <div className="mt-6 border-t border-line pt-4">
           <p className="label mb-2">Status da reunião</p>
-          <MeetingStatusButtons id={M.id} contactId={M.contact_id} status={M.status} />
+          <div className="flex flex-wrap items-start gap-2">
+            <MeetingStatusButtons id={M.id} contactId={M.contact_id} status={M.status} />
+            {M.status !== "realizada" && <MeetingReschedule id={M.id} temAgendaPublica={agendaPublicaOn} />}
+          </div>
         </div>
       </div>
 

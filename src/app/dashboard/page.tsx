@@ -28,14 +28,22 @@ export default async function Today() {
     waDisconnected = ((waAcc as any[]) || []).length > 0;
   }
 
-  const [{ data: rawTasks }, contactsCount, hotCount, { data: boxes }] = await Promise.all([
+  // ATENÇÃO ao "estimated": contar 78 mil contatos EXATO a cada abertura da home era,
+  // sozinho, 44% de todo o tempo do banco (523 chamadas, média de 620 ms, pico de
+  // 4,3 s — medido no Query Performance do Supabase). O número aqui é um cartão de
+  // resumo: a estimativa do próprio planejador serve, custa ~0 ms, e o PostgREST
+  // devolve o valor exato automaticamente enquanto a tabela é pequena.
+  //
+  // A segunda contagem (score >= HOT_THRESHOLD) foi REMOVIDA: era consultada e nunca
+  // usada em lugar nenhum da página — uma varredura completa de 78 mil linhas por
+  // carregamento, à toa.
+  const [{ data: rawTasks }, contactsCount, { data: boxes }] = await Promise.all([
     supabase
       .from("tasks")
       .select("id, channel, title, generated_content, due_date, contact_id, enrollment_id, contacts(name, company, phone, email, score)")
       .eq("status", "pending")
       .lte("due_date", in3),
-    supabase.from("contacts").select("id", { count: "exact", head: true }),
-    supabase.from("contacts").select("id", { count: "exact", head: true }).gte("score", HOT_THRESHOLD),
+    supabase.from("contacts").select("id", { count: "estimated", head: true }),
     supabase.from("email_accounts").select("daily_cap, warmup_stage, created_at").eq("is_active", true),
   ]);
 

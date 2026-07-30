@@ -28,6 +28,7 @@ export type AcaoLog =
   | "contact_enroll_bulk"
   | "account_tag_bulk"
   | "account_assign_bulk"
+  | "meeting_reschedule"
   | "radar_import";
 
 // Rótulos em PT-BR — fonte única para a tela de Registro e para o `detail`.
@@ -44,6 +45,7 @@ export const ACAO_LABEL: Record<string, string> = {
   contact_enroll_bulk: "Inscreveu em cadência em lote",
   account_tag_bulk: "Aplicou tags em empresas",
   account_assign_bulk: "Atribuiu empresas em lote",
+  meeting_reschedule: "Cancelou reunião para remarcar",
   radar_import: "Gravou empresas do Radar",
 };
 

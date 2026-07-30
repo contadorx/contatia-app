@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { scoreEvent } from "@/lib/scoring";
 import { renderTemplate, addDaysISO } from "@/lib/cadence";
+import { logAction } from "@/lib/actionLog";
 
 async function ctx() {
   const supabase = createClient();
@@ -352,4 +353,185 @@ export async function deleteMeeting(id: string) {
   if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/reunioes");
   return { ok: true };
+}
+
+// ============================================================
+// CANCELAR E OFERECER REMARCAÇÃO
+//
+// O caso real: a pessoa avisa que não pode e pede outra data. Antes disso o app só
+// tinha "excluir" — que some com a reunião do seu lado e deixa o convite ATIVO na
+// agenda dela. Aqui as duas pontas são resolvidas de uma vez:
+//
+//   1. manda um .ics com METHOD:CANCEL → o evento SAI da agenda do convidado
+//      (Gmail/Outlook/Apple entendem e removem sozinhos, sem ela fazer nada);
+//   2. no mesmo e-mail vai o link da SUA agenda pública, para ela escolher o novo
+//      horário sem vai-e-vem — os horários já saem livres, batendo com o Google;
+//   3. apaga o evento do Google Calendar, se estiver conectado;
+//   4. cancela os lembretes pendentes daquela reunião (senão você seria cobrado a
+//      lembrar de uma reunião que não existe mais);
+//   5. marca como 'remarcada' — que é o estado do enum feito para isto.
+//
+// A reunião NÃO é apagada de propósito: ela vira histórico ("foi remarcada"), e é
+// isso que o relatório de no-show/remarcação precisa enxergar.
+// ============================================================
+export async function cancelarEremarcar(
+  id: string,
+  input?: { motivo?: string; enviarEmail?: boolean }
+): Promise<{ ok?: boolean; emailEnviado?: boolean; aviso?: string; linkRemarcar?: string | null; error?: string }> {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const { data: m } = await supabase
+    .from("meetings")
+    .select("id, title, datetime, duration_min, location, notes, status, reminder_config, google_event_id, contact_id")
+    .eq("id", id)
+    .eq("tenant_id", tenant_id)
+    .maybeSingle();
+  if (!m) return { error: "Reunião não encontrada." };
+  if ((m as any).status === "realizada") return { error: "Esta reunião já aconteceu — não dá para remarcar." };
+
+  const quando = new Date((m as any).datetime);
+  const dt = quando.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" });
+  const titulo = ((m as any).title as string) || "Reunião";
+  const dur = Number((m as any).duration_min) || 30;
+
+  // convidados: ficam no reminder_config (a tabela meetings só guarda 1 contact_id)
+  const convidados: { email: string; name: string | null }[] =
+    (((m as any).reminder_config?.convidados as any[]) || []).filter((c) => c?.email);
+  const emails = Array.from(new Set(convidados.map((c) => String(c.email).toLowerCase())));
+
+  // link público de remarcação (só existe se a agenda pública estiver ligada)
+  const { data: t } = await supabase
+    .from("tenants")
+    .select("name, inbound_token, booking_enabled")
+    .eq("id", tenant_id)
+    .maybeSingle();
+  const base = (process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "")).replace(/\/+$/, "");
+  const linkRemarcar =
+    (t as any)?.booking_enabled && (t as any)?.inbound_token && base
+      ? `${base}/agendar/${(t as any).inbound_token}`
+      : null;
+
+  // 1) estado + histórico
+  const { error: errU } = await supabase
+    .from("meetings")
+    .update({ status: "remarcada" })
+    .eq("id", id)
+    .eq("tenant_id", tenant_id);
+  if (errU) return { error: msgErro(errU) };
+
+  // 2) lembretes pendentes daquela reunião saem da fila
+  await supabase
+    .from("tasks")
+    .update({ status: "skipped" })
+    .eq("tenant_id", tenant_id)
+    .eq("status", "pending")
+    .like("title", `Lembrete%${titulo}`);
+
+  // 3) e-mail de cancelamento + convite para remarcar
+  let emailEnviado = false;
+  let aviso: string | null = null;
+  const querEmail = input?.enviarEmail !== false;
+
+  if (querEmail && emails.length) {
+    try {
+      const { data: box } = await supabase
+        .from("email_accounts")
+        .select("provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token")
+        .eq("is_active", true)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (!box) {
+        aviso = "Reunião remarcada, mas o e-mail não saiu: conecte uma caixa de e-mail em Config → Canais.";
+      } else {
+        const { buildIcs } = await import("@/lib/ics");
+        const { sendEmail } = await import("@/lib/mailer");
+        const organizer = { email: (box as any).from_email as string, name: (box as any).display_name as string | null };
+
+        // SEQUENCE:1 é o que faz o cliente de e-mail entender que é uma ATUALIZAÇÃO
+        // do mesmo evento (mesmo UID) — sem isso, muita agenda ignora o cancelamento.
+        const ics = buildIcs({
+          uid: `${id}@contatia`,
+          summary: titulo,
+          startISO: quando.toISOString(),
+          durationMin: dur,
+          organizer,
+          attendees: convidados.map((c) => ({ email: c.email, name: c.name })),
+          location: ((m as any).location as string) || null,
+          description: ((m as any).notes as string) || null,
+          method: "CANCEL",
+          sequence: 1,
+        });
+
+        const motivo = (input?.motivo || "").trim();
+        const texto =
+          `Precisamos remarcar: ${titulo}\n` +
+          `Estava marcada para ${dt}.\n` +
+          (motivo ? `\nMotivo: ${motivo}\n` : "") +
+          `\nJá removi o compromisso da sua agenda — não precisa fazer nada.\n` +
+          (linkRemarcar
+            ? `\nPara escolher um novo horário, é só abrir minha agenda e clicar no dia que preferir:\n${linkRemarcar}\n\nOs horários que aparecem lá já estão livres de verdade.`
+            : `\nMe responda este e-mail com dois ou três horários bons para você que eu remarco.`) +
+          `\n\nObrigado pela compreensão.`;
+
+        await sendEmail(box as any, {
+          to: emails.join(", "),
+          subject: `Cancelada: ${titulo} — ${dt}`,
+          text: texto,
+          icalEvent: { method: "CANCEL", content: ics, filename: "cancelamento.ics" },
+        });
+        emailEnviado = true;
+      }
+    } catch (e: any) {
+      aviso = `Reunião remarcada, mas o e-mail falhou: ${msgErro(e)}`;
+    }
+  } else if (querEmail && !emails.length) {
+    aviso = "Reunião remarcada. Ninguém tinha e-mail cadastrado nesta reunião, então não houve o que enviar.";
+  }
+
+  // 4) tira do Google Calendar (best-effort — não pode derrubar o cancelamento)
+  try {
+    if ((m as any).google_event_id) {
+      const { data: acct } = await supabase
+        .from("email_accounts")
+        .select("oauth_refresh_token")
+        .eq("provider", "gmail")
+        .eq("is_active", true)
+        .not("oauth_refresh_token", "is", null)
+        .limit(1)
+        .maybeSingle();
+      const refresh = (acct as any)?.oauth_refresh_token as string | undefined;
+      if (refresh) {
+        const { deleteCalendarEvent } = await import("@/lib/gcal");
+        await deleteCalendarEvent(refresh, (m as any).google_event_id as string);
+      }
+    }
+  } catch { /* segue */ }
+
+  // 5) trilha
+  if ((m as any).contact_id) {
+    await supabase.from("events").insert({
+      tenant_id,
+      contact_id: (m as any).contact_id,
+      type: "note",
+      meta: { text: `Reunião "${titulo}" (${dt}) cancelada para remarcação${emailEnviado ? " — convidado avisado por e-mail" : ""}.` },
+    } as any);
+  }
+  await logAction(supabase, {
+    tenant_id,
+    user_id,
+    action: "meeting_reschedule",
+    entity: "meeting",
+    entity_id: id,
+    qtd: 1,
+    detail: `Cancelou "${titulo}" (${dt}) para remarcação${emailEnviado ? `; avisou ${emails.length} convidado(s)` : ""}.`,
+    meta: { convidados: emails, motivo: input?.motivo || null },
+  });
+
+  revalidatePath("/dashboard/reunioes");
+  revalidatePath(`/dashboard/reunioes/${id}`);
+  revalidatePath("/dashboard");
+  return { ok: true, emailEnviado, aviso: aviso || undefined, linkRemarcar };
 }

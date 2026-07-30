@@ -61,10 +61,15 @@ export async function getBookingSlots(token: string) {
   // TODA a matemática de horário em BRT (UTC-3, fixo — sem horário de verão desde 2019).
   // O servidor (Vercel) roda em UTC; sem isso, "09:00" viraria 06:00 em Brasília.
   const BRT_OFFSET_MS = 3 * 3600000;
-  const slots: { date: string; times: { iso: string; label: string }[] }[] = [];
+  // `dateISO` (yyyy-mm-dd no fuso de São Paulo) é o que permite desenhar o CALENDÁRIO
+  // no cliente: o rótulo em português continua vindo pronto do servidor, mas agora há
+  // uma chave estável para casar cada quadradinho da grade com os horários dele.
+  const slots: { date: string; dateISO: string; times: { iso: string; label: string }[] }[] = [];
   const now = new Date();
   const nowBRT = new Date(now.getTime() - BRT_OFFSET_MS); // "relógio de parede" BRT em campos UTC
-  for (let d = 0; d < 14; d++) {
+  // Janela de 60 dias: um calendário precisa cobrir o mês atual E o seguinte. Com os
+  // 14 dias antigos, virar o mês mostrava uma grade vazia — pior que a lista anterior.
+  for (let d = 0; d < 60; d++) {
     // meia-noite BRT do dia d (expressa como timestamp real UTC)
     const baseBRT = Date.UTC(nowBRT.getUTCFullYear(), nowBRT.getUTCMonth(), nowBRT.getUTCDate() + d, 0, 0, 0);
     const weekdayBRT = new Date(baseBRT).getUTCDay();
@@ -85,12 +90,13 @@ export async function getBookingSlots(token: string) {
       }
     }
     if (times.length) {
+      const diaReal = new Date(baseBRT + BRT_OFFSET_MS);
       slots.push({
-        date: new Date(baseBRT + BRT_OFFSET_MS).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", timeZone: "America/Sao_Paulo" }),
+        date: diaReal.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", timeZone: "America/Sao_Paulo" }),
+        dateISO: diaReal.toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }), // yyyy-mm-dd
         times,
       });
     }
-    if (slots.length >= 7) break;
   }
 
   return { ok: true, tenantName: tenant.name, duration: dur, slots };
