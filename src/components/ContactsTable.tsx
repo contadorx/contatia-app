@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useMemo } from "react";
+import { useState, useTransition, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AssignSelect from "@/components/AssignSelect";
@@ -9,6 +9,7 @@ import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { bulkAssign, bulkEnroll } from "@/app/dashboard/contatos/bulk-actions";
 import { bulkTag, createTag } from "@/app/dashboard/contatos/tag-actions";
 import { bulkDeleteContacts } from "@/app/dashboard/contatos/actions";
+import { contarPorFiltro, excluirPorFiltro } from "@/app/dashboard/contatos/filtro-actions";
 import { verificarWhatsAppLote } from "@/app/dashboard/contatos/wa-actions";
 import { capturarDoSiteLote } from "@/app/dashboard/contatos/web-capture-actions";
 import { UltimoToque } from "@/lib/lastTouch";
@@ -50,12 +51,15 @@ export default function ContactsTable({
   members,
   tags = [],
   products = {},
+  filtro,
 }: {
   contacts: Contact[];
   sequences: Seq[];
   members: Member[];
   tags?: Tag[];
   products?: Record<string, { id: string; name: string }[]>;
+  // filtro ATUAL da tela — é ele que a exclusão em massa refaz no servidor
+  filtro?: { q?: string; view?: string; tag?: string[]; produto?: string[]; cadencia?: string[]; frio?: string };
 }) {
   const router = useRouter();
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -67,8 +71,30 @@ export default function ContactsTable({
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
+  // "todos do filtro": quando o operador quer agir sobre TUDO que bate com o filtro,
+  // não só sobre as 200 linhas carregadas. Guarda o total conferido no servidor, que
+  // é reconferido na hora de apagar.
+  const [todosFiltro, setTodosFiltro] = useState<number | null>(null);
+  // quem decide se o recorte é real é o SERVIDOR (filtroVazio) — ver contarPorFiltro
+  const [semFiltroReal, setSemFiltroReal] = useState(false);
+  const [contando, setContando] = useState(false);
+
+  // Mudou o filtro (navegação suave, o componente não remonta) → seleção e modo
+  // "todos do filtro" ficariam pendurados de um recorte que não existe mais.
+  const filtroChave = JSON.stringify(filtro || {});
+  useEffect(() => {
+    setSel(new Set());
+    setTodosFiltro(null);
+    setMsg(null);
+  }, [filtroChave]);
+
   const allIds = useMemo(() => contacts.map((c) => c.id), [contacts]);
   const allChecked = sel.size > 0 && sel.size === contacts.length;
+  // a página vem cheia (200) → é bem provável que exista mais fora da tela
+  const paginaCheia = contacts.length >= 200;
+  const temFiltro = !!(
+    filtro && (filtro.q || filtro.view || filtro.frio || filtro.tag?.length || filtro.produto?.length || filtro.cadencia?.length)
+  );
 
   const seqOpts: SmartOption[] = sequences.map((s) => ({ value: s.id, label: s.name }));
   const assignOpts: SmartOption[] = [
@@ -83,15 +109,60 @@ export default function ContactsTable({
       n.has(id) ? n.delete(id) : n.add(id);
       return n;
     });
+    // desmarcar UMA linha tem que desarmar o "todos do filtro": senão o botão continua
+    // dizendo "Excluir os 22100" — inclusive o contato que a pessoa acabou de tirar —
+    // e a faixa com o "voltar" some, porque ela só aparece com tudo marcado.
+    setTodosFiltro(null);
     setMsg(null);
   }
   function toggleAll() {
     setSel((s) => (s.size === contacts.length ? new Set() : new Set(allIds)));
+    setTodosFiltro(null);
     setMsg(null);
   }
   function clear() {
     setSel(new Set());
+    setTodosFiltro(null);
     setMsg(null);
+  }
+
+  // Pergunta ao servidor quantos batem com o filtro (a tela só conhece 200).
+  // Só roda no clique — contar a base inteira a cada carregamento foi, um dia, 44%
+  // do tempo do banco.
+  function selecionarTodosDoFiltro() {
+    setMsg(null);
+    setContando(true);
+    start(async () => {
+      const r = (await contarPorFiltro(filtro || {})) as { total?: number; semFiltro?: boolean; error?: string };
+      setContando(false);
+      if (r?.error) { setMsg(r.error); return; }
+      setTodosFiltro(r.total ?? 0);
+      setSemFiltroReal(!!r.semFiltro);
+    });
+  }
+
+  // Exclusão de TUDO que bate com o filtro (o servidor refaz a consulta).
+  function excluirTudoDoFiltro() {
+    const n = todosFiltro ?? 0;
+    if (!n) return;
+    const recorta = !semFiltroReal;
+    const alvo = recorta ? `os ${n} contatos que batem com o filtro atual` : `TODOS os ${n} contatos da sua base`;
+    if (!confirm(`Excluir ${alvo}?\n\nIsso apaga junto as tarefas, matrículas em cadência e o histórico de cada um. Não tem como desfazer.`)) return;
+    if (!recorta && !confirm(`Confirma de novo: nenhum filtro em vigor, então isso zera a sua base de contatos (${n}). Continuar?`)) return;
+
+    start(async () => {
+      setMsg(null);
+      const r = (await excluirPorFiltro(filtro || {}, { total: n })) as
+        { excluidos?: number; restam?: number; error?: string; aviso?: string };
+      if (r?.error) { setMsg(r.error); return; }
+      setMsg(
+        `✓ ${r.excluidos} contato(s) excluído(s).` +
+        (r.aviso ? ` ${r.aviso}` : "") +
+        ((r.restam ?? 0) > 0 ? ` Ainda restam ${r.restam} (teto por vez) — clique de novo para continuar.` : "")
+      );
+      clear();
+      router.refresh();
+    });
   }
 
   function doEnroll() {
@@ -183,7 +254,37 @@ export default function ContactsTable({
     <div>
       {/* Barra de ações em lote */}
       {sel.size > 0 && (
-        <div className="sticky top-2 z-10 mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-brand/30 bg-brand-soft/60 p-3 shadow-sm backdrop-blur">
+        <div className="sticky top-2 z-10 mb-3 rounded-xl border border-brand/30 bg-brand-soft/60 p-3 shadow-sm backdrop-blur">
+          {/* A ponte entre "as 200 da tela" e "tudo que bate com o filtro" */}
+          {allChecked && paginaCheia && (
+            <div className="mb-2 rounded-lg border border-brand/20 bg-white/70 px-3 py-2 text-sm">
+              {todosFiltro === null ? (
+                <>
+                  <span className="text-subtle">
+                    As <b>{contacts.length}</b> desta página estão marcadas — a lista mostra só as primeiras.
+                  </span>{" "}
+                  <button
+                    className="font-semibold text-brand-dark underline disabled:opacity-50"
+                    onClick={selecionarTodosDoFiltro}
+                    disabled={pending || contando}
+                  >
+                    {contando ? "contando…" : temFiltro ? "Selecionar todos que batem com o filtro" : "Selecionar todos os contatos"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-brand-dark">
+                    {todosFiltro} contato(s) selecionado(s) — {semFiltroReal ? "a base inteira" : "todos os que batem com o filtro"}.
+                  </span>{" "}
+                  <button className="text-subtle underline" onClick={() => setTodosFiltro(null)} disabled={pending}>
+                    voltar para as {contacts.length} desta página
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm font-semibold">{sel.size} selecionado{sel.size > 1 ? "s" : ""}</span>
 
           <div className="flex items-center gap-1">
@@ -258,6 +359,8 @@ export default function ContactsTable({
           <button
             className="ml-auto rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
             onClick={() => {
+              // com "todos do filtro" ligado, quem manda é o filtro — não a lista de ids
+              if (todosFiltro !== null) return excluirTudoDoFiltro();
               if (!confirm(`Excluir ${sel.size} contato(s)? Isso não pode ser desfeito.`)) return;
               start(async () => {
                 setMsg(null);
@@ -268,11 +371,20 @@ export default function ContactsTable({
             }}
             disabled={pending}
           >
-            Excluir
+            {todosFiltro !== null ? `Excluir os ${todosFiltro}` : "Excluir"}
           </button>
           <button className="text-xs text-subtle hover:text-ink" onClick={clear}>
             limpar seleção
           </button>
+          </div>
+
+          {todosFiltro !== null && (
+            <p className="mt-2 text-[11px] text-subtle">
+              Inscrever, atribuir, aplicar tag, capturar do site e verificar WhatsApp continuam agindo sobre as{" "}
+              <b>{sel.size}</b> desta página — essas ações trabalham contato a contato e não aguentam a base inteira de
+              uma vez. Só a <b>exclusão</b> vale para os {todosFiltro}.
+            </p>
+          )}
         </div>
       )}
       {msg && <p className="mb-3 text-sm text-signal">{msg}</p>}

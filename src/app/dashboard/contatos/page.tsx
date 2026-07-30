@@ -3,15 +3,13 @@ import ContactTools from "@/components/ContactTools";
 import ContactsTable from "@/components/ContactsTable";
 import ContactsFilterBar from "@/components/ContactsFilterBar";
 import { isManager } from "@/lib/permissions";
-import { HOT_THRESHOLD } from "@/lib/scoring";
-import { produtosPorContatos, contatoIdsPorProduto } from "@/lib/produtos";
+import { produtosPorContatos } from "@/lib/produtos";
 import { comoLista } from "@/lib/filtros";
+import { consultaContatos } from "@/lib/contatosFiltro";
 
 export const dynamic = "force-dynamic";
 // A captura no site raspa vários domínios por ação (HTTP); 60s cobre o lote inline.
 export const maxDuration = 60;
-
-const NENHUM = "00000000-0000-0000-0000-000000000000";
 
 export default async function Contatos({
   searchParams,
@@ -35,7 +33,6 @@ export default async function Contatos({
   // visão rápida: completar | prontos | resgatar | quentes (vazio = todos). semcontato=1 vira "completar".
   const view = searchParams.view || (searchParams.semcontato === "1" ? "completar" : "");
   const q = (searchParams.q || "").trim();
-  const qSafe = q.slice(0, 80).replace(/[,()%*]/g, " ").trim();
 
   const { data: { user } } = await supabase.auth.getUser();
   const { data: me } = await supabase.from("profiles").select("role, team_role").eq("id", user?.id ?? "").maybeSingle();
@@ -44,69 +41,23 @@ export default async function Contatos({
   const { data: tags } = await supabase.from("tags").select("id, name, color").order("name", { ascending: true });
   const { count: suggestionCount } = await supabase.from("contact_suggestions").select("id", { count: "exact", head: true }).eq("status", "pending");
 
-  // Filtros detalhados que restringem por lista de IDs (tag, produto, cadência). Intersectamos.
-  const idConstraints: string[][] = [];
-  if (tagFilter.length) {
-    const { data: ct } = await supabase.from("contact_tags").select("contact_id").in("tag_id", tagFilter);
-    idConstraints.push(((ct as any[]) || []).map((r) => r.contact_id));
-  }
-  if (produtoFilter.length) {
-    idConstraints.push(await contatoIdsPorProduto(supabase, produtoFilter));
-  }
-  if (cadenciaFilter.length) {
-    const { data: en } = await supabase.from("enrollments").select("contact_id").in("sequence_id", cadenciaFilter).in("status", ["active", "paused"]);
-    idConstraints.push(((en as any[]) || []).map((r) => r.contact_id));
-  }
-  let idsFiltro: string[] | null = null;
-  if (idConstraints.length) {
-    idsFiltro = idConstraints.reduce((acc, cur) => acc.filter((id) => cur.includes(id)));
-  }
-
-  // Visões "prontos" e "resgatar" excluem quem já está numa cadência ativa.
-  let emCadencia: string[] = [];
-  if (view === "prontos" || view === "resgatar") {
-    const { data: en } = await supabase.from("enrollments").select("contact_id").in("status", ["active", "paused"]);
-    emCadencia = Array.from(new Set(((en as any[]) || []).map((r) => r.contact_id).filter(Boolean)));
-  }
-
-  let contactsQuery = supabase
-    .from("contacts")
-    .select("id, name, email, phone, company, origin, status, score, assigned_to, created_at, last_activity_at, wa_status, web_capture, contact_tags(tag_id, tags(id, name, color))")
-    .order("score", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(200);
-  if (idsFiltro) contactsQuery = contactsQuery.in("id", idsFiltro.length ? idsFiltro : [NENHUM]);
-  if (!gerente) contactsQuery = contactsQuery.eq("assigned_to", user?.id ?? "");
-  if (qSafe) contactsQuery = contactsQuery.or(`name.ilike.%${qSafe}%,email.ilike.%${qSafe}%,company.ilike.%${qSafe}%`);
-
-  // ---- VISÕES RÁPIDAS ----
-  if (view === "completar") {
-    // sem e-mail E sem telefone (null ou vazio)
-    contactsQuery = contactsQuery.or("email.is.null,email.eq.").or("phone.is.null,phone.eq.");
-  } else if (view === "quentes") {
-    contactsQuery = contactsQuery.gte("score", HOT_THRESHOLD);
-  } else if (view === "com_wa") {
-    // números confirmados no WhatsApp — prontos para uma cadência de WhatsApp
-    contactsQuery = contactsQuery.eq("wa_status", "valid");
-  } else if (view === "prontos") {
-    // tem e-mail OU telefone, e fora de cadência ativa
-    contactsQuery = contactsQuery.or("email.neq.,phone.neq.");
-    if (emCadencia.length) contactsQuery = contactsQuery.not("id", "in", `(${emCadencia.join(",")})`);
-  } else if (view === "resgatar") {
-    // frio (sem toque há +30d ou nunca) e fora de cadência ativa
-    const corte = new Date(); corte.setDate(corte.getDate() - 30);
-    contactsQuery = contactsQuery.or(`last_activity_at.is.null,last_activity_at.lt.${corte.toISOString()}`);
-    if (emCadencia.length) contactsQuery = contactsQuery.not("id", "in", `(${emCadencia.join(",")})`);
-  }
-
-  // ---- FILTRO DETALHADO: último toque (independente das visões) ----
-  if (frio === "nunca") {
-    contactsQuery = contactsQuery.is("last_activity_at", null);
-  } else if (frio === "15" || frio === "30") {
-    const corte = new Date();
-    corte.setDate(corte.getDate() - Number(frio));
-    contactsQuery = contactsQuery.or(`last_activity_at.is.null,last_activity_at.lt.${corte.toISOString()}`);
-  }
+  // O filtro é montado por consultaContatos (@/lib/contatosFiltro) — o MESMO código que
+  // a exclusão em massa usa. Antes essa lógica vivia só aqui; se a ação em lote a
+  // recriasse "parecida", uma diferença sutil apagaria contatos fora do filtro.
+  const filtro = { q, view, tag: tagFilter, produto: produtoFilter, cadencia: cadenciaFilter, frio };
+  // `.query` (e não a consulta já executada): o builder do postgrest executa sozinho
+  // se for devolvido de uma função async, e aí ele sairia do Promise.all abaixo —
+  // uma ida a mais ao banco, em série, logo na consulta mais pesada da página.
+  const { query: contactsQuery } = await consultaContatos(
+    supabase,
+    filtro,
+    { gerente, userId: user?.id },
+    {
+      select:
+        "id, name, email, phone, company, origin, status, score, assigned_to, created_at, last_activity_at, wa_status, web_capture, contact_tags(tag_id, tags(id, name, color))",
+      limit: 200,
+    }
+  );
 
   // NÃO ignore o `error` daqui. Quando a consulta estoura o tempo limite do Postgres,
   // `data` vem null e a tela mostrava "nenhum contato" — igualzinho a uma base vazia.
@@ -185,7 +136,14 @@ export default async function Contatos({
       )}
 
       <div className="mt-4">
-        <ContactsTable contacts={contactsComEsteira} sequences={seqs} members={memberList} tags={tagList} products={produtosContato} />
+        <ContactsTable
+          contacts={contactsComEsteira}
+          sequences={seqs}
+          members={memberList}
+          tags={tagList}
+          products={produtosContato}
+          filtro={filtro}
+        />
       </div>
     </div>
   );
