@@ -26,10 +26,20 @@ import { isManager } from "@/lib/permissions";
 import { consultaContatos, normalizarFiltro, filtroVazio, type FiltroContatos } from "@/lib/contatosFiltro";
 import { logAction, recortarItens } from "@/lib/actionLog";
 
-// 200 uuids ≈ 7,4 KB de URL — abaixo do limite de 8 KB do PostgREST/proxy.
-const ONDA = 200;
-// Teto por clique. Cabe folgado nos 60s da função; o que sobrar, o operador clica de novo.
-const TETO_POR_CHAMADA = 10000;
+// Buscar e apagar têm limites DIFERENTES, e tratá-los como um só era metade da lentidão:
+//  • buscar: o PostgREST devolve no máximo 1.000 linhas por consulta;
+//  • apagar: 200 uuids ≈ 7,4 KB de URL, no limite de 8 KB do PostgREST/proxy.
+// Buscando 1.000 e apagando em 5 pedaços são 6 idas ao banco por 1.000 contatos, em vez
+// de 10 — quase metade do tempo que era só rede.
+const ONDA_BUSCA = 1000;
+const ONDA_DELETE = 200;
+// Teto por CHAMADA. A tela chama de novo sozinha até zerar, então isto não é mais o
+// limite do que dá para apagar — é só o tamanho de cada volta.
+const TETO_POR_CHAMADA = 20000;
+// Orçamento de tempo: a função morre aos 60s (maxDuration da página). Saindo aos 40s
+// devolvemos um resultado honesto ("saíram X, faltam Y") em vez de sermos mortos no
+// meio — que é exatamente o que fazia a exclusão parar nos ~4.000 sem explicar nada.
+const ORCAMENTO_MS = 40_000;
 
 async function ctx() {
   const supabase = createClient();
@@ -74,7 +84,7 @@ export async function contarPorFiltro(filtro: FiltroContatos): Promise<{ total?:
 export async function excluirPorFiltro(
   filtro: FiltroContatos,
   confirmacao: { total: number }
-): Promise<{ ok?: boolean; excluidos?: number; restam?: number; error?: string; aviso?: string }> {
+): Promise<{ ok?: boolean; excluidos?: number; restam?: number; incompleto?: boolean; error?: string; aviso?: string }> {
   const { supabase, tenant_id, user_id, gerente } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
 
@@ -102,11 +112,13 @@ export async function excluirPorFiltro(
   }
   if (!totalAgora) return { error: "Nenhum contato bate com esse filtro." };
 
-  // O número mudou entre o clique e a confirmação → não apaga. A margem de 5% cobre um
-  // cron mexendo na base no meio do caminho; acima disso, algo mudou de verdade.
-  const desvio = Math.abs(totalAgora - esperado);
-  if (desvio > Math.max(5, esperado * 0.05)) {
-    return { error: `O número mudou desde que você conferiu (${esperado} → ${totalAgora}). Recarregue a lista e confirme de novo.` };
+  // Só recusa quando o conjunto CRESCEU além do que foi confirmado — é aí que mora o
+  // perigo (apagar mais gente do que a pessoa viu). ENCOLHER é normal e esperado: apagar
+  // uma base grande leva várias chamadas, e a tela reenvia como confirmação o total que
+  // SOBROU. A versão anterior usava o valor absoluto da diferença e por isso recusava a
+  // continuação — a segunda volta batia em "o número mudou" e a exclusão empacava.
+  if (totalAgora > esperado + Math.max(5, esperado * 0.05)) {
+    return { error: `O filtro passou a pegar mais gente do que você conferiu (${esperado} → ${totalAgora}). Recarregue a lista e confirme de novo.` };
   }
 
   // TETO REAL: o menor entre o que foi confirmado (+margem) e o teto da chamada.
@@ -115,16 +127,20 @@ export async function excluirPorFiltro(
   const limiteAbsoluto = Math.min(Math.ceil(esperado * 1.05), TETO_POR_CHAMADA);
 
   const semFiltro = filtroVazio(f);
+  const inicio = Date.now();
   let excluidos = 0;
   const amostra: any[] = [];
   let falha: string | null = null;
+  let tempoEsgotado = false;
 
   try {
     while (excluidos < limiteAbsoluto) {
+      if (Date.now() - inicio > ORCAMENTO_MS) { tempoEsgotado = true; break; }
+
       const restanteNoTeto = limiteAbsoluto - excluidos;
       const { query } = await consultaContatos(
         supabase, f, { gerente, userId: user_id, tenantId: tenant_id },
-        { select: "id, name, company, email", limit: Math.min(ONDA, restanteNoTeto), ordenar: false }
+        { select: "id, name, company, email", limit: Math.min(ONDA_BUSCA, restanteNoTeto), ordenar: false }
       );
       const { data, error } = await query;
       if (error) { falha = msgErro(error); break; }
@@ -136,14 +152,22 @@ export async function excluirPorFiltro(
         if (amostra.length < 50) amostra.push({ id: c.id, nome: c.name, empresa: c.company, email: c.email });
       }
 
-      const { data: apagados, error: errDel } = await supabase
-        .from("contacts").delete().eq("tenant_id", tenant_id).in("id", linhas.map((c) => c.id)).select("id");
-      if (errDel) { falha = msgErro(errDel); break; }
-
-      const n = ((apagados as any[]) || []).length;
-      excluidos += n;
-      // havia linhas mas nada saiu = a RLS barrou; insistir viraria laço infinito
-      if (!n) break;
+      // apaga a busca de 1.000 em pedaços de 200 (limite de tamanho da URL)
+      let saiuNoLote = 0;
+      for (let i = 0; i < linhas.length; i += ONDA_DELETE) {
+        if (Date.now() - inicio > ORCAMENTO_MS) { tempoEsgotado = true; break; }
+        const pedaco = linhas.slice(i, i + ONDA_DELETE).map((c) => c.id);
+        const { data: apagados, error: errDel } = await supabase
+          .from("contacts").delete().eq("tenant_id", tenant_id).in("id", pedaco).select("id");
+        if (errDel) { falha = msgErro(errDel); break; }
+        const n = ((apagados as any[]) || []).length;
+        excluidos += n;
+        saiuNoLote += n;
+        // havia linhas mas nada saiu = a RLS barrou; insistir viraria laço infinito
+        if (!n) break;
+      }
+      if (falha || tempoEsgotado) break;
+      if (!saiuNoLote) break;
     }
   } catch (e: any) {
     falha = msgErro(e);
@@ -163,8 +187,9 @@ export async function excluirPorFiltro(
         `${excluidos} contato(s) excluído(s) por filtro` +
         (semFiltro ? " — SEM filtro nenhum (base inteira)" : "") +
         (falha ? " (interrompido por erro no meio)" : "") +
+        (tempoEsgotado ? " (volta parcial: orçamento de tempo)" : "") +
         ".",
-      meta: { itens, truncado, filtro: f, semFiltro, confirmado: esperado, falha },
+      meta: { itens, truncado, filtro: f, semFiltro, confirmado: esperado, falha, tempoEsgotado },
     });
     revalidatePath("/dashboard/contatos");
     revalidatePath("/dashboard/contas");
@@ -179,5 +204,83 @@ export async function excluirPorFiltro(
 
   let restam = 0;
   try { restam = await contar(); } catch { /* informativo */ }
-  return { ok: true, excluidos, restam };
+  // `incompleto` é o que faz a tela chamar de novo sozinha até zerar.
+  return { ok: true, excluidos, restam, incompleto: restam > 0 && excluidos > 0 };
+}
+
+// ============================================================
+// EXPORTAR CSV do que bate com o filtro
+//
+// Mesma consulta da tela e da exclusão — se você exporta antes de apagar, o arquivo é
+// exatamente o conjunto que vai sair. Era a rede de segurança que faltava.
+//
+// As CINCO primeiras colunas são, de propósito, as que o importador do Contatia espera
+// (Nome, E-mail, Telefone, Empresa, Origem): o arquivo exportado volta para dentro do
+// sistema sem edição nenhuma.
+// ============================================================
+const TETO_EXPORT = 20000;
+
+export async function exportarContatosPorFiltro(
+  filtro: FiltroContatos,
+  opts?: { ids?: string[] }
+): Promise<{ csv?: string; linhas?: number; truncado?: boolean; error?: string }> {
+  const { supabase, tenant_id, user_id, gerente } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const { montarCsv, dataCsv } = await import("@/lib/csv");
+  const f = normalizarFiltro(filtro);
+  const selecao = (opts?.ids || []).filter(Boolean);
+
+  const SELECT =
+    "id, name, email, phone, company, cnpj, role_title, origin, status, score, " +
+    "wa_status, wa_number, company_domain, last_activity_at, created_at, " +
+    "contact_tags(tags(name)), profiles:assigned_to(full_name, email)";
+
+  const linhas: any[] = [];
+  let truncado = false;
+
+  try {
+    if (selecao.length) {
+      // exportar SÓ os marcados: fatia de 200 para não estourar o tamanho da URL
+      for (let i = 0; i < selecao.length && linhas.length < TETO_EXPORT; i += 200) {
+        const { data, error } = await supabase
+          .from("contacts").select(SELECT).eq("tenant_id", tenant_id).in("id", selecao.slice(i, i + 200));
+        if (error) return { error: msgErro(error) };
+        linhas.push(...(((data as any[]) || [])));
+      }
+    } else {
+      // exportar TUDO que bate com o filtro, em páginas (o PostgREST corta em 1.000)
+      for (let pagina = 0; pagina * 1000 < TETO_EXPORT; pagina++) {
+        const { query } = await consultaContatos(
+          supabase, f, { gerente, userId: user_id, tenantId: tenant_id },
+          { select: SELECT }
+        );
+        const { data, error } = await query.range(pagina * 1000, pagina * 1000 + 999);
+        if (error) return { error: msgErro(error) };
+        const lote = ((data as any[]) || []);
+        linhas.push(...lote);
+        if (lote.length < 1000) break;
+        if (linhas.length >= TETO_EXPORT) { truncado = true; break; }
+      }
+    }
+  } catch (e: any) {
+    return { error: msgErro(e) };
+  }
+
+  if (!linhas.length) return { error: "Nada para exportar com esse filtro." };
+
+  const WA: Record<string, string> = { valid: "Sim", invalid: "Não", queued: "Verificando", error: "Erro" };
+  const csv = montarCsv(
+    ["Nome", "E-mail", "Telefone", "Empresa", "Origem", "CNPJ", "Cargo", "Situação", "Score",
+     "WhatsApp", "Número WhatsApp", "Domínio", "Tags", "Responsável", "Último toque", "Criado em"],
+    linhas.slice(0, TETO_EXPORT).map((c) => [
+      c.name, c.email, c.phone, c.company, c.origin, c.cnpj, c.role_title, c.status, c.score,
+      WA[c.wa_status as string] || "", c.wa_number, c.company_domain,
+      ((c.contact_tags as any[]) || []).map((t) => t?.tags?.name).filter(Boolean).join(", "),
+      c.profiles?.full_name || c.profiles?.email || "",
+      dataCsv(c.last_activity_at), dataCsv(c.created_at),
+    ])
+  );
+
+  return { csv, linhas: Math.min(linhas.length, TETO_EXPORT), truncado };
 }

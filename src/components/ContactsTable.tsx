@@ -9,10 +9,12 @@ import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { bulkAssign, bulkEnroll } from "@/app/dashboard/contatos/bulk-actions";
 import { bulkTag, createTag } from "@/app/dashboard/contatos/tag-actions";
 import { bulkDeleteContacts } from "@/app/dashboard/contatos/actions";
-import { contarPorFiltro, excluirPorFiltro } from "@/app/dashboard/contatos/filtro-actions";
+import { contarPorFiltro, excluirPorFiltro, exportarContatosPorFiltro } from "@/app/dashboard/contatos/filtro-actions";
 import { verificarWhatsAppLote } from "@/app/dashboard/contatos/wa-actions";
 import { capturarDoSiteLote } from "@/app/dashboard/contatos/web-capture-actions";
 import { UltimoToque } from "@/lib/lastTouch";
+import ExportarCsv from "@/components/ExportarCsv";
+import { useExclusaoLote } from "@/components/useExclusaoLote";
 
 type Contact = {
   id: string;
@@ -78,6 +80,8 @@ export default function ContactsTable({
   // quem decide se o recorte é real é o SERVIDOR (filtroVazio) — ver contarPorFiltro
   const [semFiltroReal, setSemFiltroReal] = useState(false);
   const [contando, setContando] = useState(false);
+  // exclusão em voltas, com progresso e botão de parar (ver useExclusaoLote)
+  const { rodando: apagando, feitos, alvo: alvoExclusao, parar, rodar } = useExclusaoLote();
 
   // Mudou o filtro (navegação suave, o componente não remonta) → seleção e modo
   // "todos do filtro" ficariam pendurados de um recorte que não existe mais.
@@ -133,36 +137,49 @@ export default function ContactsTable({
     setMsg(null);
     setContando(true);
     start(async () => {
-      const r = (await contarPorFiltro(filtro || {})) as { total?: number; semFiltro?: boolean; error?: string };
-      setContando(false);
-      if (r?.error) { setMsg(r.error); return; }
-      setTodosFiltro(r.total ?? 0);
-      setSemFiltroReal(!!r.semFiltro);
+      // sem este try, uma exceção da server action vira rejeição não tratada e o Next
+      // troca a página inteira pelo "Application error" — a tela some no meio da ação.
+      try {
+        const r = (await contarPorFiltro(filtro || {})) as { total?: number; semFiltro?: boolean; error?: string };
+        if (r?.error) { setMsg(r.error); return; }
+        setTodosFiltro(r.total ?? 0);
+        setSemFiltroReal(!!r.semFiltro);
+      } catch (e: any) {
+        setMsg(`Não consegui contar: ${e?.message || "falha de conexão"}. Recarregue a página (Ctrl+Shift+R) e tente de novo.`);
+      } finally {
+        setContando(false);
+      }
     });
   }
 
   // Exclusão de TUDO que bate com o filtro (o servidor refaz a consulta).
-  function excluirTudoDoFiltro() {
+  // Vai em VOLTAS: o servidor devolve o que deu tempo de apagar em ~40s e quanto sobrou;
+  // este laço chama de novo até zerar. Sem isso, uma base grande parava nos ~4.000 —
+  // que é o que cabe nos 60 segundos da função.
+  async function excluirTudoDoFiltro() {
     const n = todosFiltro ?? 0;
-    if (!n) return;
+    if (!n || apagando) return;
     const recorta = !semFiltroReal;
-    const alvo = recorta ? `os ${n} contatos que batem com o filtro atual` : `TODOS os ${n} contatos da sua base`;
-    if (!confirm(`Excluir ${alvo}?\n\nIsso apaga junto as tarefas, matrículas em cadência e o histórico de cada um. Não tem como desfazer.`)) return;
+    const alvoTxt = recorta ? `os ${n} contatos que batem com o filtro atual` : `TODOS os ${n} contatos da sua base`;
+    if (!confirm(`Excluir ${alvoTxt}?\n\nIsso apaga junto as tarefas, matrículas em cadência e o histórico de cada um. Não tem como desfazer.`)) return;
     if (!recorta && !confirm(`Confirma de novo: nenhum filtro em vigor, então isso zera a sua base de contatos (${n}). Continuar?`)) return;
 
-    start(async () => {
-      setMsg(null);
-      const r = (await excluirPorFiltro(filtro || {}, { total: n })) as
+    setMsg(null);
+    const r = await rodar(n, async (confirmar) => {
+      const x = (await excluirPorFiltro(filtro || {}, { total: confirmar })) as
         { excluidos?: number; restam?: number; error?: string; aviso?: string };
-      if (r?.error) { setMsg(r.error); return; }
-      setMsg(
-        `✓ ${r.excluidos} contato(s) excluído(s).` +
-        (r.aviso ? ` ${r.aviso}` : "") +
-        ((r.restam ?? 0) > 0 ? ` Ainda restam ${r.restam} (teto por vez) — clique de novo para continuar.` : "")
-      );
-      clear();
-      router.refresh();
+      return { excluidos: x?.excluidos ?? 0, restam: x?.restam ?? 0, error: x?.error, aviso: x?.aviso };
     });
+
+    setMsg(
+      (r.erro ? `${r.total > 0 ? `✓ ${r.total} excluído(s) antes de parar. ` : ""}${r.erro}` :
+        `✓ ${r.total} contato(s) excluído(s).` +
+        (r.aviso ? ` ${r.aviso}` : "") +
+        (r.parado ? ` Você interrompeu — ainda restam ${r.restam}.` :
+          r.restam > 0 ? ` Ainda restam ${r.restam}; clique de novo para continuar.` : ""))
+    );
+    clear();
+    router.refresh();
   }
 
   function doEnroll() {
@@ -252,9 +269,44 @@ export default function ContactsTable({
 
   return (
     <div>
+      {/* Exportar sempre à mão — inclusive (e principalmente) ANTES de apagar */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <ExportarCsv
+          nomeBase="contatos"
+          rotulo={temFiltro ? "Exportar CSV (filtro atual)" : "Exportar CSV (todos)"}
+          exportar={() => exportarContatosPorFiltro(filtro || {})}
+        />
+        <span className="text-xs text-subtle">
+          As 5 primeiras colunas são as que o importador do Contatia espera — dá para reimportar sem editar.
+        </span>
+      </div>
+
       {/* Barra de ações em lote */}
       {sel.size > 0 && (
         <div className="sticky top-2 z-10 mb-3 rounded-xl border border-brand/30 bg-brand-soft/60 p-3 shadow-sm backdrop-blur">
+          {/* Progresso da exclusão em voltas — sem isto, apagar 78 mil parece travado */}
+          {apagando && (
+            <div className="mb-2 rounded-lg border border-red-200 bg-white/80 px-3 py-2 text-sm">
+              <div className="flex items-center gap-3">
+                <span className="font-semibold text-red-700">
+                  Excluindo… {feitos.toLocaleString("pt-BR")} de {alvoExclusao.toLocaleString("pt-BR")}
+                </span>
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-red-100">
+                  <div
+                    className="h-full bg-red-500 transition-all"
+                    style={{ width: `${alvoExclusao ? Math.min(100, (feitos / alvoExclusao) * 100) : 0}%` }}
+                  />
+                </div>
+                <button className="text-xs font-medium text-subtle underline hover:text-ink" onClick={parar}>
+                  parar
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-subtle">
+                Vai em voltas de até 40 segundos e continua sozinho. Não feche a aba — o que já saiu está no registro.
+              </p>
+            </div>
+          )}
+
           {/* A ponte entre "as 200 da tela" e "tudo que bate com o filtro" */}
           {allChecked && paginaCheia && (
             <div className="mb-2 rounded-lg border border-brand/20 bg-white/70 px-3 py-2 text-sm">
@@ -266,7 +318,7 @@ export default function ContactsTable({
                   <button
                     className="font-semibold text-brand-dark underline disabled:opacity-50"
                     onClick={selecionarTodosDoFiltro}
-                    disabled={pending || contando}
+                    disabled={pending || contando || apagando}
                   >
                     {contando ? "contando…" : temFiltro ? "Selecionar todos que batem com o filtro" : "Selecionar todos os contatos"}
                   </button>
@@ -276,7 +328,7 @@ export default function ContactsTable({
                   <span className="font-semibold text-brand-dark">
                     {todosFiltro} contato(s) selecionado(s) — {semFiltroReal ? "a base inteira" : "todos os que batem com o filtro"}.
                   </span>{" "}
-                  <button className="text-subtle underline" onClick={() => setTodosFiltro(null)} disabled={pending}>
+                  <button className="text-subtle underline disabled:opacity-50" onClick={() => setTodosFiltro(null)} disabled={pending || apagando}>
                     voltar para as {contacts.length} desta página
                   </button>
                 </>
@@ -296,7 +348,7 @@ export default function ContactsTable({
               placeholder="Inscrever em cadência…"
               clearable
             />
-            <button className="btn-brand py-1.5 text-sm" onClick={doEnroll} disabled={pending || !seq}>
+            <button className="btn-brand py-1.5 text-sm" onClick={doEnroll} disabled={pending || apagando || !seq}>
               {pending ? "..." : "Inscrever"}
             </button>
           </div>
@@ -318,7 +370,7 @@ export default function ContactsTable({
                 if (res?.error) setMsg(res.error);
                 else { setMsg(`✓ ${res.count} atribuídos.`); clear(); setAssignTo(""); }
               })}
-              disabled={pending || !assignTo}
+              disabled={pending || apagando || !assignTo}
             >
               Atribuir
             </button>
@@ -334,14 +386,14 @@ export default function ContactsTable({
                 onValuesChange={setTagIds}
                 placeholder="Aplicar tags…"
               />
-              <button className="btn-ghost py-1.5 text-sm" onClick={doTag} disabled={pending || !tagIds.length}>Aplicar</button>
+              <button className="btn-ghost py-1.5 text-sm" onClick={doTag} disabled={pending || apagando || !tagIds.length}>Aplicar</button>
             </div>
           )}
 
           <button
             className="rounded-lg border border-brand/40 bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand-dark hover:bg-brand-soft/70"
             onClick={doCaptureWeb}
-            disabled={pending}
+            disabled={pending || apagando}
             title="Lê o site da empresa e captura o telefone/WhatsApp publicado. Um link wa.me já entra como WhatsApp confirmado."
           >
             {pending ? "..." : "Capturar do site"}
@@ -350,7 +402,7 @@ export default function ContactsTable({
           <button
             className="rounded-lg border border-signal/40 bg-signal/5 px-3 py-1.5 text-sm font-medium text-signal hover:bg-signal/10"
             onClick={doVerifyWa}
-            disabled={pending}
+            disabled={pending || apagando}
             title="Descobre quais números têm WhatsApp (checa com e sem o 9º dígito). Exige o modo Evolution."
           >
             {pending ? "..." : "Verificar WhatsApp"}
@@ -360,7 +412,7 @@ export default function ContactsTable({
             className="ml-auto rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
             onClick={() => {
               // com "todos do filtro" ligado, quem manda é o filtro — não a lista de ids
-              if (todosFiltro !== null) return excluirTudoDoFiltro();
+              if (todosFiltro !== null) { void excluirTudoDoFiltro(); return; }
               if (!confirm(`Excluir ${sel.size} contato(s)? Isso não pode ser desfeito.`)) return;
               start(async () => {
                 setMsg(null);
@@ -369,10 +421,20 @@ export default function ContactsTable({
                 else { setMsg(`✓ ${res.count} excluído(s).`); clear(); router.refresh(); }
               });
             }}
-            disabled={pending}
+            disabled={pending || apagando}
           >
-            {todosFiltro !== null ? `Excluir os ${todosFiltro}` : "Excluir"}
+            {apagando ? "Excluindo…" : todosFiltro !== null ? `Excluir os ${todosFiltro}` : "Excluir"}
           </button>
+          <ExportarCsv
+            nomeBase="contatos"
+            rotulo={todosFiltro !== null ? `Exportar os ${todosFiltro}` : `Exportar ${sel.size}`}
+            className="rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted"
+            exportar={() =>
+              todosFiltro !== null
+                ? exportarContatosPorFiltro(filtro || {})
+                : exportarContatosPorFiltro(filtro || {}, { ids: [...sel] })
+            }
+          />
           <button className="text-xs text-subtle hover:text-ink" onClick={clear}>
             limpar seleção
           </button>

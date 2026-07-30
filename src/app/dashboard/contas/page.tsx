@@ -112,7 +112,13 @@ export default async function Contas({
       )}
 
       <div className="mt-6">
-        <AccountsCockpit rows={rows} allTags={(allTags as any[]) || []} members={memberList} />
+        <AccountsCockpit
+          rows={rows}
+          allTags={(allTags as any[]) || []}
+          members={memberList}
+          filtro={{ q, tag: tagFilter }}
+          filtroSoDaTela={produtoFilter.length > 0 || !!view}
+        />
       </div>
     </div>
   );
