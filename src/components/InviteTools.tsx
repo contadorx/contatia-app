@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
-import { createInvite, revokeInvite } from "@/app/dashboard/equipe/actions";
+import { createInvite, revokeInvite, reenviarConvite } from "@/app/dashboard/equipe/actions";
 
 type Invite = { id: string; email: string; token: string; expires_at: string };
 
@@ -24,13 +24,25 @@ export default function InviteTools({ pending }: { pending: Invite[] }) {
   function gerar() {
     setMsg(null);
     setLink(null);
+    const destino = email.trim();
     start(async () => {
-      const res = (await createInvite(email, teamRole)) as { token?: string; error?: string };
-      if (res?.error) setMsg(res.error);
-      else if (res?.token) {
+      const res = (await createInvite(email, teamRole)) as
+        { token?: string; error?: string; enviado?: boolean; aviso?: string };
+      if (res?.error) { setMsg(res.error); return; }
+      if (res?.token) {
         setLink(`${window.location.origin}/convite/${res.token}`);
         setEmail("");
+        // Dizer se o e-mail SAIU ou não é o ponto: antes o convite era criado em
+        // silêncio e o dono não tinha como saber que ninguém foi avisado.
+        setMsg(res.enviado ? `✓ Convite enviado para ${destino}.` : (res.aviso || "Convite criado."));
       }
+    });
+  }
+  function reenviar(id: string) {
+    setMsg(null);
+    start(async () => {
+      const res = (await reenviarConvite(id)) as { ok?: boolean; email?: string; error?: string };
+      setMsg(res?.error ? res.error : `✓ Reenviado para ${res?.email || "a pessoa"}.`);
     });
   }
   function copy(v: string) {
@@ -45,7 +57,7 @@ export default function InviteTools({ pending }: { pending: Invite[] }) {
   return (
     <div className="card p-5">
       <p className="text-sm font-semibold">Convidar pessoa</p>
-      <p className="mt-1 text-xs text-subtle">Gera um link (válido 14 dias) — mande por WhatsApp/e-mail. A pessoa cria a conta, abre o link e entra no seu workspace com o papel que você escolher.</p>
+      <p className="mt-1 text-xs text-subtle">Manda um e-mail com o convite (válido 14 dias) e também mostra o link, para você repassar por WhatsApp se preferir. A pessoa cria a conta, abre o link e entra no seu workspace com o papel que você escolher.</p>
       <div className="mt-3 flex flex-wrap items-end gap-2">
         <div>
           <label className="label">E-mail</label>
@@ -62,7 +74,7 @@ export default function InviteTools({ pending }: { pending: Invite[] }) {
         </button>
       </div>
       <p className="mt-1.5 text-[11px] text-subtle">{ROLE_OPTS.find((o) => o.v === teamRole)?.d}</p>
-      {msg && <p className="mt-2 text-sm text-danger">{msg}</p>}
+      {msg && <p className={`mt-2 text-sm ${msg.startsWith("✓") ? "text-signal" : "text-danger"}`}>{msg}</p>}
       {link && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <input className="input w-72 text-xs" value={link} readOnly onFocus={(e) => e.target.select()} />
@@ -80,6 +92,9 @@ export default function InviteTools({ pending }: { pending: Invite[] }) {
               <div key={i.id} className="flex items-center justify-between py-2 text-sm">
                 <span>{i.email}</span>
                 <div className="flex items-center gap-3">
+                  <button className="text-xs text-subtle hover:text-ink disabled:opacity-50" onClick={() => reenviar(i.id)} disabled={pendingTx}>
+                    reenviar e-mail
+                  </button>
                   <button className="text-xs text-subtle hover:text-ink" onClick={() => copy(`${window.location.origin}/convite/${i.token}`)}>
                     copiar link
                   </button>
