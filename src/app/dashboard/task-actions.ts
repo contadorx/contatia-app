@@ -135,7 +135,10 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   // (cap efetivo do dia − enviados hoje). Distribui a carga e protege cada domínio.
   const { data: accts } = await supabase
     .from("email_accounts")
-    .select("id, user_id, is_shared, verified, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage, signature")
+    .select("*")   // `*` de propósito: listar as colunas faria TODO envio quebrar com "column
+           // does not exist" no intervalo entre publicar o app e aplicar a migration —
+           // e o app é publicado pela Vercel enquanto a migration é aplicada à mão.
+           // A linha é pequena e já a líamos quase inteira.
     .eq("is_active", true)
     .order("created_at", { ascending: true });
   if (!accts || !accts.length) {
@@ -227,8 +230,9 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   const html = built.html;
   bodyText = built.text;
 
+  let copia: { copiaEmEnviados?: boolean; erroCopia?: string } = {};
   try {
-    await sendEmail(acct as any, { to, subject: task.title || "", text: bodyText, html });
+    copia = await sendEmail(acct as any, { to, subject: task.title || "", text: bodyText, html });
   } catch (e: any) {
     const { msgSmtp } = await import("@/lib/caixas");
     const ehAuth = /535|534|Invalid login|Username and Password not accepted|authentication|Incorrect authentication/i.test(String(e?.message || ""));
@@ -247,6 +251,22 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     return { error: msgSmtp(e, (acct as any).from_email) };
   }
 
+  // A cópia em "Enviados" falhou por login/host de IMAP? Desliga para ESTA caixa.
+  // Sem isso, cada envio pagaria a espera do IMAP de novo — e a pessoa está olhando
+  // a tela. O aviso volta no retorno para ela saber por que a cópia parou de aparecer.
+  let avisoCopia: string | undefined;
+  if (copia.copiaEmEnviados === false && copia.erroCopia) {
+    const permanente = /auth|login|denied|ENOTFOUND|EAI_AGAIN|certificate|Invalid credentials/i.test(copia.erroCopia);
+    if (permanente) {
+      await supabase.from("email_accounts").update({ save_to_sent: false }).eq("id", (acct as any).id);
+      avisoCopia =
+        `O e-mail saiu normalmente, mas não consegui gravar a cópia em "Enviados" (${copia.erroCopia}). ` +
+        `Desliguei a cópia para esta caixa para não atrasar os próximos envios — confira host/porta de IMAP em Configurações → Canais.`;
+    } else {
+      avisoCopia = `O e-mail saiu normalmente, mas a cópia em "Enviados" não foi gravada desta vez (${copia.erroCopia}).`;
+    }
+  }
+
   await supabase.from("tasks").update({ status: "done", completed_at: new Date().toISOString() }).eq("id", taskId);
   await scoreEvent(supabase, {
     tenant_id,
@@ -256,7 +276,7 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     meta: { to },
   });
   revalidatePath("/dashboard");
-  return { ok: true };
+  return { ok: true, aviso: avisoCopia };
 }
 
 // Envia a tarefa de WhatsApp via Evolution API (caixa ativa do tenant), com cap diário.

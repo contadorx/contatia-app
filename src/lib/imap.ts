@@ -140,3 +140,78 @@ export async function fetchRecentMessages(acc: Acc, since: Date): Promise<Recent
   }
   return out;
 }
+
+// ============================================================
+// GRAVAR CÓPIA NA PASTA "ENVIADOS"
+//
+// POR QUE ISTO PRECISA EXISTIR: enviar e guardar cópia são DUAS coisas diferentes.
+// O SMTP só transporta a mensagem — ele não tem pasta nenhuma. A pasta "Enviados" é
+// IMAP, e quem coloca a cópia lá é o programa que enviou, com um comando APPEND.
+// Outlook e Thunderbird fazem isso; um sistema que só usa SMTP, não.
+//
+// Por isso o e-mail chegava no destinatário e sumia do seu webmail: ele saiu, mas
+// ninguém tinha pedido para guardar a cópia.
+//
+// EXCEÇÃO: Gmail e Outlook.com gravam sozinhos, no servidor deles. Chamar isto numa
+// caixa Gmail criaria DUAS cópias na pasta. Quem chama precisa pular esses provedores.
+//
+// É BEST-EFFORT de propósito: a mensagem JÁ FOI ENVIADA quando esta função roda.
+// Falhar aqui não pode virar erro na tela — seria dizer "não enviou" sobre um e-mail
+// que o cliente já recebeu, e o operador mandaria de novo.
+// ============================================================
+
+// Nomes de pasta de "enviados" que os servidores usam, em ordem de tentativa.
+// O certo é o servidor declarar \Sent (SPECIAL-USE) e é isso que tentamos primeiro;
+// esta lista é o plano B para servidores antigos que não declaram.
+const NOMES_ENVIADOS = [
+  "Sent", "INBOX.Sent", "Sent Items", "INBOX.Sent Items", "Sent Messages",
+  "INBOX.Sent Messages", "Enviados", "INBOX.Enviados", "Elementos enviados",
+];
+
+export async function salvarEmEnviados(
+  acc: Acc,
+  raw: Buffer | string
+): Promise<{ ok?: boolean; pasta?: string; error?: string }> {
+  const host = acc.imap_host || acc.smtp_host;
+  if (!host || !acc.smtp_user) return { error: "Caixa sem dados de IMAP." };
+
+  const client = new ImapFlow({
+    host,
+    port: acc.imap_port || 993,
+    secure: true,
+    auth: { user: acc.smtp_user, pass: acc.smtp_pass || "" },
+    logger: false,
+    socketTimeout: 15000,
+  });
+
+  try {
+    await client.connect();
+    try {
+      // 1) a pasta que o próprio servidor marca como "enviados"
+      let destino: string | null = null;
+      try {
+        const lista = await client.list();
+        const especial = (lista || []).find(
+          (m: any) => m.specialUse === "\\Sent" || (m.flags && m.flags.has && m.flags.has("\\Sent"))
+        );
+        if (especial) destino = especial.path;
+        // 2) plano B: casar pelo nome, respeitando o separador do servidor
+        if (!destino) {
+          const caminhos = new Set((lista || []).map((m: any) => m.path));
+          destino = NOMES_ENVIADOS.find((n) => caminhos.has(n)) || null;
+        }
+      } catch { /* servidor sem LIST utilizável: tenta o nome mais comum */ }
+
+      if (!destino) destino = "Sent";
+
+      // \Seen porque a cópia na pasta de enviados não é "não lida" — sem isso o
+      // webmail mostra um contador de não lidos que nunca faz sentido.
+      await client.append(destino, raw, ["\\Seen"]);
+      return { ok: true, pasta: destino };
+    } finally {
+      await client.logout().catch(() => {});
+    }
+  } catch (e: any) {
+    return { error: e?.message || "Falha ao gravar em Enviados." };
+  }
+}

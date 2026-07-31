@@ -168,9 +168,13 @@ export default function TaskQueue({
   function send(id: string, override?: { subject?: string; body?: string }) {
     setErr(null);
     start(async () => {
-      const res = (await sendEmailTask(id, override)) as { error?: string } | undefined;
-      if (res?.error) setErr(res.error);
-      else setEditing((s) => { const n = { ...s }; delete n[id]; return n; });
+      const res = (await sendEmailTask(id, override)) as { error?: string; aviso?: string } | undefined;
+      if (res?.error) { setErr(res.error); return; }
+      // `aviso` = o e-mail SAIU, mas algo secundário falhou (hoje: a cópia em
+      // "Enviados"). Não pode virar erro vermelho — quem lê "falhou" manda de novo,
+      // e o cliente receberia duas vezes.
+      setErr(res?.aviso || null);
+      setEditing((s) => { const n = { ...s }; delete n[id]; return n; });
     });
   }
   function sendWa(id: string, body?: string) {

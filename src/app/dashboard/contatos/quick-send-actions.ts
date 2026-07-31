@@ -43,7 +43,10 @@ export async function sendQuickEmail(contactId: string, subject: string, body: s
   // rotação de caixas + cap diário (mesma lógica da fila)
   const { data: accts } = await supabase
     .from("email_accounts")
-    .select("id, user_id, is_shared, verified, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage, signature")
+    .select("*")   // `*` de propósito: listar as colunas faria TODO envio quebrar com "column
+           // does not exist" no intervalo entre publicar o app e aplicar a migration —
+           // e o app é publicado pela Vercel enquanto a migration é aplicada à mão.
+           // A linha é pequena e já a líamos quase inteira.
     .eq("is_active", true)
     .order("created_at", { ascending: true });
   if (!accts || !accts.length) return { error: "Nenhuma caixa de e-mail conectada. Configure em Config." };
