@@ -1,5 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import TaskQueue from "@/components/TaskQueue";
+import EnviosHoje from "@/components/EnviosHoje";
+import { enviosDeHoje } from "@/lib/enviosHoje";
+import { isManager } from "@/lib/permissions";
 import OnboardingChecklist from "@/components/OnboardingChecklist";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import { effectiveDailyCap } from "@/lib/warmup";
@@ -12,8 +15,19 @@ export default async function Today() {
   const today = new Date().toISOString().slice(0, 10);
   const in3 = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
 
-  const { data: tenantRow } = await supabase.from("tenants").select("whatsapp_mode").maybeSingle();
+  const { data: tenantRow } = await supabase.from("tenants").select("id, whatsapp_mode").maybeSingle();
   const waMode = ((tenantRow as any)?.whatsapp_mode as string) || "assistido";
+
+  // quem está olhando — decide se o painel de envios mostra só os seus ou os da equipe
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: eu } = await supabase
+    .from("profiles").select("tenant_id, role, team_role").eq("id", user?.id ?? "").maybeSingle();
+  const souGestor = isManager((eu as any)?.role, (eu as any)?.team_role);
+  const envios = await enviosDeHoje(supabase, {
+    tenantId: ((eu as any)?.tenant_id as string) || "",
+    meuId: user?.id,
+    gestor: souGestor,
+  });
 
   // no modo automático, avisa se o número desconectou (envios falhariam em silêncio)
   let waDisconnected = false;
@@ -180,7 +194,13 @@ export default async function Today() {
         ))}
       </div>
 
-      <h2 className="mt-8 mb-3 font-display text-lg font-bold">Fila de hoje</h2>
+      {/* Quanto EU já mandei hoje e a que horas — a pergunta que faltava responder.
+          Fica logo acima da fila porque é o que evita mandar duas vezes sem querer. */}
+      <div className="mt-8">
+        <EnviosHoje dados={envios} gestor={souGestor} />
+      </div>
+
+      <h2 className="mb-3 font-display text-lg font-bold">Fila de hoje</h2>
       <TaskQueue tasks={tasks} hotThreshold={HOT_THRESHOLD} lastActivity={lastActivity} allTags={(allTags as any[]) || []} waMode={waMode} />
     </div>
   );

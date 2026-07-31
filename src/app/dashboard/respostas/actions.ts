@@ -86,26 +86,107 @@ export async function deleteThread(input: { phone: string; contactId?: string | 
 }
 
 // Exclui VÁRIAS conversas de WhatsApp de uma vez (apaga as mensagens de cada número/contato).
-export async function deleteThreadsBulk(threads: { phone: string; contactId?: string | null }[]) {
+// ============================================================
+// AÇÕES EM MASSA NA CAIXA — WhatsApp E e-mail
+//
+// A versão anterior só apagava WhatsApp: recebia `phone` e mexia apenas em
+// `whatsapp_messages`. Na tela isso virava "Selecionar todas (WhatsApp)" e as conversas
+// de e-mail ficavam acinzentadas, sem explicação — quem tem a caixa cheia de e-mail
+// não tinha como limpar.
+//
+// Agora a conversa é identificada pelo que ela realmente é: canal + contato (ou o
+// telefone/endereço solto, quando não há contato cadastrado).
+// ============================================================
+export type AlvoConversa = {
+  channel: "whatsapp" | "email";
+  contactId?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
+
+const FATIA = 150;   // ids por consulta (limite de tamanho da URL do PostgREST)
+
+async function porFatias<T>(itens: T[], fn: (fatia: T[]) => Promise<any>) {
+  for (let i = 0; i < itens.length; i += FATIA) {
+    const r = await fn(itens.slice(i, i + FATIA));
+    if (r?.error) throw r.error;
+  }
+}
+
+// Aplica uma operação (apagar ou marcar como lida) às conversas selecionadas.
+async function operarConversas(
+  alvos: AlvoConversa[],
+  op: "excluir" | "marcarLida"
+): Promise<{ ok?: boolean; whatsapp?: number; email?: number; error?: string }> {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
-  const list = (threads || []).filter((t) => t && (t.contactId || t.phone));
-  if (!list.length) return { error: "Nenhuma conversa selecionada." };
 
-  // Separa em dois lotes: por contato (com contact_id) e por telefone solto (sem contato).
-  const contactIds = Array.from(new Set(list.map((t) => t.contactId).filter(Boolean))) as string[];
-  const phones = Array.from(new Set(list.filter((t) => !t.contactId).map((t) => (t.phone || "").trim()).filter(Boolean)));
+  const lista = (alvos || []).filter((t) => t && (t.contactId || t.phone || t.email));
+  if (!lista.length) return { error: "Nenhuma conversa selecionada." };
 
-  if (contactIds.length) {
-    const { error } = await supabase.from("whatsapp_messages").delete().eq("tenant_id", tenant_id).in("contact_id", contactIds);
-    if (error) return { error: msgErro(error) };
+  const wa = lista.filter((t) => t.channel === "whatsapp");
+  const em = lista.filter((t) => t.channel === "email");
+
+  const waContatos = Array.from(new Set(wa.map((t) => t.contactId).filter(Boolean))) as string[];
+  const waFones = Array.from(new Set(wa.filter((t) => !t.contactId).map((t) => (t.phone || "").trim()).filter(Boolean)));
+  const emContatos = Array.from(new Set(em.map((t) => t.contactId).filter(Boolean))) as string[];
+  const emEnderecos = Array.from(new Set(em.filter((t) => !t.contactId).map((t) => (t.email || "").trim().toLowerCase()).filter(Boolean)));
+
+  const agora = new Date().toISOString();
+  const aplicar = (q: any) => (op === "excluir" ? q.delete() : q.update({ read_at: agora }));
+
+  try {
+    if (waContatos.length) {
+      await porFatias(waContatos, (f) =>
+        aplicar(supabase.from("whatsapp_messages")).eq("tenant_id", tenant_id).in("contact_id", f));
+    }
+    if (waFones.length) {
+      await porFatias(waFones, (f) =>
+        aplicar(supabase.from("whatsapp_messages")).eq("tenant_id", tenant_id).in("phone", f).is("contact_id", null));
+    }
+    if (emContatos.length) {
+      await porFatias(emContatos, (f) =>
+        aplicar(supabase.from("email_messages")).eq("tenant_id", tenant_id).in("contact_id", f));
+    }
+    if (emEnderecos.length) {
+      await porFatias(emEnderecos, (f) =>
+        aplicar(supabase.from("email_messages")).eq("tenant_id", tenant_id).in("email", f).is("contact_id", null));
+    }
+  } catch (e: any) {
+    return { error: msgErro(e) };
   }
-  if (phones.length) {
-    const { error } = await supabase.from("whatsapp_messages").delete().eq("tenant_id", tenant_id).in("phone", phones).is("contact_id", null);
-    if (error) return { error: msgErro(error) };
+
+  // Exclusão em massa na caixa é destrutiva e some com histórico de conversa —
+  // vai para o registro, como as demais.
+  if (op === "excluir") {
+    const { logAction } = await import("@/lib/actionLog");
+    const { data: { user } } = await supabase.auth.getUser();
+    await logAction(supabase, {
+      tenant_id,
+      user_id: user?.id,
+      action: "thread_delete_bulk",
+      entity: "message",
+      qtd: lista.length,
+      detail: `Excluiu ${lista.length} conversa(s) da caixa (${wa.length} WhatsApp, ${em.length} e-mail).`,
+      meta: { whatsapp: wa.length, email: em.length },
+    });
   }
+
   revalidatePath("/dashboard/respostas");
-  return { ok: true, count: list.length };
+  return { ok: true, whatsapp: wa.length, email: em.length };
+}
+
+export async function excluirConversas(alvos: AlvoConversa[]) {
+  return operarConversas(alvos, "excluir");
+}
+
+export async function marcarConversasLidas(alvos: AlvoConversa[]) {
+  return operarConversas(alvos, "marcarLida");
+}
+
+// Compatibilidade: assinatura antiga (só WhatsApp).
+export async function deleteThreadsBulk(threads: { phone: string; contactId?: string | null }[]) {
+  return excluirConversas((threads || []).map((t) => ({ channel: "whatsapp" as const, phone: t.phone, contactId: t.contactId })));
 }
 
 // Busca a mídia de uma mensagem sob demanda (não armazena nada).

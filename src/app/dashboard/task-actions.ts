@@ -272,6 +272,7 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     tenant_id,
     contact_id: (task as any).contact_id,
     type: "email_sent",
+    user_id,
     email_account_id: (acct as any).id,
     meta: { to },
   });
@@ -328,8 +329,10 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
   if (res.error) return { error: res.error };
 
   await supabase.from("tasks").update({ status: "done", completed_at: new Date().toISOString() }).eq("id", taskId);
-  await scoreEvent(supabase, { tenant_id, contact_id: (task as any).contact_id, type: "task_done" });
-  await supabase.from("events").insert({ tenant_id, type: "whatsapp_sent", contact_id: (task as any).contact_id, meta: {} });
+  await scoreEvent(supabase, { tenant_id, contact_id: (task as any).contact_id, type: "task_done", user_id });
+  // pelo scoreEvent, e não por insert direto: é ele que sabe gravar o autor e que
+  // tolera a coluna user_id ainda não existir (0106 não aplicada).
+  await scoreEvent(supabase, { tenant_id, contact_id: (task as any).contact_id, type: "whatsapp_sent", user_id });
   // guarda a mensagem enviada na conversa (para a caixa de Respostas mostrar os dois lados)
   await supabase.from("whatsapp_messages").insert({
     tenant_id,

@@ -11,7 +11,8 @@ import {
   createContactFromEmailThread,
   blockThread,
   deleteThread,
-  deleteThreadsBulk,
+  excluirConversas,
+  marcarConversasLidas,
   fetchMedia,
 } from "@/app/dashboard/respostas/actions";
 import { waLink } from "@/lib/cadence";
@@ -73,7 +74,9 @@ export default function RespostasInbox({
   const visibleThreads = busca
     ? threads.filter((t) => `${t.name} ${t.phone} ${snippet(t)}`.toLowerCase().includes(busca.toLowerCase()))
     : threads;
-  const visibleWa = visibleThreads.filter((t) => t.channel === "whatsapp");
+  // Antes só WhatsApp entrava na seleção. Agora vale a conversa inteira, dos dois
+  // canais — quem tem a caixa cheia de e-mail também precisa limpar.
+  const selecionaveis = visibleThreads;
 
   function toggleCheck(key: string) {
     setChecked((s) => {
@@ -83,9 +86,15 @@ export default function RespostasInbox({
     });
     setErr(null);
   }
-  function toggleAllWa() {
-    setChecked((s) => (visibleWa.every((t) => s.has(t.key)) ? new Set() : new Set(visibleWa.map((t) => t.key))));
+  function toggleTodas() {
+    setChecked((s) => (selecionaveis.length > 0 && selecionaveis.every((t) => s.has(t.key)) ? new Set() : new Set(selecionaveis.map((t) => t.key))));
     setErr(null);
+  }
+  // as conversas marcadas, no formato que o servidor entende (canal + quem é)
+  function alvosSelecionados() {
+    return threads
+      .filter((t) => checked.has(t.key))
+      .map((t) => ({ channel: t.channel, contactId: t.contactId, phone: t.phone, email: t.email }));
   }
   function sairSelecao() {
     setSelMode(false);
@@ -93,10 +102,22 @@ export default function RespostasInbox({
     setErr(null);
   }
   function excluirSelecionadas() {
-    const alvos = threads.filter((t) => t.channel === "whatsapp" && checked.has(t.key)).map((t) => ({ phone: t.phone, contactId: t.contactId }));
+    const alvos = alvosSelecionados();
     if (!alvos.length) return;
-    if (!window.confirm(`Excluir ${alvos.length} conversa(s) de WhatsApp? As mensagens desses números são apagadas da caixa. Isso não pode ser desfeito.`)) return;
-    act(() => deleteThreadsBulk(alvos), () => { sairSelecao(); setSel(null); });
+    const nWa = alvos.filter((a) => a.channel === "whatsapp").length;
+    const nEm = alvos.length - nWa;
+    const detalhe = [nWa ? `${nWa} de WhatsApp` : "", nEm ? `${nEm} de e-mail` : ""].filter(Boolean).join(" e ");
+    if (!window.confirm(
+      `Excluir ${alvos.length} conversa(s) (${detalhe})?\n\n` +
+      `As mensagens saem da caixa. Os CONTATOS não são apagados — só o histórico da conversa. ` +
+      `Isso não pode ser desfeito.`
+    )) return;
+    act(() => excluirConversas(alvos as any), () => { sairSelecao(); setSel(null); });
+  }
+  function marcarLidasSelecionadas() {
+    const alvos = alvosSelecionados();
+    if (!alvos.length) return;
+    act(() => marcarConversasLidas(alvos as any), () => sairSelecao());
   }
 
   useEffect(() => {
@@ -148,7 +169,7 @@ export default function RespostasInbox({
           {/* barra de seleção múltipla (WhatsApp) */}
           <div className="mt-2 flex items-center justify-between gap-2 px-1 text-xs">
             {!selMode ? (
-              <button className="font-medium text-subtle hover:text-brand" onClick={() => setSelMode(true)} disabled={!visibleWa.length}>
+              <button className="font-medium text-subtle hover:text-brand" onClick={() => setSelMode(true)} disabled={!selecionaveis.length}>
                 Selecionar conversas
               </button>
             ) : (
@@ -156,12 +177,20 @@ export default function RespostasInbox({
                 <label className="flex items-center gap-1.5 text-subtle">
                   <input
                     type="checkbox"
-                    checked={visibleWa.length > 0 && visibleWa.every((t) => checked.has(t.key))}
-                    onChange={toggleAllWa}
+                    checked={selecionaveis.length > 0 && selecionaveis.every((t) => checked.has(t.key))}
+                    onChange={toggleTodas}
                   />
-                  {checked.size > 0 ? `${checked.size} selecionada(s)` : "Selecionar todas (WhatsApp)"}
+                  {checked.size > 0 ? `${checked.size} selecionada(s)` : "Selecionar todas"}
                 </label>
                 <div className="flex items-center gap-2">
+                  <button
+                    className="rounded-lg border border-line bg-white px-2 py-1 font-medium hover:bg-muted disabled:opacity-40"
+                    disabled={pending || checked.size === 0}
+                    onClick={marcarLidasSelecionadas}
+                    title="Zera o não-lido dessas conversas sem abrir uma por uma."
+                  >
+                    Marcar como lida
+                  </button>
                   <button
                     className="rounded-lg bg-danger px-2 py-1 font-bold text-white disabled:opacity-40"
                     disabled={pending || checked.size === 0}
@@ -180,7 +209,7 @@ export default function RespostasInbox({
           <p className="p-4 text-sm text-subtle">Nenhuma conversa para “{busca}”.</p>
         )}
         {visibleThreads.map((t) => {
-          const selectable = selMode && t.channel === "whatsapp";
+          const selectable = selMode;
           const isChecked = checked.has(t.key);
           return (
           <button
@@ -188,7 +217,7 @@ export default function RespostasInbox({
             onClick={() => (selectable ? toggleCheck(t.key) : setSel(t.key))}
             className={`flex w-full items-start gap-2 p-3 text-left transition ${
               selectable && isChecked ? "bg-brand-soft/60" : sel === t.key && !selMode ? "bg-brand-soft/50" : "hover:bg-muted"
-            } ${selMode && t.channel === "email" ? "opacity-50" : ""}`}
+            }`}
           >
             {selectable && (
               <input type="checkbox" checked={isChecked} readOnly className="mt-0.5 shrink-0" aria-label={`Selecionar ${t.name}`} />

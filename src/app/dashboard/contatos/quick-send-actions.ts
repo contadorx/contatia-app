@@ -115,7 +115,7 @@ export async function sendQuickEmail(contactId: string, subject: string, body: s
     return { error: msgSmtp(e, (acct as any).from_email) };
   }
 
-  await scoreEvent(supabase, { tenant_id, contact_id: contactId, type: "email_sent", email_account_id: (acct as any).id, meta: { to, avulso: true } });
+  await scoreEvent(supabase, { tenant_id, contact_id: contactId, type: "email_sent", email_account_id: (acct as any).id, user_id, meta: { to, avulso: true } });
   revalidatePath(`/dashboard/contatos/${contactId}`);
   return { ok: true, from: (acct as any).from_email };
 }
@@ -159,7 +159,8 @@ export async function sendQuickWhatsApp(contactId: string, body: string) {
   const res = await sendText(acc as any, phone, body);
   if (res.error) return { error: res.error };
 
-  await supabase.from("events").insert({ tenant_id, type: "whatsapp_sent", contact_id: contactId, meta: { avulso: true } });
+  // via scoreEvent: é ele que tolera a coluna user_id ainda não existir (0106)
+  await scoreEvent(supabase, { tenant_id, type: "whatsapp_sent", user_id, contact_id: contactId, meta: { avulso: true } });
   await supabase.from("whatsapp_messages").insert({ tenant_id, account_id: (acc as any).id, contact_id: contactId, phone, direction: "out", text: body });
   revalidatePath(`/dashboard/contatos/${contactId}`);
   return { ok: true };
