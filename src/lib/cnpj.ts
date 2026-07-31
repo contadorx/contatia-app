@@ -1,4 +1,5 @@
 import "server-only";
+import { chaveCnpj, consultavelNaBaseReceita } from "@/lib/cnpjFormato";
 
 export type CnpjData = {
   razao_social?: string;
@@ -23,8 +24,11 @@ export type CnpjData = {
   abertura?: string;
 };
 
+// CNPJ pode ter letras desde jul/2026. Mantemos o nome `onlyDigits` porque outros
+// arquivos o importam daqui, mas o comportamento agora é "normalizar CNPJ": preserva
+// as 12 posições alfanuméricas e devolve "" quando não é um CNPJ completo.
 function onlyDigits(s: string) {
-  return (s || "").replace(/\D/g, "");
+  return chaveCnpj(s);
 }
 
 // Nome próprio PT-BR: "JOÃO DA SILVA" → "João da Silva"; "METALÚRGICA ZENIT LTDA" →
@@ -156,8 +160,10 @@ const pref = <T,>(a: T | undefined | null, b: T | undefined | null): T | undefin
 // sócios, capital social, natureza jurídica). Se a base não estiver configurada ou não
 // achar, usa só o provedor externo (comportamento antigo).
 export async function enrichCnpj(cnpjRaw: string): Promise<{ data?: CnpjData; error?: string; fontes?: string[] }> {
-  const cnpj = onlyDigits(cnpjRaw);
-  if (cnpj.length !== 14) return { error: "CNPJ inválido." };
+  const cnpj = chaveCnpj(cnpjRaw);
+  if (!cnpj) {
+    return { error: "CNPJ inválido. São 14 posições: 12 alfanuméricas + 2 dígitos verificadores (ex.: 12.ABC.345/01DE-35)." };
+  }
 
   const fontes: string[] = [];
 
@@ -165,7 +171,10 @@ export async function enrichCnpj(cnpjRaw: string): Promise<{ data?: CnpjData; er
   let base: CnpjData | null = null;
   try {
     const { buscarEmpresaPorCnpj, receitaConfigurada } = await import("@/lib/receita");
-    if (receitaConfigurada()) {
+    // A base da Receita no VPS vem do arquivo mensal oficial, que ainda só traz CNPJ
+    // numérico — os alfanuméricos passaram a ser emitidos em jul/2026. Consultar lá com
+    // um alfanumérico é ida à rede garantidamente vazia; vai direto ao provedor externo.
+    if (receitaConfigurada() && consultavelNaBaseReceita(cnpj)) {
       const r = await buscarEmpresaPorCnpj(cnpj);
       if (r.empresa) { base = mapBase(r.empresa); fontes.push("base"); }
     }
