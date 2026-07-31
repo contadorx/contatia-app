@@ -19,7 +19,7 @@ async function ctx() {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const { data } = await supabase.from("profiles").select("tenant_id").eq("id", user?.id ?? "").maybeSingle();
-  return { supabase, tenant_id: (data?.tenant_id as string) || null };
+  return { supabase, tenant_id: (data?.tenant_id as string) || null, user_id: user?.id };
 }
 
 const digits = (s: any) => String(s || "").replace(/\D/g, "");
@@ -27,23 +27,33 @@ const digits = (s: any) => String(s || "").replace(/\D/g, "");
 export async function verificarWhatsAppLote(contactIds: string[]): Promise<{
   ok?: boolean; verificados?: number; comWa?: number; semWa?: number; enfileirados?: number; semTelefone?: number; error?: string;
 }> {
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (!contactIds.length) return { error: "Nada selecionado." };
 
-  // precisa do modo Evolution + instância conectada
+  // Precisa do modo Evolution + instância conectada. As duas mensagens abaixo foram
+  // reescritas para dizer O QUE FAZER: "não funcionou" quase sempre é uma destas duas
+  // travas, e a redação anterior não dizia onde clicar nem em que estado a coisa está.
   const { data: tmode } = await supabase.from("tenants").select("whatsapp_mode").eq("id", tenant_id).maybeSingle();
-  if ((tmode as any)?.whatsapp_mode !== "evolution") {
-    return { error: "A verificação em massa exige o WhatsApp no modo Evolution conectado (Config → Canais)." };
+  const modo = (tmode as any)?.whatsapp_mode || "(não configurado)";
+  if (modo !== "evolution") {
+    return {
+      error:
+        `A verificação de WhatsApp consulta a sua sessão do WhatsApp para perguntar "este número existe?" — ` +
+        `e hoje o seu workspace está no modo "${modo}", que não tem sessão. ` +
+        `Vá em Configurações → Canais, escolha o modo Evolution e leia o QR code. Sem isso, nenhuma verificação é possível.`,
+    };
   }
-  const { data: acc } = await supabase
-    .from("whatsapp_accounts")
-    .select("id, evolution_url, api_key, instance")
-    .eq("is_active", true)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (!acc) return { error: "Nenhuma instância WhatsApp conectada." };
+  // a instância do PRÓPRIO usuário, quando ela existe (ver lib/instanciaWa)
+  const { instanciaDoUsuario } = await import("@/lib/instanciaWa");
+  const { acc } = await instanciaDoUsuario(supabase, tenant_id, user_id);
+  if (!acc) {
+    return {
+      error:
+        "O modo Evolution está ligado, mas não há nenhuma instância de WhatsApp ATIVA disponível para você. " +
+        "Em Configurações → Canais, conecte o SEU número (ou peça ao gestor para liberar um compartilhado) e leia o QR code.",
+    };
+  }
 
   const { data: rows } = await supabase
     .from("contacts")

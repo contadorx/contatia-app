@@ -85,7 +85,7 @@ export async function markReplied(contactId: string) {
 // ---- Envio de e-mail real (SMTP/Gmail) a partir de uma tarefa da fila ----
 export async function sendEmailTask(taskId: string, override?: { subject?: string; body?: string }) {
   const { sendEmail } = await import("@/lib/mailer");
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
 
   // se veio corpo/assunto editado, persiste na task antes de enviar
@@ -135,10 +135,12 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   // (cap efetivo do dia − enviados hoje). Distribui a carga e protege cada domínio.
   const { data: accts } = await supabase
     .from("email_accounts")
-    .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage, signature")
+    .select("id, user_id, is_shared, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage, signature")
     .eq("is_active", true)
     .order("created_at", { ascending: true });
-  if (!accts || !accts.length) return { error: "Nenhuma caixa de e-mail conectada. Configure em Config." };
+  if (!accts || !accts.length) {
+    return { error: "Nenhuma caixa de e-mail conectada. Cadastre a sua em Configurações → Canais." };
+  }
 
   // meia-noite BRT (UTC-3, fixo): o servidor roda em UTC — sem isso o "dia" do cap
   // diário resetaria às 21h de Brasília e a caixa poderia enviar 2x o limite num dia real.
@@ -170,6 +172,23 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     const slack = cap - used;
     if (warming) anyWarming = true;
     if (slack > bestSlack) { bestSlack = slack; acct = a; }
+  }
+
+  // CAIXA PRÓPRIA — precedência mais alta depois da caixa designada.
+  //
+  // Se quem está enviando tem uma caixa PESSOAL ativa (migration 0104), o e-mail sai
+  // por ela, mesmo que outra tenha mais folga. Não é otimização de volume: é a marca
+  // certa. Um e-mail do vendedor saindo pelo endereço do escritório faz a RESPOSTA cair
+  // na caixa errada — e resposta é o único evento que realmente importa aqui.
+  //
+  // Só o cap diário derruba essa preferência: sem folga, cai no rodízio (o e-mail sai
+  // pelo endereço errado, mas sai — melhor que travar a fila do dia).
+  const minhaCaixa = (accts as any[]).find((a) => a.user_id && a.user_id === user_id);
+  if (minhaCaixa) {
+    const warmupOn = (minhaCaixa.warmup_stage ?? 0) !== -1;
+    const { cap } = effectiveDailyCap(minhaCaixa.created_at, minhaCaixa.daily_cap ?? 40, warmupOn);
+    const folga = cap - (sentByAcct[minhaCaixa.id] || 0);
+    if (folga > 0) { acct = minhaCaixa; bestSlack = folga; }
   }
 
   // CAIXA DESIGNADA (produto/cadência): se a tarefa foi carimbada com uma caixa e
@@ -238,7 +257,7 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
 // Envia a tarefa de WhatsApp via Evolution API (caixa ativa do tenant), com cap diário.
 export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
   const { sendText } = await import("@/lib/whatsapp");
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
 
   // envio automático só no modo Evolution; no assistido o envio é manual pelo link
@@ -261,14 +280,10 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
   const phone = (task as any).contacts?.phone as string | undefined;
   if (!phone) return { error: "Contato sem telefone." };
 
-  const { data: acc } = await supabase
-    .from("whatsapp_accounts")
-    .select("id, evolution_url, api_key, instance, daily_cap")
-    .eq("is_active", true)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (!acc) return { error: "Nenhuma instância WhatsApp conectada. Configure em Config." };
+  // instância do PRÓPRIO usuário quando ela existe (ver lib/instanciaWa)
+  const { instanciaDoUsuario, SEM_INSTANCIA } = await import("@/lib/instanciaWa");
+  const { acc } = await instanciaDoUsuario(supabase, tenant_id, user_id);
+  if (!acc) return { error: SEM_INSTANCIA };
 
   // meia-noite BRT (UTC-3, fixo): o servidor roda em UTC — sem isso o "dia" do cap
   // diário resetaria às 21h de Brasília e a caixa poderia enviar 2x o limite num dia real.

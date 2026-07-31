@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { normalizarDoc, docCompleto } from "@/lib/docCobranca";
 import { createClient } from "@/lib/supabase/server";
 
 async function ctx() {
@@ -48,12 +49,13 @@ export async function subscribePlan(planId: string, docNumber?: string, couponCo
   if (!tenant) return { error: "Workspace não encontrado." };
 
   // O Asaas exige CPF/CNPJ para cobrar: usa o do cadastro ou o informado agora.
-  const doc = String(docNumber || (tenant as any).cnpj || "").replace(/\D/g, "");
-  if (doc.length !== 11 && doc.length !== 14) {
+  // CPF (11 dígitos) ou CNPJ (12 alfanuméricos + 2 dígitos — ver lib/docCobranca).
+  const doc = normalizarDoc(docNumber || (tenant as any).cnpj);
+  if (!docCompleto(doc)) {
     return { error: "need_doc" }; // a tela pede o CPF/CNPJ
   }
   // salva no cadastro para as próximas cobranças (e NF)
-  if (doc !== String((tenant as any).cnpj || "").replace(/\D/g, "")) {
+  if (doc !== normalizarDoc((tenant as any).cnpj)) {
     await supabase.from("tenants").update({ cnpj: doc }).eq("id", tenant_id);
   }
 

@@ -1,6 +1,7 @@
 "use server";
 
 import { msgErro } from "@/lib/erros";
+import { chaveCnpj } from "@/lib/cnpjFormato";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { canCreate, mensagemLimite } from "@/lib/plan";
@@ -18,7 +19,12 @@ async function ctx() {
   return { supabase, tenant_id: (data?.tenant_id as string) || null, user_id: user?.id };
 }
 
-const soDigitos = (s: string | null | undefined) => (s || "").replace(/\D/g, "");
+// CNPJ alfanumérico (jul/2026): esta função só é usada para CNPJ, e antes era
+// `replace(/\D/g,"")` — que apagava as letras. A base da Receita no VPS ainda só tem
+// CNPJ numérico, mas as EMPRESAS do workspace já podem ter um alfanumérico vindo de
+// importação; com o corte antigo, a comparação "esta empresa já existe?" comparava
+// coisas diferentes e o Radar reofertava quem você já tinha.
+const soDigitos = (s: string | null | undefined) => chaveCnpj(s);
 const normNome = (s: string | null | undefined) =>
   (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 

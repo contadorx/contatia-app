@@ -104,7 +104,7 @@ export async function sendQuickEmail(contactId: string, subject: string, body: s
 }
 
 export async function sendQuickWhatsApp(contactId: string, body: string) {
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (!body.trim()) return { error: "Escreva a mensagem." };
 
@@ -127,14 +127,10 @@ export async function sendQuickWhatsApp(contactId: string, body: string) {
   }
 
   // modo EVOLUTION: envia direto pela instância, respeitando o cap diário
-  const { data: acc } = await supabase
-    .from("whatsapp_accounts")
-    .select("id, evolution_url, api_key, instance, daily_cap")
-    .eq("is_active", true)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (!acc) return { error: "Nenhuma instância WhatsApp conectada. Configure em Config." };
+  // instância do PRÓPRIO usuário quando ela existe (ver lib/instanciaWa)
+  const { instanciaDoUsuario, SEM_INSTANCIA } = await import("@/lib/instanciaWa");
+  const { acc } = await instanciaDoUsuario(supabase, tenant_id, user_id);
+  if (!acc) return { error: SEM_INSTANCIA };
 
   const BRT_OFFSET_MS = 3 * 3600000;
   const nowBRT = new Date(Date.now() - BRT_OFFSET_MS);

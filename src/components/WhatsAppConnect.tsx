@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import DonoDaCaixa from "@/components/DonoDaCaixa";
 import {
   saveWhatsApp,
   deleteWhatsApp,
@@ -8,9 +9,11 @@ import {
   whatsappStatus,
   whatsappSetWebhook,
   setWhatsAppMode,
+  criarMinhaInstancia,
+  removerMinhaInstancia,
 } from "@/app/dashboard/config/whatsapp-actions";
 
-type Acc = { id: string; evolution_url: string; instance: string; is_active: boolean; inbound_token: string };
+type Acc = { id: string; evolution_url: string; instance: string; is_active: boolean; inbound_token: string; user_id?: string | null; is_shared?: boolean | null };
 type Mode = "assistido" | "evolution" | "meta";
 
 // ============================================================
@@ -24,13 +27,23 @@ export default function WhatsAppConnect({
   mode = "assistido",
   acked = false,
   platformReady = false,
+  meuId = null,
+  nomePorId = {},
+  onCompartilhar,
 }: {
   accounts: Acc[];
   mode?: Mode;
   acked?: boolean;
   platformReady?: boolean;
+  // dono do número (migration 0104): no WhatsApp a conversa fica no aparelho de quem
+  // enviou, então saber de quem é o número não é detalhe — é onde a resposta vai cair.
+  meuId?: string | null;
+  nomePorId?: Record<string, string>;
+  onCompartilhar?: (id: string, compartilhada: boolean) => Promise<{ ok?: boolean; error?: string }>;
 }) {
   const [pending, start] = useTransition();
+  // a instância DESTA pessoa, se já existir
+  const minhaInstancia = meuId ? accounts.find((a) => a.user_id === meuId) : undefined;
   const [err, setErr] = useState<string | null>(null);
   const [showAck, setShowAck] = useState(false);
   const [ack, setAck] = useState(false);
@@ -148,8 +161,81 @@ export default function WhatsAppConnect({
             </p>
           )}
 
+          {/* MEU NÚMERO — o caminho principal desde que cada pessoa pode ter o seu.
+              Antes existia uma instância por workspace e todo mundo enviava por ela; no
+              WhatsApp isso faz a resposta chegar no aparelho errado. */}
+          {platformReady && meuId && (
+            <div className="mt-3 rounded-lg border border-brand/30 bg-white p-3">
+              {minhaInstancia ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm">
+                    <b>Este é o seu número.</b>{" "}
+                    <span className="text-subtle">
+                      Seus envios saem por ele e as respostas chegam no seu aparelho.
+                    </span>
+                  </p>
+                  <button
+                    className="text-xs text-subtle underline hover:text-danger disabled:opacity-50"
+                    disabled={pending}
+                    onClick={() => {
+                      if (!confirm(
+                        "Desconectar o seu número?\n\n" +
+                        "A sessão é encerrada no servidor e seus envios voltam a sair pelo número do " +
+                        "workspace (se houver um). O histórico de mensagens não é apagado."
+                      )) return;
+                      setErr(null);
+                      start(async () => {
+                        const r: any = await removerMinhaInstancia(minhaInstancia.id);
+                        if (r?.error) setErr(r.error);
+                        else if (r?.aviso) setErr(r.aviso);
+                      });
+                    }}
+                  >
+                    desconectar meu número
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm">
+                    <b>Conectar o meu número</b>{" "}
+                    <span className="text-subtle">
+                      — a instância é criada para você; depois é só ler o QR com o celular que vai enviar.
+                    </span>
+                  </p>
+                  <button
+                    className="btn-brand py-1.5 text-sm"
+                    disabled={pending}
+                    onClick={() => {
+                      setErr(null);
+                      start(async () => {
+                        const r: any = await criarMinhaInstancia();
+                        if (r?.error) setErr(r.error);
+                      });
+                    }}
+                  >
+                    {pending ? "Criando…" : "Criar a minha instância"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {accounts.map((a) => (
-            <AccountRow key={a.id} acc={a} />
+            <div key={a.id}>
+              <AccountRow acc={a} />
+              {onCompartilhar && (
+                <div className="mt-1 pl-1">
+                  <DonoDaCaixa
+                    tipo="whatsapp"
+                    userId={a.user_id ?? null}
+                    isShared={a.is_shared ?? null}
+                    meuId={meuId}
+                    nomeDono={a.user_id ? nomePorId[a.user_id] : undefined}
+                    onCompartilhar={(c) => onCompartilhar(a.id, c)}
+                  />
+                </div>
+              )}
+            </div>
           ))}
 
           {/* sem instância ainda: modo avançado (traga seu servidor) */}

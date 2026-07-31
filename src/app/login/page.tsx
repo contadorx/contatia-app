@@ -149,6 +149,16 @@ export default function LoginPage() {
             {mode === "in" ? "Não tem conta? Cadastre-se" : "Já tem conta? Entrar"}
           </button>
         )}
+
+        {/* Documentos: alcançáveis SEM login de propósito — quem precisa ler a política de
+            privacidade muitas vezes ainda não é cliente (ou é um titular de dado). */}
+        <p className="mt-6 text-center text-xs text-subtle">
+          <a href="/privacidade" className="hover:text-brand hover:underline">Privacidade</a>
+          {" · "}
+          <a href="/termos" className="hover:text-brand hover:underline">Termos</a>
+          {" · "}
+          <a href="/seguranca" className="hover:text-brand hover:underline">Segurança</a>
+        </p>
       </div>
     </main>
   );

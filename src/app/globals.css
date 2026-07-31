@@ -35,3 +35,26 @@ body {
     @apply text-xs font-medium text-subtle;
   }
 }
+
+/* ============================================================
+   Páginas legais (privacidade, termos, segurança, políticas).
+   Estilo só aqui, e não classes soltas em cada <p>: são documentos longos e o
+   próximo a editar vai mexer no TEXTO, não no Tailwind. Se a formatação depender de
+   classe em cada tag, a primeira edição do jurídico desmonta a página.
+   ============================================================ */
+.legal { color: #16172A; font-size: 15px; line-height: 1.7; }
+.legal h1 { font-family: Georgia, "Times New Roman", serif; font-size: 28px; font-weight: 700; line-height: 1.25; margin: 0 0 6px; }
+.legal h2 { font-family: Georgia, "Times New Roman", serif; font-size: 19px; font-weight: 700; margin: 30px 0 8px; }
+.legal h3 { font-size: 15px; font-weight: 600; margin: 20px 0 4px; }
+.legal p { margin: 0 0 12px; }
+.legal ul, .legal ol { margin: 0 0 12px; padding-left: 20px; }
+.legal li { margin: 0 0 6px; }
+.legal a { color: #3627D6; text-decoration: underline; }
+.legal strong { font-weight: 600; }
+.legal hr { border: 0; border-top: 1px solid #E4E6EF; margin: 28px 0; }
+.legal table { width: 100%; border-collapse: collapse; margin: 0 0 14px; font-size: 13.5px; }
+.legal th, .legal td { border: 1px solid #E4E6EF; padding: 7px 9px; text-align: left; vertical-align: top; }
+.legal th { background: #F5F6FA; font-weight: 600; }
+.legal .atualizado { color: #667085; font-size: 13px; margin: 0 0 4px; }
+.legal .nota { background: #F5F6FA; border-left: 3px solid #4A3AFF; padding: 12px 14px; margin: 0 0 14px; border-radius: 0 8px 8px 0; }
+.legal .nota p:last-child { margin-bottom: 0; }

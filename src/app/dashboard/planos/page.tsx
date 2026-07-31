@@ -1,4 +1,5 @@
 import { UsageLimits } from "@/components/UsageLimits";
+import { docCompleto } from "@/lib/docCobranca";
 import { getUsage } from "@/lib/plan";
 import { createClient } from "@/lib/supabase/server";
 import { PlanPicker } from "@/components/PlanPicker";
@@ -111,7 +112,7 @@ export default async function Planos() {
           seats={Math.max(1, seats ?? 1)}
           currentPlanId={currentPlanId}
           canSubscribe={isOwner}
-          hasDoc={!!String((tenant as any)?.cnpj || "").replace(/\D/g, "").match(/^\d{11}$|^\d{14}$/)}
+          hasDoc={docCompleto((tenant as any)?.cnpj)}
         />
       </div>
 

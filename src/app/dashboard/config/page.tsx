@@ -12,6 +12,9 @@ import WhatsAppConnect from "@/components/WhatsAppConnect";
 import BusinessProfileForm from "@/components/BusinessProfileForm";
 import SignatureForm from "@/components/SignatureForm";
 import ConfigTabs from "@/components/ConfigTabs";
+import DonoDaCaixa from "@/components/DonoDaCaixa";
+import { definirCompartilhamentoCaixa } from "@/app/dashboard/config/actions";
+import { definirCompartilhamentoWhatsApp } from "@/app/dashboard/config/whatsapp-actions";
 import WorkspaceInfo from "@/components/WorkspaceInfo";
 
 export const dynamic = "force-dynamic";
@@ -62,14 +65,22 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
   const initialTab = Math.max(0, TAB_IDS.indexOf((searchParams?.tab || "").toLowerCase()));
   const { data: accounts } = await supabase
     .from("email_accounts")
-    .select("id, provider, from_email, display_name, is_active, daily_cap, warmup_stage, created_at, verified, verified_at, smtp_host, smtp_port, smtp_secure, smtp_user, detect_replies, imap_host, signature")
+    .select("id, user_id, is_shared, provider, from_email, display_name, is_active, daily_cap, warmup_stage, created_at, verified, verified_at, smtp_host, smtp_port, smtp_secure, smtp_user, detect_replies, imap_host, signature")
     .order("created_at", { ascending: false });
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { data: me } = await supabase.from("profiles").select("role, email").eq("id", user?.id ?? "").maybeSingle();
+  const { data: me } = await supabase.from("profiles").select("role, team_role, email").eq("id", user?.id ?? "").maybeSingle();
   const isOwner = (me as any)?.role === "owner";
+  const meuId = user?.id || null;
+
+  // Nomes dos donos, para a tela dizer "caixa de Fulano" em vez de mostrar um uuid.
+  // A RLS já esconde a caixa privada dos outros, então esta lista só traz quem você
+  // pode mesmo ver.
+  const { data: equipe } = await supabase.from("profiles").select("id, full_name, email");
+  const nomePorId: Record<string, string> = {};
+  for (const p of ((equipe as any[]) || [])) nomePorId[p.id] = p.full_name || p.email || "—";
 
   const { data: tenant } = await supabase
     .from("tenants")
@@ -87,7 +98,7 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
 
   const { data: waAccounts } = await supabase
     .from("whatsapp_accounts")
-    .select("id, evolution_url, instance, is_active, inbound_token")
+    .select("id, user_id, is_shared, evolution_url, instance, is_active, inbound_token")
     .order("created_at", { ascending: false });
 
   const { data: crmConns } = await supabase.from("crm_connections").select("*");
@@ -197,6 +208,14 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
                             )}
                             {a.detect_replies && <span className="rounded-full bg-brand-soft px-2 py-0.5 text-xs text-brand-dark">IMAP on</span>}
                             {!a.is_active && <span className="text-xs text-subtle">(inativa)</span>}
+                            <DonoDaCaixa
+                              tipo="email"
+                              userId={a.user_id ?? null}
+                              isShared={a.is_shared ?? null}
+                              meuId={meuId}
+                              nomeDono={a.user_id ? nomePorId[a.user_id] : undefined}
+                              onCompartilhar={async (c) => { "use server"; return definirCompartilhamentoCaixa(a.id, c); }}
+                            />
                           </p>
                           <p className="text-xs text-subtle">
                             {warming ? `Aquecendo: hoje envia ${cap} e-mails. Sobe até ${target}/dia automaticamente.` : `Limite diário: ${target}/dia${on ? " (aquecida)" : " (aquecimento desligado)"}.`}
@@ -251,7 +270,15 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
               <Section title="Canal do WhatsApp" desc="Como o WhatsApp entra na cadência — do link sem risco à API automática.">
                 {/* WhatsApp incluído em TODOS os planos — sem gate. */}
                 <div className="card p-5">
-                  <WhatsAppConnect accounts={(waAccounts as any[]) || []} mode={waMode as any} acked={waAcked} platformReady={waPlatformReady} />
+                  <WhatsAppConnect
+                    accounts={(waAccounts as any[]) || []}
+                    mode={waMode as any}
+                    acked={waAcked}
+                    platformReady={waPlatformReady}
+                    meuId={meuId}
+                    nomePorId={nomePorId}
+                    onCompartilhar={async (id: string, c: boolean) => { "use server"; return definirCompartilhamentoWhatsApp(id, c); }}
+                  />
                 </div>
               </Section>
             </div>

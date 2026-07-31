@@ -21,103 +21,33 @@ async function tenantId() {
   return { supabase, tenant_id: data?.tenant_id as string | null, user_id: user?.id };
 }
 
-// Normaliza o nome de uma empresa para comparação: minúsculo, sem acento, sem
-// pontuação, sem sufixos societários (ME, MEI, LTDA, EPP, EIRELI, S/A...), espaços
-// colapsados. Assim "Padaria do Bairro ME" e "Padaria do Bairro" batem como a MESMA.
-function normalizeCompany(raw: string): string {
-  const s = (raw || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "") // tira acentos
-    .replace(/[.,/\\\-&]/g, " ")      // pontuação vira espaço
-    .replace(/\s+/g, " ")
-    .trim();
+// A normalização de nome de empresa e o "só dígitos" moravam AQUI. Foram para
+// @/lib/resolverEmpresas, junto com quem os usa. Manter uma cópia solta neste arquivo
+// era um convite à divergência: a regra de dedup existe em três lugares (este app, o
+// resolvedor e a função empresa_chave do banco) e as três precisam concordar — se
+// discordarem, a importação passa a criar empresas duplicadas sem avisar ninguém.
 
-  // Sufixos societários. Separamos em dois grupos por AMBIGUIDADE:
-  //  - UNAMBÍGUOS: nunca são palavra real de nome (LTDA, EIRELI, EPP, MEI, ME) →
-  //    podem ser removidos mesmo que sobre uma única palavra ("TechLógica EIRELI" == "TechLógica").
-  //  - AMBÍGUOS: podem ser sobrenome/iniciais (SA→"Sá", SS, EI) → só removemos quando
-  //    ainda sobram ≥2 palavras, pra NÃO fundir "Consultoria Sá" com "Consultoria".
-  const UNAMBIG = new Set(["ltda", "eireli", "epp", "mei", "me"]);
-  const AMBIG = new Set(["sa", "ss", "ei"]);
-  const toks = s.split(" ").filter(Boolean);
-  let changed = true;
-  while (changed && toks.length > 0) {
-    changed = false;
-    const last = toks[toks.length - 1];
-    if (UNAMBIG.has(last) && toks.length >= 2) {
-      toks.pop();
-      changed = true;
-    } else if (AMBIG.has(last) && toks.length >= 3) {
-      toks.pop();
-      changed = true;
-    }
+// Encontra (por CNPJ, ou por nome normalizado) ou cria a empresa e devolve o id.
+//
+// Serve o cadastro AVULSO (um contato por vez). A implementação foi trocada para
+// delegar ao resolvedor em lote: a versão anterior lia `accounts` sem limite e o
+// PostgREST corta em 1.000 — numa base de 78 mil, cadastrar um contato de uma empresa
+// que já existia criava uma DUPLICADA, o mesmo defeito da importação.
+async function ensureAccount(
+  supabase: any, tenant_id: string, user_id: string | undefined,
+  companyName: string | null | undefined, cnpj?: string | null
+) {
+  const { resolverEmpresas, chaveDe } = await import("@/lib/resolverEmpresas");
+  const pedido = { nome: companyName, cnpj };
+  const chave = chaveDe(pedido);
+  if (!chave) return null;
+  try {
+    const { porChave } = await resolverEmpresas(supabase, tenant_id, user_id, [pedido]);
+    return porChave.get(chave) || null;
+  } catch {
+    // Não achar/criar a empresa não pode impedir de salvar o contato.
+    return null;
   }
-  return toks.join(" ");
-}
-
-function onlyDigits(v: string | null | undefined): string {
-  return (v || "").replace(/\D/g, "");
-}
-
-// Encontra (por CNPJ, ou por nome normalizado) ou cria a empresa em accounts e
-// devolve o id. Dedup robusto: casa mesmo com sufixo societário diferente e
-// prioriza o CNPJ quando houver.
-async function ensureAccount(supabase: any, tenant_id: string, user_id: string | undefined, companyName: string | null | undefined, cnpj?: string | null) {
-  const name = (companyName || "").trim();
-  // B4: só trata como CNPJ (chave de dedup) quando tem os 14 dígitos completos —
-  // "00.000" não pode fundir empresas nem virar chave.
-  const cnpjDigits = onlyDigits(cnpj).length === 14 ? onlyDigits(cnpj) : "";
-  if (!name && !cnpjDigits) return null;
-
-  // busca todas as empresas do tenant (poucas por conta; dedup em JS é seguro)
-  const { data: accounts } = await supabase
-    .from("accounts")
-    .select("id, name, cnpj")
-    .eq("tenant_id", tenant_id);
-  const list = (accounts as any[]) || [];
-
-  // 1) match por CNPJ (mais forte)
-  if (cnpjDigits) {
-    const byCnpj = list.find((a) => onlyDigits(a.cnpj) && onlyDigits(a.cnpj) === cnpjDigits);
-    if (byCnpj) return byCnpj.id as string;
-  }
-
-  // 2) match por nome normalizado
-  if (name) {
-    const target = normalizeCompany(name);
-    if (target) {
-      const byName = list.find((a) => normalizeCompany(a.name || "") === target);
-      if (byName) {
-        // se a empresa achada não tem CNPJ e agora temos um, completa
-        if (cnpjDigits && !onlyDigits(byName.cnpj)) {
-          await supabase.from("accounts").update({ cnpj: cnpj?.trim() || null }).eq("id", byName.id).eq("tenant_id", tenant_id);
-        }
-        return byName.id as string;
-      }
-    }
-  }
-
-  const { data: created, error } = await supabase
-    .from("accounts")
-    .insert({ tenant_id, owner_id: user_id ?? null, name: name || cnpjDigits, cnpj: cnpj?.trim() || null })
-    .select("id")
-    .single();
-  if (!error) return (created as any).id as string;
-
-  // M11: corrida — outra requisição criou a mesma empresa (índice único de CNPJ 0070).
-  // Em vez de devolver null (contato ficaria sem empresa), busca a existente.
-  if (cnpjDigits) {
-    const { data: again } = await supabase
-      .from("accounts")
-      .select("id")
-      .eq("tenant_id", tenant_id)
-      .eq("cnpj", cnpj?.trim() || "")
-      .limit(1)
-      .maybeSingle();
-    if (again) return (again as any).id as string;
-  }
-  return null;
 }
 
 export async function addContact(formData: FormData) {
@@ -158,7 +88,7 @@ export async function addContact(formData: FormData) {
   return { ok: true, id: (inserted as any)?.id as string | undefined };
 }
 
-type Row = { name: string; email?: string; phone?: string; company?: string; origin?: string };
+type Row = { name: string; email?: string; phone?: string; company?: string; cnpj?: string; role_title?: string; origin?: string };
 
 export async function importContacts(rows: Row[]) {
   // limite de contatos do plano (a importação não pode furar o teto)
@@ -179,21 +109,38 @@ export async function importContacts(rows: Row[]) {
       email: r.email?.trim().toLowerCase() || null,
       phone: r.phone?.trim() || null,
       company: r.company?.trim() || null,
+      cnpj: r.cnpj?.trim() || null,
+      role_title: r.role_title?.trim() || null,
       origin: r.origin?.trim() || "Import CSV",
     }));
 
   if (!clean.length) return { error: "Nenhuma linha válida (coluna 'name' é obrigatória)." };
 
-  // resolve empresas únicas uma vez (encontra/cria) e mapeia nome→account_id
-  const companyNames = Array.from(new Set(clean.map((c) => (c.company || "").trim().toLowerCase()).filter(Boolean)));
-  const nameToId: Record<string, string> = {};
-  for (const c of clean) {
-    const key = (c.company || "").trim().toLowerCase();
-    if (!key || nameToId[key]) continue;
-    const id = await ensureAccount(supabase, tenant_id, user_id, c.company);
-    if (id) nameToId[key] = id;
+  // EMPRESAS — resolvidas TODAS DE UMA VEZ (ver lib/resolverEmpresas).
+  // O código anterior chamava ensureAccount() por nome, e cada chamada lia
+  // `accounts` sem limite: o PostgREST corta em 1.000, então numa base grande a
+  // empresa existente simplesmente não era encontrada e nascia uma duplicada.
+  const { resolverEmpresas, chaveDe } = await import("@/lib/resolverEmpresas");
+  let avisoEmpresa: string | undefined;
+  let empresasCriadas = 0;
+  let porChave = new Map<string, string>();
+  try {
+    const r = await resolverEmpresas(
+      supabase, tenant_id, user_id,
+      clean.map((c) => ({ nome: c.company, cnpj: c.cnpj }))
+    );
+    porChave = r.porChave;
+    empresasCriadas = r.criadas;
+    avisoEmpresa = r.aviso;
+  } catch (e: any) {
+    // Falhar aqui não pode impedir a importação: contato sem empresa é recuperável,
+    // contato não importado obriga a refazer o arquivo inteiro.
+    avisoEmpresa = `Não consegui vincular as empresas (${msgErro(e)}). Os contatos entraram sem empresa.`;
   }
-  const withAccounts = clean.map((c) => ({ ...c, account_id: nameToId[(c.company || "").trim().toLowerCase()] || null }));
+  const withAccounts = clean.map((c) => ({
+    ...c,
+    account_id: porChave.get(chaveDe({ nome: c.company, cnpj: c.cnpj })) || null,
+  }));
 
   // verifica e-mails por DOMÍNIO único (uma checagem de MX por domínio, não por linha)
   const { verifyEmail } = await import("@/lib/emailverify");
@@ -238,7 +185,18 @@ export async function importContacts(rows: Row[]) {
   }
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/contas");
-  return { ok: true, count: withStatus.length, companies: companyNames.length, invalid: invalidCount };
+  const comEmpresa = withAccounts.filter((c) => c.account_id).length;
+  return {
+    ok: true,
+    count: withStatus.length,
+    invalid: invalidCount,
+    // números honestos sobre o vínculo: era isto que faltava para perceber que a
+    // empresa não estava colando
+    comEmpresa,
+    semEmpresa: withAccounts.filter((c) => c.company && !c.account_id).length,
+    empresasCriadas,
+    aviso: avisoEmpresa,
+  };
 }
 
 // Edita os dados de um contato (corrigir/completar informações).

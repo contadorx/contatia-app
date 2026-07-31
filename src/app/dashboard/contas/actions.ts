@@ -1,13 +1,16 @@
 "use server";
 
 import { msgErro } from "@/lib/erros";
+import { chaveCnpj } from "@/lib/cnpjFormato";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { canCreate, mensagemLimite } from "@/lib/plan";
 import { nomeProprio } from "@/lib/cnpj";
 import { logAction, recortarItens } from "@/lib/actionLog";
 
-const soDig = (s: any) => String(s || "").replace(/\D/g, "");
+// Só usado para CNPJ. Aceita letras desde jul/2026 (ver lib/cnpjFormato): o corte
+// antigo por dígitos destruía o CNPJ novo e a empresa perdia a chave forte de dedup.
+const soDig = (s: any) => chaveCnpj(s);
 const normNome = (s: any) =>
   String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -411,130 +414,132 @@ export async function createOpportunityForAccount(
 // cria também o CONTATO vinculado. Deduplica empresa por CNPJ/nome e contato por CNPJ.
 // Cabeçalho flexível (aceita vírgula ou ponto-e-vírgula).
 // ============================================================
-export async function importEmpresasCsv(csv: string) {
+// ============================================================
+// IMPORTAR EMPRESAS — agora recebe as linhas JÁ MAPEADAS pela tela
+//
+// A versão anterior recebia o texto do CSV e fazia `linha.split(",")`. Isso é um defeito
+// de CORREÇÃO, não de conforto: um nome com vírgula ("Padaria Exemplo, Ltda") empurrava
+// todas as colunas seguintes uma casa para o lado, e o CNPJ ia parar no campo de CNAE —
+// em silêncio. Também exigia os nomes de coluna exatos, sem mapeamento.
+//
+// Agora quem lê o arquivo é o navegador (PapaParse para CSV, leitor próprio para .xlsx),
+// com aspas e delimitador tratados de verdade, e o operador confirma o mapeamento antes.
+// Aqui chega uma lista de objetos limpos.
+//
+// A resolução da empresa passou a ser em LOTE (ver lib/resolverEmpresas): a versão
+// anterior carregava `accounts` sem limite e o PostgREST cortava em 1.000 — numa base
+// grande a empresa existente não era encontrada e nascia duplicada.
+// ============================================================
+export type LinhaEmpresa = {
+  cnpj?: string; razao?: string; fantasia?: string; cnae?: string; uf?: string;
+  municipio?: string; dominio?: string; contato?: string; email?: string; telefone?: string;
+};
+
+export async function importEmpresas(linhas: LinhaEmpresa[]) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace atribuído." };
+  if (!Array.isArray(linhas) || !linhas.length) return { error: "Nada para importar." };
 
-  const lines = String(csv || "").split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length < 2) return { error: "CSV vazio ou sem linhas de dados." };
+  const g = (v?: string) => (v || "").trim();
 
-  const delim = lines[0].includes(";") ? ";" : ",";
-  const header = lines[0].split(delim).map((h) => h.trim().toLowerCase());
-  const idx = (names: string[]) => {
-    for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; }
-    return -1;
-  };
-  const col = {
-    cnpj: idx(["cnpj"]),
-    razao: idx(["razao_social", "razão social", "razao", "nome"]),
-    fantasia: idx(["nome_fantasia", "fantasia"]),
-    cnae: idx(["cnae", "cnae_fiscal"]),
-    uf: idx(["uf", "estado"]),
-    municipio: idx(["municipio", "município", "cidade"]),
-    domain: idx(["dominio", "domínio", "site", "website"]),
-    contato: idx(["contato_principal", "contato", "responsavel"]),
-    email: idx(["email", "e-mail"]),
-    telefone: idx(["telefone", "fone", "phone"]),
-  };
-  if (col.razao < 0 && col.fantasia < 0 && col.cnpj < 0) {
-    return { error: "O CSV precisa ter ao menos a coluna 'razao_social' (ou 'nome_fantasia'/'cnpj')." };
+  // 1) normaliza e tira duplicata DENTRO do próprio arquivo
+  const vistas = new Set<string>();
+  const itens: (LinhaEmpresa & { nome: string; cnpjD: string; chaveArq: string })[] = [];
+  for (const l of linhas) {
+    const cnpjD = soDig(g(l.cnpj));
+    const nome = nomeProprio(g(l.fantasia) || g(l.razao)) || (cnpjD || "");
+    if (!nome) continue;
+    const chaveArq = cnpjD ? `c:${cnpjD}` : `n:${normNome(nome)}`;
+    if (vistas.has(chaveArq)) continue;
+    vistas.add(chaveArq);
+    itens.push({ ...l, nome, cnpjD, chaveArq });
   }
+  if (!itens.length) return { error: "Nenhuma linha com razão social, nome fantasia ou CNPJ." };
 
-  // carrega o que já existe (dedup em memória)
-  const { data: accs } = await supabase.from("accounts").select("id, name, cnpj").eq("tenant_id", tenant_id);
-  const contaPorCnpj = new Map<string, string>();
-  const contaPorNome = new Map<string, string>();
-  for (const a of (accs as any[]) || []) {
-    const d = soDig(a.cnpj);
-    if (d.length === 14) contaPorCnpj.set(d, a.id);
-    const n = normNome(a.name);
-    if (n && !contaPorNome.has(n)) contaPorNome.set(n, a.id);
-  }
-  const { data: cts } = await supabase.from("contacts").select("cnpj").eq("tenant_id", tenant_id).not("cnpj", "is", null);
-  const contatoTemCnpj = new Set<string>();
-  for (const c of (cts as any[]) || []) { const d = soDig(c.cnpj); if (d.length === 14) contatoTemCnpj.add(d); }
-
-  // se o CSV traz contatos, respeita o teto do plano
-  const temContatoNoCsv = col.contato >= 0 || col.email >= 0 || col.telefone >= 0;
-  if (temContatoNoCsv) {
+  // se o arquivo traz contatos, respeita o teto do plano
+  const temContato = itens.some((i) => g(i.contato) || g(i.email) || g(i.telefone));
+  if (temContato) {
     const lim = await canCreate("contatos");
     if (!lim.permitido) return { error: mensagemLimite("contatos", lim.usado, lim.limite, lim.sugerido) };
   }
 
-  let empresas = 0;
+  // 2) encontra/cria todas as empresas de uma vez
+  const { resolverEmpresas, chaveDe } = await import("@/lib/resolverEmpresas");
+  let porChave = new Map<string, string>();
+  let criadas = 0;
+  let aviso: string | undefined;
+  try {
+    const r = await resolverEmpresas(supabase, tenant_id, user_id, itens.map((i) => ({ nome: i.nome, cnpj: i.cnpjD })));
+    porChave = r.porChave; criadas = r.criadas; aviso = r.aviso;
+  } catch (e: any) {
+    return { error: `Não consegui resolver as empresas: ${msgErro(e)}` };
+  }
+
+  // 3) completa os dados das empresas (CNAE, UF, município, domínio, telefone).
+  // Só preenche o que está VAZIO: a importação não pode apagar dado bom que já existe
+  // por causa de uma coluna em branco na planilha.
+  let completadas = 0;
+  for (const it of itens) {
+    const id = porChave.get(chaveDe({ nome: it.nome, cnpj: it.cnpjD }));
+    if (!id) continue;
+    const email = g(it.email).toLowerCase();
+    const patch: Record<string, string> = {};
+    const dominio = g(it.dominio) || (email.includes("@") ? email.split("@")[1] : "");
+    if (g(it.cnae)) patch.cnae = g(it.cnae);
+    if (g(it.uf)) patch.uf = g(it.uf).toUpperCase().slice(0, 2);
+    if (g(it.municipio)) patch.municipio = nomeProprio(g(it.municipio)) || g(it.municipio);
+    if (dominio) patch.domain = dominio;
+    if (g(it.telefone)) patch.phone = g(it.telefone);
+    if (!Object.keys(patch).length) continue;
+    const { data: atual } = await supabase
+      .from("accounts").select("cnae, uf, municipio, domain, phone").eq("id", id).maybeSingle();
+    const faltando: Record<string, string> = {};
+    for (const [k, v] of Object.entries(patch)) if (!((atual as any)?.[k] || "").toString().trim()) faltando[k] = v;
+    if (!Object.keys(faltando).length) continue;
+    const { error } = await supabase.from("accounts").update(faltando).eq("id", id).eq("tenant_id", tenant_id);
+    if (!error) completadas++;
+  }
+
+  // 4) contatos — só quando a linha traz algo de contato e ainda não existe um com o
+  // mesmo CNPJ. A consulta de quem já tem CNPJ vai FATIADA: sem limite, o PostgREST
+  // cortava em 1.000 e a checagem de duplicado mentia numa base grande.
   let contatos = 0;
-  const vistas = new Set<string>();
-
-  for (let i = 1; i < lines.length; i++) {
-    const c = lines[i].split(delim);
-    const get = (k: number) => (k >= 0 ? (c[k] || "").trim() : "");
-    const cnpj = soDig(get(col.cnpj));
-    const nome = nomeProprio(get(col.fantasia) || get(col.razao)) || (cnpj ? cnpj : "");
-    if (!nome) continue;
-    const email = get(col.email).toLowerCase() || null;
-    const telefone = get(col.telefone) || null;
-    const contatoNome = nomeProprio(get(col.contato)) || null;
-    const dominio = get(col.domain) || (email && email.includes("@") ? email.split("@")[1] : "") || null;
-
-    const chave = cnpj || normNome(nome);
-    if (vistas.has(chave)) continue; // linha duplicada no próprio arquivo (por empresa)
-    vistas.add(chave);
-
-    // 1) empresa (conta)
-    let account_id =
-      (cnpj.length === 14 ? contaPorCnpj.get(cnpj) : null) || contaPorNome.get(normNome(nome)) || null;
-    if (!account_id) {
-      const { data: nova, error } = await supabase
-        .from("accounts")
-        .insert({
-          tenant_id,
-          owner_id: user_id ?? null,
-          name: nome,
-          cnpj: cnpj.length === 14 ? cnpj : null,
-          cnae: get(col.cnae) || null,
-          uf: get(col.uf).toUpperCase() || null,
-          municipio: nomeProprio(get(col.municipio)) || null,
-          domain: dominio,
-          phone: telefone,
-        })
-        .select("id")
-        .single();
-      if (error) {
-        if (cnpj.length === 14) {
-          const { data: ja } = await supabase.from("accounts").select("id").eq("tenant_id", tenant_id).eq("cnpj", cnpj).limit(1).maybeSingle();
-          account_id = (ja as any)?.id || null;
-        }
-      } else {
-        account_id = (nova as any).id;
-        empresas++;
-        if (cnpj.length === 14) contaPorCnpj.set(cnpj, account_id!);
-        contaPorNome.set(normNome(nome), account_id!);
-      }
+  if (temContato) {
+    const cnpjs = itens.map((i) => i.cnpjD).filter(Boolean);
+    const jaTem = new Set<string>();
+    for (let i = 0; i < cnpjs.length; i += 150) {
+      const { data } = await supabase
+        .from("contacts").select("cnpj").eq("tenant_id", tenant_id).in("cnpj", cnpjs.slice(i, i + 150));
+      for (const c of ((data as any[]) || [])) { const d = soDig(c.cnpj); if (d) jaTem.add(d); }
     }
 
-    // 2) contato (só se a linha tiver algo de contato e ainda não houver um com esse CNPJ)
-    const criarContato = temContatoNoCsv && (contatoNome || email || telefone);
-    if (criarContato && !(cnpj.length === 14 && contatoTemCnpj.has(cnpj))) {
-      const { error } = await supabase.from("contacts").insert({
+    const novos: any[] = [];
+    for (const it of itens) {
+      const email = g(it.email).toLowerCase() || null;
+      const telefone = g(it.telefone) || null;
+      const contatoNome = nomeProprio(g(it.contato)) || null;
+      if (!contatoNome && !email && !telefone) continue;
+      if (it.cnpjD && jaTem.has(it.cnpjD)) continue;
+      if (it.cnpjD) jaTem.add(it.cnpjD);
+      novos.push({
         tenant_id,
         assigned_to: user_id ?? null,
-        name: contatoNome || nome,
-        company: get(col.razao) || get(col.fantasia) || null,
-        account_id,
-        cnpj: cnpj.length === 14 ? cnpj : null,
-        email,
-        phone: telefone,
-        origin: "Import CSV",
+        name: contatoNome || it.nome,
+        company: g(it.razao) || g(it.fantasia) || it.nome,
+        account_id: porChave.get(chaveDe({ nome: it.nome, cnpj: it.cnpjD })) || null,
+        cnpj: it.cnpjD || null,
+        email, phone: telefone,
+        origin: "Import planilha",
         status: "novo",
       });
-      if (!error) {
-        contatos++;
-        if (cnpj.length === 14) contatoTemCnpj.add(cnpj);
-      }
+    }
+    for (let i = 0; i < novos.length; i += 200) {
+      const { error } = await supabase.from("contacts").insert(novos.slice(i, i + 200));
+      if (!error) contatos += novos.slice(i, i + 200).length;
     }
   }
 
   revalidatePath("/dashboard/contas");
   revalidatePath("/dashboard/contatos");
-  return { ok: true, empresas, contatos };
+  return { ok: true, empresas: criadas, jaExistiam: itens.length - criadas, completadas, contatos, aviso };
 }

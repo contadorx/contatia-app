@@ -65,6 +65,11 @@ export async function saveSmtpAccount(input: {
   const { error } = await supabase.from("email_accounts").insert({
     tenant_id,
     user_id,
+    // Nasce PRIVADA. A coluna tem default `true` para que as caixas que já existiam
+    // (todas com user_id nulo, do workspace) continuem valendo para todo mundo — mas
+    // uma caixa PESSOAL que nasce compartilhada seria o oposto do que a pessoa espera
+    // ao cadastrar o próprio e-mail. Quem quiser emprestar liga o compartilhamento.
+    is_shared: false,
     provider: "smtp",
     from_email: input.from_email.trim(),
     display_name: input.display_name.trim() || null,
@@ -330,4 +335,27 @@ export async function saveBookingSettings(input: {
 // O cliente não edita mais — mantida como no-op para não quebrar imports antigos.
 export async function saveRetention(_months: number) {
   return { error: "A retenção de arquivos é definida pelo plano e não pode ser alterada aqui." };
+}
+
+
+// ============================================================
+// COMPARTILHAR (ou não) uma caixa de e-mail
+//
+// Compartilhada = outras pessoas do workspace podem enviar por ela quando não têm a
+// sua. Isso EXPÕE a linha inteira da caixa a elas (a RLS da 0104 libera a leitura da
+// linha compartilhada) — inclusive a senha SMTP. Por isso a confirmação na tela é
+// explícita e o padrão é não compartilhar.
+// ============================================================
+export async function definirCompartilhamentoCaixa(id: string, compartilhada: boolean) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const { error } = await supabase
+    .from("email_accounts")
+    .update({ is_shared: !!compartilhada })
+    .eq("id", id)
+    .eq("tenant_id", tenant_id);
+  // A própria RLS já barra mexer na caixa dos outros — não precisamos checar papel aqui.
+  if (error) return { error: msgErro(error) };
+  revalidatePath("/dashboard/config");
+  return { ok: true };
 }

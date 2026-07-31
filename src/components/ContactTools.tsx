@@ -1,50 +1,36 @@
 "use client";
 
-import { useMemo, useState, useRef, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import Papa from "papaparse";
 import { addContact, importContacts } from "@/app/dashboard/contatos/actions";
-import SmartSelect from "@/components/SmartSelect";
+import ImportadorPlanilha, { type CampoImport } from "@/components/ImportadorPlanilha";
 
-// Campos de destino + apelidos comuns de coluna (usados no chute do mapeamento).
-const TARGETS = [
-  { key: "name", label: "Nome", aliases: ["nome", "name", "nome completo", "contato", "nome do contato", "full name", "responsavel"] },
-  { key: "email", label: "E-mail", aliases: ["email", "e-mail", "e mail", "email comercial", "e-mail comercial", "mail", "correio", "email 1"] },
-  { key: "phone", label: "Telefone / WhatsApp", aliases: ["phone", "telefone", "whatsapp", "celular", "telefone comercial", "fone", "tel", "mobile", "telefone 1", "contato telefone"] },
-  { key: "company", label: "Empresa", aliases: ["company", "empresa", "razao social", "razão social", "razao_social", "organizacao", "organização", "cliente", "conta", "nome fantasia"] },
-  { key: "origin", label: "Origem", aliases: ["origin", "origem", "fonte", "source", "canal"] },
-] as const;
-
-type MapKey = (typeof TARGETS)[number]["key"];
-type Mapping = Record<MapKey, string>;
-const EMPTY_MAP: Mapping = { name: "", email: "", phone: "", company: "", origin: "" };
-
-const norm = (s: string) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
-
-// Chuta o mapeamento: 1) casamento exato de apelido; 2) por conteúdo (a coluna contém o apelido).
-function guessMapping(headers: string[]): Mapping {
-  const map: Mapping = { ...EMPTY_MAP };
-  const used = new Set<string>();
-  const normed = headers.map((h) => ({ h, n: norm(h) }));
-  for (const t of TARGETS) {
-    const aliases = t.aliases as readonly string[];
-    let hit = normed.find(({ h, n }) => !used.has(h) && aliases.includes(n))?.h;
-    if (!hit) hit = normed.find(({ h, n }) => !used.has(h) && aliases.some((a) => n.includes(a) || a.includes(n)))?.h;
-    if (hit) { map[t.key] = hit; used.add(hit); }
-  }
-  return map;
-}
+// Campos de destino + apelidos de coluna (usados no chute do mapeamento).
+// CNPJ e Cargo foram ACRESCENTADOS: o CNPJ é a chave forte para casar a empresa certa —
+// sem ele, "Alfa Serviços" de dois estados diferentes viravam a mesma conta.
+const CAMPOS: CampoImport[] = [
+  { key: "name", label: "Nome", obrigatorio: true, dica: "Maria Souza",
+    aliases: ["nome", "name", "nome completo", "contato", "nome do contato", "full name", "responsavel", "socio", "sócio"] },
+  { key: "email", label: "E-mail", dica: "maria@empresa.com.br",
+    aliases: ["email", "e-mail", "e mail", "email comercial", "e-mail comercial", "mail", "correio", "email 1"] },
+  { key: "phone", label: "Telefone / WhatsApp", dica: "11999998888",
+    aliases: ["phone", "telefone", "whatsapp", "celular", "telefone comercial", "fone", "tel", "mobile", "telefone 1", "contato telefone"] },
+  { key: "company", label: "Empresa", dica: "Padaria Exemplo Ltda",
+    aliases: ["company", "empresa", "razao social", "razão social", "razao_social", "organizacao", "organização", "cliente", "conta", "nome fantasia", "fantasia"] },
+  { key: "cnpj", label: "CNPJ da empresa", dica: "12.345.678/0001-90",
+    aliases: ["cnpj", "cnpj da empresa", "documento", "cnpj empresa"] },
+  { key: "role_title", label: "Cargo", dica: "Sócio",
+    aliases: ["cargo", "role", "funcao", "função", "titulo", "título", "position", "qualificacao", "qualificação"] },
+  { key: "origin", label: "Origem", dica: "Lista Enquadria A",
+    aliases: ["origin", "origem", "fonte", "source", "canal", "lista"] },
+];
 
 export default function ContactTools() {
   const router = useRouter();
   const [open, setOpen] = useState<"add" | "import" | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const fileRef = useRef<HTMLInputElement>(null);
 
-  // etapa de importação: arquivo lido → prévia + mapeamento
-  const [parsed, setParsed] = useState<{ headers: string[]; rows: Record<string, string>[] } | null>(null);
-  const [mapping, setMapping] = useState<Mapping>(EMPTY_MAP);
 
   async function handleAdd(fd: FormData) {
     setMsg(null);
@@ -59,75 +45,14 @@ export default function ContactTools() {
     });
   }
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setMsg(null);
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (result) => {
-        const headers = (result.meta.fields || []).filter(Boolean) as string[];
-        const rows = (result.data as Record<string, string>[]) || [];
-        if (!headers.length || !rows.length) { setMsg("Não consegui ler colunas nesse arquivo. Confirme que é um CSV com cabeçalho na 1ª linha."); return; }
-        setParsed({ headers, rows });
-        setMapping(guessMapping(headers));
-      },
-      error: () => setMsg("Falha ao ler o arquivo."),
-    });
-  }
-
-  // quantas linhas ficam realmente aproveitáveis com o mapeamento atual
-  const stats = useMemo(() => {
-    if (!parsed) return { total: 0, comContato: 0 };
-    const comContato = parsed.rows.filter((r) => (mapping.email && r[mapping.email]?.trim()) || (mapping.phone && r[mapping.phone]?.trim())).length;
-    return { total: parsed.rows.length, comContato };
-  }, [parsed, mapping]);
-
-  function resetImport() {
-    setParsed(null);
-    setMapping(EMPTY_MAP);
-    if (fileRef.current) fileRef.current.value = "";
-  }
-
-  function doImport() {
-    if (!parsed) return;
-    const rows = parsed.rows
-      .map((r) => {
-        const g = (col: string) => ((col && r[col]) || "").trim();
-        return {
-          name: g(mapping.name),
-          email: g(mapping.email),
-          phone: g(mapping.phone),
-          company: g(mapping.company),
-          origin: g(mapping.origin),
-        };
-      })
-      .filter((r) => r.name || r.email || r.phone); // descarta linhas totalmente vazias
-    if (!rows.length) { setMsg("Nenhuma linha aproveitável com esse mapeamento. Confira as colunas escolhidas."); return; }
-    start(async () => {
-      const res = await importContacts(rows);
-      if (res?.error) setMsg(res.error);
-      else {
-        const invalid = (res as any)?.invalid ? ` ${(res as any).invalid} com e-mail inválido (marcados; não entram em cadência de e-mail).` : "";
-        setMsg(`${res?.count} contatos importados.${invalid}`);
-        resetImport();
-        setOpen(null);
-        router.refresh();
-      }
-    });
-  }
-
-  const semContato = !mapping.email && !mapping.phone;
-
   return (
     <div>
       <div className="flex gap-2">
         <button className="btn-brand" onClick={() => setOpen(open === "add" ? null : "add")}>
           + Contato
         </button>
-        <button className="btn-ghost" onClick={() => { setOpen(open === "import" ? null : "import"); if (open !== "import") resetImport(); }}>
-          Importar CSV
+        <button className="btn-ghost" onClick={() => setOpen(open === "import" ? null : "import")}>
+          Importar CSV / Excel
         </button>
       </div>
 
@@ -171,78 +96,25 @@ export default function ContactTools() {
       )}
 
       {open === "import" && (
-        <div className="card mt-4 space-y-3 p-5">
-          {!parsed ? (
-            <>
-              <p className="text-sm text-subtle">Selecione um CSV com cabeçalho na 1ª linha. Na próxima etapa você confere e ajusta quais colunas viram nome, e-mail, telefone etc.</p>
-              <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} className="text-sm" />
-            </>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold">Confira o mapeamento das colunas</p>
-                <button className="text-xs text-subtle hover:text-ink" onClick={resetImport}>trocar arquivo</button>
-              </div>
-
-              {/* mapeamento: cada campo ↔ uma coluna do arquivo */}
-              <div className="grid gap-3 sm:grid-cols-2">
-                {TARGETS.map((t) => (
-                  <div key={t.key}>
-                    <label className="label">{t.label}{t.key === "name" ? "" : " (opcional)"}</label>
-                    <div className="mt-1">
-                      {/* single de propósito: um campo do Contatia recebe UMA coluna do arquivo */}
-                      <SmartSelect
-                        className="py-1.5 text-sm"
-                        clearable
-                        placeholder="— não importar —"
-                        value={mapping[t.key]}
-                        onValueChange={(v) => setMapping((m) => ({ ...m, [t.key]: v }))}
-                        options={parsed.headers.map((h) => ({ value: h, label: h }))}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* prévia das 3 primeiras linhas */}
-              <div>
-                <p className="label mb-1">Prévia (3 primeiras linhas)</p>
-                <div className="overflow-x-auto rounded-lg border border-line">
-                  <table className="w-full text-xs">
-                    <thead className="border-b border-line bg-muted/50 text-left text-subtle">
-                      <tr>{parsed.headers.map((h) => <th key={h} className="whitespace-nowrap px-2 py-1.5 font-medium">{h}</th>)}</tr>
-                    </thead>
-                    <tbody>
-                      {parsed.rows.slice(0, 3).map((r, i) => (
-                        <tr key={i} className="border-b border-line last:border-0">
-                          {parsed.headers.map((h) => <td key={h} className="max-w-[160px] truncate px-2 py-1.5 text-subtle" title={r[h]}>{r[h] || "—"}</td>)}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* contagem honesta ANTES de confirmar */}
-              <div className="rounded-lg bg-muted p-3 text-sm">
-                <b>{stats.comContato}</b> de <b>{stats.total}</b> linhas têm e-mail ou telefone para trabalhar.
-                {stats.comContato < stats.total && (
-                  <span className="text-subtle"> As demais entram como contato, mas sem forma de contato até você completar.</span>
-                )}
-              </div>
-              {semContato && (
-                <p className="rounded-lg bg-warn/10 p-2.5 text-xs text-warn">⚠ Nenhuma coluna de e-mail ou telefone escolhida — os contatos entrarão sem forma de contato e não poderão receber cadência.</p>
-              )}
-
-              <div className="flex gap-2">
-                <button className="btn-brand" disabled={pending} onClick={doImport}>
-                  {pending ? "Importando..." : `Importar ${stats.total} contato(s)`}
-                </button>
-                <button className="btn-ghost" onClick={resetImport} disabled={pending}>Cancelar</button>
-              </div>
-            </>
-          )}
-        </div>
+        <ImportadorPlanilha
+          titulo="Importar contatos"
+          descricao="Aceita CSV (vírgula ou ponto-e-vírgula) e Excel (.xlsx). A 1ª linha preenchida é o cabeçalho. Na etapa seguinte você confere quais colunas viram nome, e-mail, empresa etc."
+          campos={CAMPOS}
+          modeloNome="modelo-contatos-contatia.csv"
+          onFechar={() => setOpen(null)}
+          onImportar={async (linhas) => {
+            const res: any = await importContacts(linhas as any);
+            if (res?.error) return { error: res.error };
+            // Relatório honesto do VÍNCULO: é justamente o número que faltava para
+            // perceber que a empresa não estava colando.
+            const partes = [`${res.count} contato(s) importado(s).`];
+            if (res.comEmpresa) partes.push(`${res.comEmpresa} vinculado(s) a empresa` + (res.empresasCriadas ? ` (${res.empresasCriadas} empresa(s) nova(s))` : "") + ".");
+            if (res.semEmpresa) partes.push(`${res.semEmpresa} tinham empresa no arquivo mas não foi possível vincular.`);
+            if (res.invalid) partes.push(`${res.invalid} com e-mail inválido (marcados; não entram em cadência de e-mail).`);
+            router.refresh();
+            return { mensagem: partes.join(" "), aviso: res.aviso };
+          }}
+        />
       )}
 
       {msg && <p className="mt-3 text-sm text-subtle">{msg}</p>}

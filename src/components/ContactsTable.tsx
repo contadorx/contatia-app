@@ -12,6 +12,7 @@ import { bulkDeleteContacts } from "@/app/dashboard/contatos/actions";
 import { contarPorFiltro, excluirPorFiltro, exportarContatosPorFiltro } from "@/app/dashboard/contatos/filtro-actions";
 import { verificarWhatsAppLote } from "@/app/dashboard/contatos/wa-actions";
 import { capturarDoSiteLote } from "@/app/dashboard/contatos/web-capture-actions";
+import { descobrirEmailsLote } from "@/app/dashboard/prospectar/actions";
 import { UltimoToque } from "@/lib/lastTouch";
 import ExportarCsv from "@/components/ExportarCsv";
 import { useExclusaoLote } from "@/components/useExclusaoLote";
@@ -248,6 +249,31 @@ export default function ContactsTable({
       }
     });
   }
+  // Descoberta de e-mail direto da lista. Antes só existia dentro do Prospectar — quem
+  // chegava aqui por um filtro ("sem e-mail", "veio do Radar") tinha que sair da tela,
+  // ir ao wizard e refazer a seleção.
+  function doDescobrirEmail() {
+    setMsg(null);
+    start(async () => {
+      try {
+        const res = (await descobrirEmailsLote([...sel])) as
+          { achou?: number; publicados?: number; semEmail?: number; restantes?: number; semDominio?: number; semWorker?: boolean; error?: string };
+        if (res?.error) { setMsg(res.error); return; }
+        if (res?.semWorker) { setMsg("O worker de e-mail (VPS) não respondeu. A descoberta continua pelo cron; tente de novo mais tarde."); return; }
+        const partes = [`✓ ${(res.achou ?? 0) + (res.publicados ?? 0)} e-mail(is) encontrado(s)`];
+        if (res.publicados) partes.push(`${res.publicados} publicados no site`);
+        if (res.semEmail) partes.push(`${res.semEmail} sem caixa confirmada`);
+        if (res.semDominio) partes.push(`${res.semDominio} sem domínio corporativo`);
+        if (res.restantes) partes.push(`${res.restantes} na fila (o cron continua sozinho)`);
+        setMsg(partes.join(" · "));
+        clear();
+        router.refresh();
+      } catch (e: any) {
+        setMsg(`Falhou: ${e?.message || "conexão"}. Se acabou de publicar, recarregue com Ctrl+Shift+R.`);
+      }
+    });
+  }
+
   function doCreateTag() {
     if (!newTag.trim()) return;
     start(async () => {
@@ -410,6 +436,15 @@ export default function ContactsTable({
             title="Descobre quais números têm WhatsApp (checa com e sem o 9º dígito). Exige o modo Evolution."
           >
             {pending ? "..." : "Verificar WhatsApp"}
+          </button>
+
+          <button
+            className="rounded-lg border border-brand/40 bg-brand-soft/60 px-3 py-1.5 text-sm font-medium text-brand-dark hover:bg-brand-soft"
+            onClick={doDescobrirEmail}
+            disabled={pending || apagando}
+            title="Testa os padrões de e-mail (nome@domínio) no servidor do destinatário e só grava o que for confirmado. Precisa do contato SEM e-mail e COM domínio corporativo."
+          >
+            {pending ? "..." : "Descobrir e-mail"}
           </button>
 
           <button

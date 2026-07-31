@@ -1,102 +1,67 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { importEmpresasCsv } from "@/app/dashboard/contas/actions";
+// ============================================================
+// Importar EMPRESAS — usa o mesmo importador de Contatos.
+//
+// Antes esta tela tinha caminho próprio: textarea, ordem fixa de colunas, split cru por
+// vírgula, sem prévia. Duas telas para o mesmo problema divergiam com o tempo, e a de
+// Empresas ficou com o pior comportamento (um nome com vírgula desalinhava a linha).
+// Agora só a LISTA DE CAMPOS é diferente.
+// ============================================================
 
-const TEMPLATE_HEADER = "cnpj,razao_social,nome_fantasia,cnae,uf,municipio,dominio,contato_principal,email,telefone";
-const TEMPLATE_EXAMPLE = "12345678000190,Padaria Exemplo Ltda,Padaria do Bairro,4721-1/02,SP,São Paulo,padaria.com.br,Maria Souza,contato@padaria.com.br,11999990000";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import ImportadorPlanilha, { type CampoImport } from "@/components/ImportadorPlanilha";
+import { importEmpresas } from "@/app/dashboard/contas/actions";
+
+const CAMPOS: CampoImport[] = [
+  { key: "razao", label: "Razão social", dica: "Padaria Exemplo Ltda",
+    aliases: ["razao social", "razão social", "razao_social", "razao", "empresa", "nome", "name", "company"] },
+  { key: "fantasia", label: "Nome fantasia", dica: "Padaria do Bairro",
+    aliases: ["nome fantasia", "nome_fantasia", "fantasia", "apelido", "trade name"] },
+  { key: "cnpj", label: "CNPJ", dica: "12.345.678/0001-90",
+    aliases: ["cnpj", "documento", "cnpj da empresa"] },
+  { key: "cnae", label: "CNAE", dica: "4721-1/02",
+    aliases: ["cnae", "cnae fiscal", "cnae_fiscal", "atividade", "codigo cnae"] },
+  { key: "uf", label: "UF", dica: "SP",
+    aliases: ["uf", "estado", "sigla uf"] },
+  { key: "municipio", label: "Município", dica: "Santo André",
+    aliases: ["municipio", "município", "cidade", "city"] },
+  { key: "dominio", label: "Domínio / site", dica: "padaria.com.br",
+    aliases: ["dominio", "domínio", "site", "website", "url", "web"] },
+  { key: "contato", label: "Contato principal", dica: "Maria Souza",
+    aliases: ["contato principal", "contato_principal", "contato", "responsavel", "responsável", "socio", "sócio", "nome do contato"] },
+  { key: "email", label: "E-mail", dica: "contato@padaria.com.br",
+    aliases: ["email", "e-mail", "e mail", "email comercial", "mail"] },
+  { key: "telefone", label: "Telefone / WhatsApp", dica: "11999998888",
+    aliases: ["telefone", "fone", "phone", "celular", "whatsapp", "tel"] },
+];
 
 export default function AccountImport() {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [csv, setCsv] = useState("");
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [showPaste, setShowPaste] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [erro, setErro] = useState<string | null>(null);
-  const [pending, start] = useTransition();
-
-  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    setMsg(null); setErro(null);
-    const reader = new FileReader();
-    reader.onload = () => setCsv(String(reader.result || ""));
-    reader.readAsText(file);
-  }
-
-  function baixarModelo() {
-    const blob = new Blob([`${TEMPLATE_HEADER}\n${TEMPLATE_EXAMPLE}\n`], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "modelo-empresas-contatia.csv";
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  const linhas = csv.split(/\r?\n/).filter((l) => l.trim());
-  const nRegistros = Math.max(linhas.length - 1, 0);
-
-  function importar() {
-    setMsg(null); setErro(null);
-    start(async () => {
-      const r: any = await importEmpresasCsv(csv);
-      if (r?.error) { setErro(r.error); return; }
-      const partes = [`${r.empresas} empresa(s) importada(s)`];
-      if (r.contatos) partes.push(`${r.contatos} contato(s) criado(s)`);
-      setMsg(partes.join(" · ") + ".");
-      setCsv(""); setFileName(null);
-    });
-  }
 
   if (!open) {
-    return (
-      <button className="btn-outline" onClick={() => setOpen(true)}>
-        Importar CSV
-      </button>
-    );
+    return <button className="btn-outline" onClick={() => setOpen(true)}>Importar CSV / Excel</button>;
   }
 
   return (
-    <div className="card w-full p-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-display text-lg font-bold">Importar empresas (CSV)</h3>
-        <button className="text-sm text-subtle hover:text-ink" onClick={() => setOpen(false)}>fechar</button>
-      </div>
-      <p className="mt-1 text-sm text-subtle">
-        Suba uma lista de empresas. Se o arquivo tiver contato/e-mail/telefone, o contato é criado e vinculado à empresa. Aceita vírgula ou ponto-e-vírgula.
-      </p>
-
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <label className="btn-brand cursor-pointer px-4">
-          Escolher arquivo CSV
-          <input type="file" accept=".csv,text/csv" className="hidden" onChange={onFile} />
-        </label>
-        <button className="text-sm text-brand hover:underline" onClick={baixarModelo}>baixar modelo</button>
-        <button className="text-sm text-subtle hover:text-ink" onClick={() => setShowPaste((s) => !s)}>
-          {showPaste ? "− fechar colar" : "ou colar o CSV"}
-        </button>
-      </div>
-
-      {fileName && <p className="mt-2 text-xs text-subtle">{fileName} · {nRegistros} empresa(s) para importar</p>}
-
-      {showPaste && (
-        <textarea
-          className="input mt-3 h-32 w-full font-mono text-xs"
-          value={csv}
-          onChange={(e) => setCsv(e.target.value)}
-          placeholder="Cole aqui o conteúdo do CSV (a 1ª linha é o cabeçalho)…"
-        />
-      )}
-
-      <div className="mt-3">
-        <button className="btn-brand px-4" onClick={importar} disabled={pending || !csv.trim()}>
-          {pending ? "Importando…" : "Importar"}
-        </button>
-      </div>
-
-      {erro && <p className="mt-3 text-sm text-red-600">{erro}</p>}
-      {msg && <p className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{msg}</p>}
-    </div>
+    <ImportadorPlanilha
+      titulo="Importar empresas"
+      descricao="Aceita CSV (vírgula ou ponto-e-vírgula) e Excel (.xlsx). Se a linha tiver contato/e-mail/telefone, o contato é criado e já vinculado à empresa. Precisa de razão social, nome fantasia OU CNPJ."
+      campos={CAMPOS}
+      modeloNome="modelo-empresas-contatia.csv"
+      onFechar={() => setOpen(false)}
+      onImportar={async (linhas) => {
+        const r: any = await importEmpresas(linhas as any);
+        if (r?.error) return { error: r.error };
+        const partes = [`${r.empresas} empresa(s) criada(s).`];
+        if (r.jaExistiam) partes.push(`${r.jaExistiam} já existiam e foram reaproveitadas.`);
+        if (r.completadas) partes.push(`${r.completadas} tiveram campos vazios preenchidos.`);
+        if (r.contatos) partes.push(`${r.contatos} contato(s) criado(s).`);
+        router.refresh();
+        return { mensagem: partes.join(" "), aviso: r.aviso };
+      }}
+    />
   );
 }

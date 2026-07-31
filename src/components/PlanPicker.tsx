@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { normalizarDoc, docCompleto } from "@/lib/docCobranca";
 import { subscribePlan, validateCoupon } from "@/app/dashboard/planos/actions";
 
 type Plan = { id: string; name: string; price_monthly: number; max_seats: number | null; min_seats?: number; sort: number; segment?: string };
@@ -113,7 +114,7 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
               inputMode="numeric"
               placeholder="Só números"
               value={doc}
-              onChange={(e) => setDoc(e.target.value.replace(/\D/g, "").slice(0, 14))}
+              onChange={(e) => setDoc(normalizarDoc(e.target.value).slice(0, 14))}
               style={{ width: 220 }}
             />
             <p className="mt-1 text-[11px] text-subtle">Exigido pelo Asaas. Fica salvo — assim você assina em um clique.</p>
@@ -176,13 +177,13 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
                     inputMode="numeric"
                     placeholder="Só números"
                     value={doc}
-                    onChange={(e) => setDoc(e.target.value.replace(/\D/g, "").slice(0, 14))}
+                    onChange={(e) => setDoc(normalizarDoc(e.target.value).slice(0, 14))}
                     autoFocus
                   />
                   <p className="mt-1 text-[11px] text-subtle">Exigido pelo Asaas para emitir a cobrança. Fica salvo no seu cadastro.</p>
                   <button
                     className="btn-brand mt-2 w-full justify-center"
-                    disabled={pending || (doc.length !== 11 && doc.length !== 14)}
+                    disabled={pending || !docCompleto(doc)}
                     onClick={() => pick(p.id, doc)}
                   >
                     {busyId === p.id ? "Gerando..." : "Confirmar e assinar"}
@@ -191,12 +192,12 @@ export function PlanPicker({ plans, features, seats, currentPlanId, canSubscribe
               ) : (
                 <button
                   className={`mt-5 w-full justify-center ${team ? "btn-brand" : "btn-dark"}`}
-                  disabled={!canSubscribe || pending || (!docReady && doc.length !== 11 && doc.length !== 14)}
+                  disabled={!canSubscribe || pending || (!docReady && !docCompleto(doc))}
                   onClick={() => pick(p.id)}
                 >
                   {busyId === p.id
                     ? "Gerando..."
-                    : !docReady && doc.length !== 11 && doc.length !== 14
+                    : !docReady && !docCompleto(doc)
                       ? "Informe o CPF/CNPJ acima"
                       : currentPlanId
                         ? "Trocar para este"

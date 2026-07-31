@@ -10,6 +10,7 @@ import ExportarCsv from "@/components/ExportarCsv";
 import { bulkTagAccounts, bulkAssignAccounts, bulkDeleteAccounts, createTagAccounts } from "@/app/dashboard/contas/actions";
 import { contarEmpresasPorFiltro, excluirEmpresasPorFiltro, exportarEmpresasPorFiltro } from "@/app/dashboard/contas/filtro-actions";
 import { useExclusaoLote } from "@/components/useExclusaoLote";
+import { verificarWhatsAppDasEmpresas, capturarDoSiteDasEmpresas, descobrirEmailsDasEmpresas } from "@/app/dashboard/contas/enriquecer-actions";
 
 type Tag = { id: string; name: string; color: string };
 type Member = { id: string; full_name: string | null; email: string };
@@ -182,6 +183,33 @@ export default function AccountsCockpit({
     );
     clear(); router.refresh();
   }
+  // ---------- ENRIQUECIMENTO A PARTIR DA EMPRESA ----------
+  // As três ações agem sobre os CONTATOS das empresas marcadas — a tradução
+  // empresa → contatos é feita no servidor (ver contas/enriquecer-actions).
+  // Antes isso só existia na tela de Contatos e no Prospectar, o que obrigava a sair
+  // daqui e recomeçar a seleção justamente no fluxo do Radar, onde o que você tem na
+  // mão é a empresa.
+  function enriquecer(
+    fn: (ids: string[]) => Promise<any>,
+    resumo: (r: any) => string
+  ) {
+    setMsg(null);
+    start(async () => {
+      try {
+        const r = await fn([...sel]);
+        if (r?.error) { setMsg(r.error); return; }
+        const alcance = r?.contatosAlcancados
+          ? ` (${r.contatosAlcancados} de ${r.totalContatos} contato(s) dessas empresas)`
+          : "";
+        setMsg(resumo(r) + alcance);
+        clear();
+        router.refresh();
+      } catch (e: any) {
+        setMsg(`Falhou: ${e?.message || "conexão"}. Se acabou de publicar, recarregue com Ctrl+Shift+R.`);
+      }
+    });
+  }
+
   function doCreateTag() {
     if (!newTag.trim()) return;
     start(async () => {
@@ -299,6 +327,52 @@ export default function AccountsCockpit({
               <button className="btn-ghost py-1.5 text-sm" onClick={doAssign} disabled={pending || apagando || !assignTo}>Atribuir</button>
             </div>
           )}
+
+          <button
+            className="rounded-lg border border-brand/40 bg-brand-soft/60 px-3 py-1.5 text-sm font-medium text-brand-dark hover:bg-brand-soft"
+            disabled={pending || apagando}
+            title="Lê o site das empresas marcadas e captura telefone/WhatsApp/e-mail publicado. Um link wa.me já entra como WhatsApp confirmado."
+            onClick={() => enriquecer(capturarDoSiteDasEmpresas, (r) => {
+              const p = [`✓ ${r.achou ?? 0} número(s) no site`];
+              if (r.whats) p.push(`${r.whats} já confirmados no WhatsApp`);
+              if (r.filaVerif) p.push(`${r.filaVerif} na fila de verificação`);
+              if (r.enfileirados) p.push(`${r.enfileirados} na fila (o cron continua)`);
+              return p.join(" · ");
+            })}
+          >
+            {pending ? "..." : "Capturar do site"}
+          </button>
+
+          <button
+            className="rounded-lg border border-signal/40 bg-signal/5 px-3 py-1.5 text-sm font-medium text-signal hover:bg-signal/10"
+            disabled={pending || apagando}
+            title="Verifica quais telefones dos contatos dessas empresas têm WhatsApp. Exige o modo Evolution conectado."
+            onClick={() => enriquecer(verificarWhatsAppDasEmpresas, (r) => {
+              const p = [`✓ ${r.comWa ?? 0} com WhatsApp`];
+              if (r.semWa) p.push(`${r.semWa} sem WhatsApp`);
+              if (r.enfileirados) p.push(`${r.enfileirados} na fila (continua sozinho)`);
+              if (r.semTelefone) p.push(`${r.semTelefone} sem telefone`);
+              return p.join(" · ");
+            })}
+          >
+            {pending ? "..." : "Verificar WhatsApp"}
+          </button>
+
+          <button
+            className="rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted"
+            disabled={pending || apagando}
+            title="Testa padrões de e-mail (nome@domínio) no servidor do destinatário e só grava o que for confirmado."
+            onClick={() => enriquecer(descobrirEmailsDasEmpresas, (r) => {
+              if (r.semWorker) return "O worker de e-mail (VPS) não respondeu. A descoberta continua pelo cron.";
+              const p = [`✓ ${(r.achou ?? 0) + (r.publicados ?? 0)} e-mail(is) encontrado(s)`];
+              if (r.publicados) p.push(`${r.publicados} publicados no site`);
+              if (r.semEmail) p.push(`${r.semEmail} sem caixa confirmada`);
+              if (r.restantes) p.push(`${r.restantes} na fila (o cron continua)`);
+              return p.join(" · ");
+            })}
+          >
+            {pending ? "..." : "Descobrir e-mail"}
+          </button>
 
           <button
             className="ml-auto rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
