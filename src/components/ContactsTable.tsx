@@ -94,7 +94,10 @@ export default function ContactsTable({
 
   const allIds = useMemo(() => contacts.map((c) => c.id), [contacts]);
   const allChecked = sel.size > 0 && sel.size === contacts.length;
-  // a página vem cheia (200) → é bem provável que exista mais fora da tela
+  // A faixa "selecionar todos" aparece sempre que tudo o que está na tela está marcado.
+  // Antes ela exigia a página cheia (200), e então sumia bem no fim de uma limpeza —
+  // quando sobravam menos de 200 e ainda havia mais do que a tela mostra. `paginaCheia`
+  // sobrou só para escolher a frase certa.
   const paginaCheia = contacts.length >= 200;
   const temFiltro = !!(
     filtro && (filtro.q || filtro.view || filtro.frio || filtro.tag?.length || filtro.produto?.length || filtro.cadencia?.length)
@@ -308,12 +311,13 @@ export default function ContactsTable({
           )}
 
           {/* A ponte entre "as 200 da tela" e "tudo que bate com o filtro" */}
-          {allChecked && paginaCheia && (
+          {allChecked && (
             <div className="mb-2 rounded-lg border border-brand/20 bg-white/70 px-3 py-2 text-sm">
               {todosFiltro === null ? (
                 <>
                   <span className="text-subtle">
-                    As <b>{contacts.length}</b> desta página estão marcadas — a lista mostra só as primeiras.
+                    As <b>{contacts.length}</b> desta página estão marcadas
+                    {paginaCheia ? " — a lista mostra só as primeiras." : "."}
                   </span>{" "}
                   <button
                     className="font-semibold text-brand-dark underline disabled:opacity-50"

@@ -65,7 +65,13 @@ export default function AccountsCockpit({
 
   const allIds = useMemo(() => rows.map((r) => r.id), [rows]);
   const allChecked = sel.size > 0 && sel.size === rows.length;
-  const paginaCheia = rows.length >= 300;   // a lista busca 300 por vez
+  // A página busca 300 empresas e DEPOIS filtra tag/produto/visão em memória. Usar
+  // rows.length >= 300 como gatilho fazia a faixa "selecionar todas" SUMIR sempre que
+  // um desses filtros recortasse a lista — e também quando a base caía abaixo de 300,
+  // justamente no fim de uma limpeza. Agora a faixa aparece sempre que tudo o que está
+  // na tela está marcado; quem sabe o total de verdade é o servidor, e ele responde no
+  // clique. `paginaCheia` sobrou só para escolher a frase certa.
+  const paginaCheia = rows.length >= 300;
   const tagOpts: SmartOption[] = allTags.map((t) => ({ value: t.id, label: t.name }));
   const assignOpts: SmartOption[] = [
     { value: "__none__", label: "Sem responsável" },
@@ -227,12 +233,13 @@ export default function AccountsCockpit({
             </div>
           )}
 
-          {allChecked && paginaCheia && !filtroSoDaTela && (
+          {allChecked && !filtroSoDaTela && (
             <div className="mb-2 rounded-lg border border-brand/20 bg-white/70 px-3 py-2 text-sm">
               {todasFiltro === null ? (
                 <>
                   <span className="text-subtle">
-                    As <b>{rows.length}</b> desta página estão marcadas — a lista mostra só as primeiras.
+                    As <b>{rows.length}</b> desta página estão marcadas
+                    {paginaCheia ? " — a lista mostra só as primeiras." : "."}
                   </span>{" "}
                   <button
                     className="font-semibold text-brand-dark underline disabled:opacity-50"
@@ -254,7 +261,7 @@ export default function AccountsCockpit({
               )}
             </div>
           )}
-          {allChecked && paginaCheia && filtroSoDaTela && (
+          {allChecked && filtroSoDaTela && (
             <div className="mb-2 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-xs text-warn">
               Com filtro de <b>produto</b> ou <b>visão</b> ativo, a exclusão em massa fica indisponível: esses dois são
               aplicados na tela, não no banco — apagar por eles pegaria empresas que você não está vendo. Limpe esses

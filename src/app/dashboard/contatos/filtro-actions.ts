@@ -25,14 +25,12 @@ import { msgErro } from "@/lib/erros";
 import { isManager } from "@/lib/permissions";
 import { consultaContatos, normalizarFiltro, filtroVazio, type FiltroContatos } from "@/lib/contatosFiltro";
 import { logAction, recortarItens } from "@/lib/actionLog";
+import { apagarLote } from "@/lib/apagarLote";
 
-// Buscar e apagar têm limites DIFERENTES, e tratá-los como um só era metade da lentidão:
-//  • buscar: o PostgREST devolve no máximo 1.000 linhas por consulta;
-//  • apagar: 200 uuids ≈ 7,4 KB de URL, no limite de 8 KB do PostgREST/proxy.
-// Buscando 1.000 e apagando em 5 pedaços são 6 idas ao banco por 1.000 contatos, em vez
-// de 10 — quase metade do tempo que era só rede.
+// O PostgREST devolve no máximo 1.000 linhas por consulta — é o tamanho da busca.
+// Quem apaga é apagarLote(): pela função do banco (0102) é UMA ida por 1.000; sem ela,
+// cai para pedaços de 200 por causa do limite de tamanho da URL.
 const ONDA_BUSCA = 1000;
-const ONDA_DELETE = 200;
 // Teto por CHAMADA. A tela chama de novo sozinha até zerar, então isto não é mais o
 // limite do que dá para apagar — é só o tamanho de cada volta.
 const TETO_POR_CHAMADA = 20000;
@@ -152,22 +150,11 @@ export async function excluirPorFiltro(
         if (amostra.length < 50) amostra.push({ id: c.id, nome: c.name, empresa: c.company, email: c.email });
       }
 
-      // apaga a busca de 1.000 em pedaços de 200 (limite de tamanho da URL)
-      let saiuNoLote = 0;
-      for (let i = 0; i < linhas.length; i += ONDA_DELETE) {
-        if (Date.now() - inicio > ORCAMENTO_MS) { tempoEsgotado = true; break; }
-        const pedaco = linhas.slice(i, i + ONDA_DELETE).map((c) => c.id);
-        const { data: apagados, error: errDel } = await supabase
-          .from("contacts").delete().eq("tenant_id", tenant_id).in("id", pedaco).select("id");
-        if (errDel) { falha = msgErro(errDel); break; }
-        const n = ((apagados as any[]) || []).length;
-        excluidos += n;
-        saiuNoLote += n;
-        // havia linhas mas nada saiu = a RLS barrou; insistir viraria laço infinito
-        if (!n) break;
-      }
-      if (falha || tempoEsgotado) break;
-      if (!saiuNoLote) break;
+      const r = await apagarLote(supabase, "contacts", tenant_id, linhas.map((c) => c.id));
+      excluidos += r.n;
+      if (r.erro) { falha = r.erro; break; }
+      // havia linhas mas nada saiu = a RLS barrou; insistir viraria laço infinito
+      if (!r.n) break;
     }
   } catch (e: any) {
     falha = msgErro(e);

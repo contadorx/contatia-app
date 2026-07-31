@@ -19,10 +19,11 @@ import { createClient } from "@/lib/supabase/server";
 import { msgErro } from "@/lib/erros";
 import { comoLista } from "@/lib/filtros";
 import { logAction, recortarItens } from "@/lib/actionLog";
+import { apagarLote } from "@/lib/apagarLote";
 
-// Mesma separação de Contatos: buscar aguenta 1.000 por vez, apagar só 200 (tamanho da URL).
+// O PostgREST devolve no máximo 1.000 linhas por consulta. Quem apaga é apagarLote():
+// pela função do banco (0102) é UMA ida por 1.000; sem ela, pedaços de 200 (URL).
 const ONDA_BUSCA = 1000;
-const ONDA_DELETE = 200;       // ~7,4 KB de URL — abaixo do limite do PostgREST
 const TETO_POR_CHAMADA = 20000;
 const ORCAMENTO_MS = 40_000;   // sai limpo antes dos 60s da função
 const PAGINA_VINCULOS = 1000;
@@ -63,24 +64,67 @@ async function idsPorTag(supabase: any, tenant_id: string, tags: string[]): Prom
   return Array.from(new Set(ids));
 }
 
-async function montarConsulta(
+// ------------------------------------------------------------
+// FATIAS — por que o filtro de tag precisa ser quebrado
+//
+// O filtro de tag vira `id=in.("uuid","uuid",…)` na URL. Medido: 200 uuids já dão 9 KB
+// e 1.000 dão 45 KB. Uma tag com mais de ~150 empresas estourava o tamanho da URL e a
+// consulta falhava — a tela mostrava "0 empresas" ou dava erro, e a exclusão em massa
+// simplesmente não saía do lugar.
+//
+// Solução: uma consulta por fatia de 150 ids, somando os resultados. As fatias são
+// DISJUNTAS (os ids são únicos), então somar contagens é aritmeticamente correto —
+// nenhuma empresa é contada duas vezes.
+//
+// Sem filtro de tag não há lista de ids: uma fatia só, valendo `null`.
+// ------------------------------------------------------------
+const FATIA_IDS = 150;
+
+async function fatiasDeIds(supabase: any, tenant_id: string, f: FiltroEmpresas): Promise<(string[] | null)[]> {
+  if (!f.tag?.length) return [null];
+  const ids = await idsPorTag(supabase, tenant_id, f.tag);
+  if (!ids.length) return [[]];        // interseção vazia = NENHUMA, não "todas"
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += FATIA_IDS) out.push(ids.slice(i, i + FATIA_IDS));
+  return out;
+}
+
+function montarConsulta(
   supabase: any, tenant_id: string, f: FiltroEmpresas,
-  opts: { select: string; count?: "exact"; head?: boolean; limit?: number }
+  opts: { select: string; count?: "exact"; head?: boolean; limit?: number },
+  fatia: string[] | null
 ) {
   let q = supabase
     .from("accounts")
     .select(opts.select, opts.count ? { count: opts.count, head: !!opts.head } : undefined)
     .eq("tenant_id", tenant_id);
   if (opts.limit) q = q.limit(opts.limit);
-
-  if (f.tag?.length) {
-    const ids = await idsPorTag(supabase, tenant_id, f.tag);
-    // interseção vazia = NENHUMA, não "todas"
-    q = q.in("id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"]);
-  }
+  if (fatia) q = q.in("id", fatia.length ? fatia : ["00000000-0000-0000-0000-000000000000"]);
   const qs = buscaEfetiva(f.q);
   if (qs) q = q.or(`name.ilike.%${qs}%,cnpj.ilike.%${qs}%,domain.ilike.%${qs}%`);
   return q;
+}
+
+// Total real = soma das fatias. Com ATALHO importante: se o único filtro é a tag, o
+// total já é o tamanho da lista de ids (cada vínculo aponta para uma empresa existente
+// do mesmo tenant) — não precisa de UMA consulta por fatia. Sem esse atalho, contar uma
+// tag com 78 mil empresas custaria ~520 idas ao banco, e o orçamento de tempo acabaria
+// antes de apagar a primeira linha.
+async function contarTudo(supabase: any, tenant_id: string, f: FiltroEmpresas): Promise<number> {
+  const temBusca = !!buscaEfetiva(f.q);
+  if (f.tag?.length && !temBusca) {
+    return (await idsPorTag(supabase, tenant_id, f.tag)).length;
+  }
+  const fatias = await fatiasDeIds(supabase, tenant_id, f);
+  let total = 0;
+  for (const fatia of fatias) {
+    const { count, error } = await montarConsulta(
+      supabase, tenant_id, f, { select: "id", count: "exact", head: true }, fatia
+    );
+    if (error) throw error;
+    total += count ?? 0;
+  }
+  return total;
 }
 
 export async function contarEmpresasPorFiltro(
@@ -90,10 +134,8 @@ export async function contarEmpresasPorFiltro(
   if (!tenant_id) return { error: "Sem workspace." };
   try {
     const f = limparFiltro(filtro);
-    const q = await montarConsulta(supabase, tenant_id, f, { select: "id", count: "exact", head: true });
-    const { count, error } = await q;
-    if (error) return { error: msgErro(error) };
-    return { total: count ?? 0, semFiltro: !buscaEfetiva(f.q) && !f.tag?.length };
+    const total = await contarTudo(supabase, tenant_id, f);
+    return { total, semFiltro: !buscaEfetiva(f.q) && !f.tag?.length };
   } catch (e: any) {
     return { error: msgErro(e) };
   }
@@ -112,12 +154,7 @@ export async function excluirEmpresasPorFiltro(
     return { error: "Confirmação inválida. Recarregue a lista e selecione de novo." };
   }
 
-  const contar = async (): Promise<number> => {
-    const q = await montarConsulta(supabase, tenant_id, f, { select: "id", count: "exact", head: true });
-    const { count, error } = await q;
-    if (error) throw error;
-    return count ?? 0;
-  };
+  const contar = () => contarTudo(supabase, tenant_id, f);
 
   let totalAgora = 0;
   try { totalAgora = await contar(); } catch (e: any) { return { error: msgErro(e) }; }
@@ -138,36 +175,30 @@ export async function excluirEmpresasPorFiltro(
   let tempoEsgotado = false;
 
   try {
-    while (excluidas < limiteAbsoluto) {
-      if (Date.now() - inicio > ORCAMENTO_MS) { tempoEsgotado = true; break; }
-
-      const q = await montarConsulta(supabase, tenant_id, f, {
-        select: "id, name, cnpj",
-        limit: Math.min(ONDA_BUSCA, limiteAbsoluto - excluidas),
-      });
-      const { data, error } = await q;
-      if (error) { falha = msgErro(error); break; }
-      const linhas = ((data as any[]) || []);
-      if (!linhas.length) break;
-
-      for (const a of linhas) {
-        if (amostra.length < 50) amostra.push({ id: a.id, nome: a.name, cnpj: a.cnpj });
-      }
-
-      let saiuNoLote = 0;
-      for (let i = 0; i < linhas.length; i += ONDA_DELETE) {
+    const fatias = await fatiasDeIds(supabase, tenant_id, f);
+    // percorre fatia por fatia; dentro de cada uma, repete até esgotá-la
+    for (const fatia of fatias) {
+      if (falha || tempoEsgotado || excluidas >= limiteAbsoluto) break;
+      while (excluidas < limiteAbsoluto) {
         if (Date.now() - inicio > ORCAMENTO_MS) { tempoEsgotado = true; break; }
-        const pedaco = linhas.slice(i, i + ONDA_DELETE).map((a) => a.id);
-        const { data: apagadas, error: errDel } = await supabase
-          .from("accounts").delete().eq("tenant_id", tenant_id).in("id", pedaco).select("id");
-        if (errDel) { falha = msgErro(errDel); break; }
-        const n = ((apagadas as any[]) || []).length;
-        excluidas += n;
-        saiuNoLote += n;
-        if (!n) break; // RLS barrou: insistir viraria laço infinito
+
+        const { data, error } = await montarConsulta(supabase, tenant_id, f, {
+          select: "id, name, cnpj",
+          limit: Math.min(ONDA_BUSCA, limiteAbsoluto - excluidas),
+        }, fatia);
+        if (error) { falha = msgErro(error); break; }
+        const linhas = ((data as any[]) || []);
+        if (!linhas.length) break;   // esta fatia acabou
+
+        for (const a of linhas) {
+          if (amostra.length < 50) amostra.push({ id: a.id, nome: a.name, cnpj: a.cnpj });
+        }
+
+        const r = await apagarLote(supabase, "accounts", tenant_id, linhas.map((a) => a.id));
+        excluidas += r.n;
+        if (r.erro) { falha = r.erro; break; }
+        if (!r.n) break; // RLS barrou: insistir viraria laço infinito
       }
-      if (falha || tempoEsgotado) break;
-      if (!saiuNoLote) break;
     }
   } catch (e: any) {
     falha = msgErro(e);
@@ -236,14 +267,18 @@ export async function exportarEmpresasPorFiltro(
         linhas.push(...(((data as any[]) || [])));
       }
     } else {
-      for (let pagina = 0; pagina * 1000 < TETO_EXPORT; pagina++) {
-        const q = await montarConsulta(supabase, tenant_id, f, { select: SELECT });
-        const { data, error } = await q.range(pagina * 1000, pagina * 1000 + 999);
-        if (error) return { error: msgErro(error) };
-        const lote = ((data as any[]) || []);
-        linhas.push(...lote);
-        if (lote.length < 1000) break;
+      const fatias = await fatiasDeIds(supabase, tenant_id, f);
+      for (const fatia of fatias) {
         if (linhas.length >= TETO_EXPORT) { truncado = true; break; }
+        for (let pagina = 0; pagina * 1000 < TETO_EXPORT; pagina++) {
+          const q = montarConsulta(supabase, tenant_id, f, { select: SELECT }, fatia);
+          const { data, error } = await q.range(pagina * 1000, pagina * 1000 + 999);
+          if (error) return { error: msgErro(error) };
+          const lote = ((data as any[]) || []);
+          linhas.push(...lote);
+          if (lote.length < 1000) break;
+          if (linhas.length >= TETO_EXPORT) { truncado = true; break; }
+        }
       }
     }
   } catch (e: any) {
