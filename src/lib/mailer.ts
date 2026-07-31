@@ -55,8 +55,14 @@ export async function sendEmail(
     // convite de calendário (.ics). O nodemailer monta o MIME certo
     // (text/calendar; method=REQUEST) → Gmail/Outlook mostram o convite e travam a agenda.
     icalEvent?: { method: string; content: string; filename?: string };
-  }
-): Promise<{ copiaEmEnviados?: boolean; erroCopia?: string }> {
+  },
+  // `adiarCopia` devolve a cópia em "Enviados" como uma função para o chamador rodar
+  // DEPOIS. Existe porque a cópia leva até 8 segundos de IMAP, e esse tempo estava
+  // DENTRO da janela entre "o e-mail saiu" e "o envio foi registrado". Se a função
+  // morresse ali, o e-mail estava na rua e não havia registro nenhum dele — o contador
+  // do dia não subia e o limite ficava cego.
+  opts?: { adiarCopia?: boolean }
+): Promise<{ copiaEmEnviados?: boolean; erroCopia?: string; copiar?: () => Promise<{ copiaEmEnviados?: boolean; erroCopia?: string }> }> {
   const transport = buildTransport(account);
   const from = account.display_name
     ? `${account.display_name} <${account.from_email}>`
@@ -91,6 +97,8 @@ export async function sendEmail(
   if (account.provider === "gmail" || account.save_to_sent === false) {
     return {};
   }
+
+  const fazerCopia = async (): Promise<{ copiaEmEnviados?: boolean; erroCopia?: string }> => {
   try {
     const MailComposer = (await import("nodemailer/lib/mail-composer")).default as any;
     const raw: Buffer = await new MailComposer(opcoes).compile().build();
@@ -107,4 +115,8 @@ export async function sendEmail(
   } catch (e: any) {
     return { copiaEmEnviados: false, erroCopia: e?.message || "falha ao compor a cópia" };
   }
+  };
+
+  if (opts?.adiarCopia) return { copiar: fazerCopia };
+  return await fazerCopia();
 }

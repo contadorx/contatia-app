@@ -63,6 +63,29 @@ export default function EnviosHoje({ dados, gestor }: { dados: ResumoEnvios; ges
           {dados.capacidade.length > 0 && (
             <div className="mb-4">
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-subtle">Capacidade do dia</p>
+              {/* O TOTAL é o número que faltava. O limite é POR CAIXA: com 4 caixas de 80,
+                  o sistema aceita 320 num dia sem nenhuma delas estourar — e foi essa
+                  soma invisível que surpreendeu. */}
+              {dados.capacidade.length > 1 && (
+                <p className="mb-2 text-xs">
+                  {/* O numerador é o TOTAL de e-mails do dia, não a soma das barras: envios
+                      reconstruídos pelo reparo não têm caixa e sumiriam da conta. */}
+                  <b>Total do dia: {dados.emailsDia} de{" "}
+                  {dados.capacidade.reduce((a, c) => a + c.teto, 0)}</b>{" "}
+                  <span className="text-subtle">
+                    — o limite é por caixa, e o envio troca de caixa quando uma enche.
+                    Com {dados.capacidade.length} caixas, este é o teto real do dia.
+                  </span>
+                </p>
+              )}
+              {dados.semCaixa > 0 && (
+                <p className="mb-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">
+                  <b>{dados.semCaixa}</b> envio{dados.semCaixa === 1 ? "" : "s"} de hoje não
+                  sabe{dados.semCaixa === 1 ? "" : "m"} por qual caixa saiu — são registros
+                  reconstruídos. Eles entram no total acima, mas <b>não</b> nas barras por
+                  caixa, e <b>não</b> contam para o limite de nenhuma delas.
+                </p>
+              )}
               <div className="space-y-1.5">
                 {dados.capacidade.map((c) => {
                   const pct = c.teto > 0 ? Math.min(100, (c.usados / c.teto) * 100) : 0;

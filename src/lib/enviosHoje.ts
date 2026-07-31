@@ -38,6 +38,8 @@ export type ResumoEnvios = {
   porPessoa: { nome: string; emails: number; whats: number; ultimo: string | null; souEu: boolean }[];
   linhas: LinhaEnvio[];          // detalhe, mais recente primeiro
   capacidade: { caixa: string; usados: number; teto: number; aquecendo: boolean }[];
+  emailsDia: number;             // TODOS os e-mails do dia, inclusive os sem caixa conhecida
+  semCaixa: number;              // envios do dia sem caixa identificada (eventos reconstruídos)
   semAutoria: boolean;           // migration 0106 ainda não aplicada
 };
 
@@ -56,7 +58,7 @@ export async function enviosDeHoje(
 
   const vazio: ResumoEnvios = {
     meusEmails: 0, meusWhats: 0, ultimoMeu: null, totalEquipe: 0,
-    porPessoa: [], linhas: [], capacidade: [], semAutoria: false,
+    porPessoa: [], linhas: [], capacidade: [], emailsDia: 0, semCaixa: 0, semAutoria: false,
   };
 
   // `select("*")` de propósito: pedir a coluna user_id explicitamente faria a tela
@@ -122,11 +124,19 @@ export async function enviosDeHoje(
 
   // capacidade restante das caixas (mesmo cálculo do envio)
   const { effectiveDailyCap } = await import("@/lib/warmup");
+  // O total do dia conta TODOS os e-mails, não só os que sabem por qual caixa saíram.
+  // Eventos reconstruídos pelo reparo (REPARO-eventos-perdidos.sql) ficam sem caixa: a
+  // tarefa não guarda essa informação. Se eles só entrassem na soma por caixa, o painel
+  // continuaria mostrando "40 de 320" depois do reparo — que é justamente a mentira que
+  // este painel existe para desfazer.
   const usadosPorCaixa: Record<string, number> = {};
+  let emailsDia = 0;
+  let semCaixa = 0;
   for (const e of linhasBrutas) {
-    if (e.type === "email_sent" && e.email_account_id) {
-      usadosPorCaixa[e.email_account_id] = (usadosPorCaixa[e.email_account_id] || 0) + 1;
-    }
+    if (e.type !== "email_sent") continue;
+    emailsDia++;
+    if (e.email_account_id) usadosPorCaixa[e.email_account_id] = (usadosPorCaixa[e.email_account_id] || 0) + 1;
+    else semCaixa++;
   }
   const capacidade = ((caixas as any).data || [])
     .filter((c: any) => c.is_active)
@@ -145,6 +155,8 @@ export async function enviosDeHoje(
     porPessoa: [...agg.values()].sort((a, b) => (b.emails + b.whats) - (a.emails + a.whats)),
     linhas: linhas.slice(0, 200),
     capacidade,
+    emailsDia,
+    semCaixa,
     semAutoria,
   };
 }

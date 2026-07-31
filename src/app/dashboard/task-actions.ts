@@ -230,10 +230,44 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   const html = built.html;
   bodyText = built.text;
 
-  let copia: { copiaEmEnviados?: boolean; erroCopia?: string } = {};
+  // ============================================================
+  // RESERVA ANTES DE ENVIAR — a trava contra envio duplicado
+  //
+  // A ordem antiga era: envia → grava cópia em Enviados (até 8s) → marca a tarefa como
+  // feita → registra o evento. Se a função morresse em qualquer ponto dessa janela, o
+  // e-mail estava na rua e a tarefa continuava PENDENTE — então "Enviar todos" mandava
+  // de novo, e de novo. E como o evento também não era gravado, o contador do dia não
+  // subia: o limite diário ficava CEGO e nunca disparava.
+  //
+  // Agora a tarefa é RESERVADA antes do envio, numa atualização condicional
+  // (`status = 'pending'`). Se duas execuções disputarem a mesma tarefa, só uma leva —
+  // o banco decide. Se o envio falhar depois, devolvemos para pendente.
+  //
+  // Em e-mail, mandar duas vezes é pior do que não mandar. Por isso a reserva vem antes.
+  // ============================================================
+  const { data: reservada } = await supabase
+    .from("tasks")
+    .update({ status: "done", completed_at: new Date().toISOString() })
+    .eq("id", taskId)
+    .eq("status", "pending")
+    .select("id")
+    .maybeSingle();
+  if (!reservada) {
+    return { error: "Esta tarefa já foi enviada (ou está sendo enviada agora). Recarregue a fila." };
+  }
+  const devolverParaFila = async () => {
+    await supabase.from("tasks").update({ status: "pending", completed_at: null }).eq("id", taskId);
+  };
+
+  let copia: { copiaEmEnviados?: boolean; erroCopia?: string; copiar?: () => Promise<any> } = {};
   try {
-    copia = await sendEmail(acct as any, { to, subject: task.title || "", text: bodyText, html });
+    copia = await sendEmail(
+      acct as any,
+      { to, subject: task.title || "", text: bodyText, html },
+      { adiarCopia: true }   // a cópia sai do caminho crítico (ver mailer)
+    );
   } catch (e: any) {
+    await devolverParaFila();
     const { msgSmtp } = await import("@/lib/caixas");
     const ehAuth = /535|534|Invalid login|Username and Password not accepted|authentication|Incorrect authentication/i.test(String(e?.message || ""));
 
@@ -249,6 +283,24 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
       revalidatePath("/dashboard/config");
     }
     return { error: msgSmtp(e, (acct as any).from_email) };
+  }
+
+  // REGISTRA O ENVIO IMEDIATAMENTE — antes de qualquer outra coisa que possa falhar.
+  // É este registro que alimenta o limite diário; enquanto ele não existe, o envio é
+  // invisível e o limite não conta. A janela de risco agora é uma consulta, não oito
+  // segundos de IMAP.
+  const reg = await scoreEvent(supabase, {
+    tenant_id,
+    contact_id: (task as any).contact_id,
+    type: "email_sent",
+    user_id,
+    email_account_id: (acct as any).id,
+    meta: { to },
+  });
+
+  // Agora sim a cópia em "Enviados" (best-effort, fora do caminho crítico).
+  if (copia.copiar) {
+    try { copia = { ...(await copia.copiar()) }; } catch { /* nunca derruba o envio */ }
   }
 
   // A cópia em "Enviados" falhou por login/host de IMAP? Desliga para ESTA caixa.
@@ -267,17 +319,13 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     }
   }
 
-  await supabase.from("tasks").update({ status: "done", completed_at: new Date().toISOString() }).eq("id", taskId);
-  await scoreEvent(supabase, {
-    tenant_id,
-    contact_id: (task as any).contact_id,
-    type: "email_sent",
-    user_id,
-    email_account_id: (acct as any).id,
-    meta: { to },
-  });
   revalidatePath("/dashboard");
-  return { ok: true, aviso: avisoCopia };
+  // Envio sem registro é o pior estado possível: o limite diário deixa de contá-lo e a
+  // pessoa perde a noção de quanto já mandou. Se acontecer, avisa alto.
+  const avisoRegistro = reg?.ok === false
+    ? `ATENÇÃO: o e-mail saiu, mas o registro do envio falhou (${reg.error}). Ele NÃO entra na contagem do dia nem no limite — confira o painel "Seus envios de hoje" antes de continuar.`
+    : undefined;
+  return { ok: true, aviso: [avisoRegistro, avisoCopia].filter(Boolean).join(" ") || undefined, caixa: (acct as any).from_email };
 }
 
 // Envia a tarefa de WhatsApp via Evolution API (caixa ativa do tenant), com cap diário.
@@ -347,6 +395,27 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
 }
 
 // Envia TODAS as tarefas de e-mail pendentes de hoje, respeitando o cap diário.
+// ============================================================
+// ENVIAR TODOS — com freio, orçamento de tempo e relatório
+//
+// O QUE ACONTECIA: este laço percorria até 500 tarefas chamando sendEmailTask uma a
+// uma, dentro de UMA execução de função. Três consequências, todas ruins:
+//
+//   1) Passava dos 60 segundos e a função era morta no meio. A tela não recebia
+//      resposta — e a pessoa clicava de novo.
+//   2) Como a tarefa só era marcada como feita DEPOIS do envio, quem foi enviado no
+//      momento da morte continuava pendente. O clique seguinte MANDAVA DE NOVO.
+//   3) O evento também não era gravado, então o contador do dia não subia e o limite
+//      diário nunca disparava. Foi assim que saíram ~300 e-mails com o painel
+//      marcando 40.
+//
+// A reserva da tarefa (em sendEmailTask) resolve o reenvio. Aqui resolvemos o resto:
+// orçamento de tempo, parada imediata quando o limite é atingido, e um relatório que
+// diz por quais caixas os e-mails saíram.
+// ============================================================
+const ORCAMENTO_ENVIO_MS = 40_000;   // sai limpo antes dos 60s da função
+const TETO_POR_CLIQUE = 200;
+
 export async function sendAllEmailTasks() {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
@@ -357,19 +426,49 @@ export async function sendAllEmailTasks() {
     .eq("channel", "email")
     .eq("status", "pending")
     .lte("due_date", today)
-    .limit(500);
+    .order("due_date", { ascending: true })
+    .limit(TETO_POR_CLIQUE);
   const ids = ((tasks as any[]) || []).map((t) => t.id);
-  if (!ids.length) return { ok: true, sent: 0, failed: 0 };
+  if (!ids.length) return { ok: true, sent: 0, failed: 0, restantes: 0 };
 
+  const inicio = Date.now();
   let sent = 0;
   let failed = 0;
-  for (const id of ids) {
-    const res = (await sendEmailTask(id)) as { ok?: boolean; error?: string };
-    if (res?.ok) sent++;
-    else failed++;
+  let limiteAtingido: string | null = null;
+  let primeiroErro: string | null = null;
+  const porCaixa: Record<string, number> = {};
+  let i = 0;
+
+  for (; i < ids.length; i++) {
+    if (Date.now() - inicio > ORCAMENTO_ENVIO_MS) break;
+    const res = (await sendEmailTask(ids[i])) as { ok?: boolean; error?: string; caixa?: string };
+    if (res?.ok) {
+      sent++;
+      if (res.caixa) porCaixa[res.caixa] = (porCaixa[res.caixa] || 0) + 1;
+      continue;
+    }
+    failed++;
+    if (!primeiroErro && res?.error) primeiroErro = res.error;
+    // Limite diário atingido: PARAR. Insistir só produz 200 falhas iguais e some com o
+    // motivo no meio delas.
+    if (res?.error && /[Ll]imite/.test(res.error)) { limiteAtingido = res.error; break; }
   }
+
+  const processados = i;
+  const restantes = Math.max(0, ids.length - processados);
+
   revalidatePath("/dashboard");
-  return { ok: true, sent, failed };
+  return {
+    ok: true,
+    sent,
+    failed,
+    restantes,
+    limiteAtingido,
+    primeiroErro,
+    porCaixa,
+    // total do dia por caixa, para a tela poder mostrar de onde saiu
+    detalhe: Object.entries(porCaixa).map(([caixa, n]) => `${n} por ${caixa}`).join(", "),
+  };
 }
 
 // Conclui várias tarefas de uma vez (fila sequencial por tipo — ex.: todos os LinkedIn).

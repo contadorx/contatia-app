@@ -141,9 +141,30 @@ export default function TaskQueue({
     setErr(null);
     setBulkMsg(null);
     start(async () => {
-      const res = (await sendAllEmailTasks()) as { sent?: number; failed?: number; error?: string };
-      if (res?.error) setErr(res.error);
-      else setBulkMsg(`✓ ${res.sent} e-mails enviados${res.failed ? `, ${res.failed} falharam (cap diário/sem caixa)` : ""}.`);
+      const res = (await sendAllEmailTasks()) as
+        { sent?: number; failed?: number; restantes?: number; limiteAtingido?: string | null;
+          primeiroErro?: string | null; detalhe?: string; error?: string } | undefined;
+
+      // resposta vazia = função morta por tempo. Antes isso não dizia nada, e a pessoa
+      // clicava de novo — reenviando o que já tinha saído.
+      if (!res) {
+        setErr(
+          "O envio em lote não retornou resposta (tempo esgotado). Parte pode ter saído — " +
+          "confira o painel \"Seus envios de hoje\" ANTES de clicar de novo."
+        );
+        return;
+      }
+      if (res.error) { setErr(res.error); return; }
+
+      const partes = [`✓ ${res.sent ?? 0} e-mail(is) enviado(s)`];
+      if (res.detalhe) partes.push(res.detalhe);
+      if (res.failed) partes.push(`${res.failed} falharam`);
+      if (res.restantes) partes.push(`${res.restantes} ainda na fila — clique de novo para continuar`);
+      setBulkMsg(partes.join(" · ") + ".");
+      // O limite é a informação mais importante do lote: sem destaque, ela some no meio
+      // do resumo e a pessoa acha que enviou tudo.
+      if (res.limiteAtingido) setErr(res.limiteAtingido);
+      else if (res.failed && res.primeiroErro) setErr(`Primeira falha: ${res.primeiroErro}`);
     });
   }
   // conclui todos os toques visíveis (fila sequencial por tipo)
