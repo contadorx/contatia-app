@@ -19,7 +19,7 @@ async function ctx() {
 }
 
 export async function sendQuickEmail(contactId: string, subject: string, body: string) {
-  const { supabase, tenant_id } = await ctx();
+  const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (!subject.trim() || !body.trim()) return { error: "Preencha assunto e mensagem." };
 
@@ -43,7 +43,7 @@ export async function sendQuickEmail(contactId: string, subject: string, body: s
   // rotação de caixas + cap diário (mesma lógica da fila)
   const { data: accts } = await supabase
     .from("email_accounts")
-    .select("id, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage, signature")
+    .select("id, user_id, is_shared, verified, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage, signature")
     .eq("is_active", true)
     .order("created_at", { ascending: true });
   if (!accts || !accts.length) return { error: "Nenhuma caixa de e-mail conectada. Configure em Config." };
@@ -56,14 +56,21 @@ export async function sendQuickEmail(contactId: string, subject: string, body: s
   const sentByAcct: Record<string, number> = {};
   for (const e of (sentToday as any[]) || []) { const id = e.email_account_id; if (id) sentByAcct[id] = (sentByAcct[id] || 0) + 1; }
 
-  let acct: any = null; let bestSlack = -1; let anyWarming = false;
-  for (const a of accts as any[]) {
+  // MESMA escolha por camadas do envio da fila (minha → do workspace → emprestada) e
+  // mesmo cuidado com caixa reprovada. Este caminho tinha o defeito idêntico: pegava a
+  // de maior folga sem olhar de quem era.
+  let anyWarming = false;
+  const folgaDe = (a: any) => {
     const warmupOn = (a.warmup_stage ?? 0) !== -1;
     const { cap, warming } = effectiveDailyCap(a.created_at, a.daily_cap ?? 40, warmupOn);
-    const slack = cap - (sentByAcct[a.id] || 0);
     if (warming) anyWarming = true;
-    if (slack > bestSlack) { bestSlack = slack; acct = a; }
-  }
+    return cap - (sentByAcct[a.id] || 0);
+  };
+  for (const a of accts as any[]) folgaDe(a);
+  const { escolherCaixa } = await import("@/lib/caixas");
+  const escolha = escolherCaixa(accts as any[], folgaDe, user_id);
+  const acct: any = escolha.caixa;
+  const bestSlack = escolha.folga;
   if (!acct || bestSlack <= 0) {
     return { error: anyWarming
       ? "Limite de envio de hoje atingido em todas as caixas (algumas em aquecimento). Tente amanhã ou conecte outra caixa."
@@ -95,7 +102,14 @@ export async function sendQuickEmail(contactId: string, subject: string, body: s
   try {
     await sendEmail(acct as any, { to, subject: subject.trim(), text: bodyText, html });
   } catch (e: any) {
-    return { error: "Falha no envio: " + (e?.message || "erro desconhecido") };
+    const { msgSmtp } = await import("@/lib/caixas");
+    if (/535|534|Invalid login|Username and Password not accepted|authentication|Incorrect authentication/i.test(String(e?.message || ""))) {
+      // tira a caixa do rodízio até alguém corrigir (ver task-actions)
+      await supabase.from("email_accounts")
+        .update({ verified: false, verified_at: new Date().toISOString() })
+        .eq("id", (acct as any).id);
+    }
+    return { error: msgSmtp(e, (acct as any).from_email) };
   }
 
   await scoreEvent(supabase, { tenant_id, contact_id: contactId, type: "email_sent", email_account_id: (acct as any).id, meta: { to, avulso: true } });

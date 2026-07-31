@@ -135,7 +135,7 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   // (cap efetivo do dia − enviados hoje). Distribui a carga e protege cada domínio.
   const { data: accts } = await supabase
     .from("email_accounts")
-    .select("id, user_id, is_shared, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage, signature")
+    .select("id, user_id, is_shared, verified, provider, from_email, display_name, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, oauth_refresh_token, daily_cap, created_at, warmup_stage, signature")
     .eq("is_active", true)
     .order("created_at", { ascending: true });
   if (!accts || !accts.length) {
@@ -161,35 +161,26 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     if (id) sentByAcct[id] = (sentByAcct[id] || 0) + 1;
   }
 
-  // escolhe a caixa com maior folga
-  let acct: any = null;
-  let bestSlack = -1;
+  // folga do dia de uma caixa (cap efetivo do aquecimento − enviados hoje)
   let anyWarming = false;
-  for (const a of accts as any[]) {
+  const folgaDe = (a: any) => {
     const warmupOn = (a.warmup_stage ?? 0) !== -1;
     const { cap, warming } = effectiveDailyCap(a.created_at, a.daily_cap ?? 40, warmupOn);
-    const used = sentByAcct[a.id] || 0;
-    const slack = cap - used;
     if (warming) anyWarming = true;
-    if (slack > bestSlack) { bestSlack = slack; acct = a; }
-  }
+    return cap - (sentByAcct[a.id] || 0);
+  };
+  for (const a of accts as any[]) folgaDe(a);   // só para saber se ALGUMA está aquecendo
 
-  // CAIXA PRÓPRIA — precedência mais alta depois da caixa designada.
+  // ESCOLHA POR CAMADAS: minha → do workspace → emprestada (ver lib/caixas).
   //
-  // Se quem está enviando tem uma caixa PESSOAL ativa (migration 0104), o e-mail sai
-  // por ela, mesmo que outra tenha mais folga. Não é otimização de volume: é a marca
-  // certa. Um e-mail do vendedor saindo pelo endereço do escritório faz a RESPOSTA cair
-  // na caixa errada — e resposta é o único evento que realmente importa aqui.
-  //
-  // Só o cap diário derruba essa preferência: sem folga, cai no rodízio (o e-mail sai
-  // pelo endereço errado, mas sai — melhor que travar a fila do dia).
-  const minhaCaixa = (accts as any[]).find((a) => a.user_id && a.user_id === user_id);
-  if (minhaCaixa) {
-    const warmupOn = (minhaCaixa.warmup_stage ?? 0) !== -1;
-    const { cap } = effectiveDailyCap(minhaCaixa.created_at, minhaCaixa.daily_cap ?? 40, warmupOn);
-    const folga = cap - (sentByAcct[minhaCaixa.id] || 0);
-    if (folga > 0) { acct = minhaCaixa; bestSlack = folga; }
-  }
+  // Antes isto era "a caixa com maior folga", sem olhar de quem ela é. Numa equipe isso
+  // fazia um gestor sem caixa própria enviar pela caixa PESSOAL de outra pessoa, só
+  // porque ela era a mais nova e portanto a mais vazia — o destinatário via o endereço
+  // da colega e a resposta caía na caixa dela.
+  const { escolherCaixa } = await import("@/lib/caixas");
+  const escolha = escolherCaixa(accts as any[], folgaDe, user_id);
+  let acct: any = escolha.caixa;
+  let bestSlack = escolha.folga;
 
   // CAIXA DESIGNADA (produto/cadência): se a tarefa foi carimbada com uma caixa e
   // ela está ativa e com folga hoje, envia POR ELA (mantém a marca certa). Se estiver
@@ -239,7 +230,21 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   try {
     await sendEmail(acct as any, { to, subject: task.title || "", text: bodyText, html });
   } catch (e: any) {
-    return { error: "Falha no envio: " + (e?.message || "erro desconhecido") };
+    const { msgSmtp } = await import("@/lib/caixas");
+    const ehAuth = /535|534|Invalid login|Username and Password not accepted|authentication|Incorrect authentication/i.test(String(e?.message || ""));
+
+    // Caixa que reprova no LOGIN é marcada como não validada. Sem isso ela continuaria
+    // no rodízio e derrubaria todo envio que caísse nela — que foi como uma caixa
+    // quebrada virou a remetente de todo mundo sem ninguém perceber. Marcada, ela sai
+    // do rodízio (só volta se não houver alternativa) e fica VERMELHA em Config.
+    if (ehAuth) {
+      await supabase
+        .from("email_accounts")
+        .update({ verified: false, verified_at: new Date().toISOString() })
+        .eq("id", (acct as any).id);
+      revalidatePath("/dashboard/config");
+    }
+    return { error: msgSmtp(e, (acct as any).from_email) };
   }
 
   await supabase.from("tasks").update({ status: "done", completed_at: new Date().toISOString() }).eq("id", taskId);
