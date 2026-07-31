@@ -190,16 +190,42 @@ export default function ContactsTable({
     if (!seq) return setMsg("Escolha a cadência.");
     setMsg(null);
     start(async () => {
-      const res = (await bulkEnroll([...sel], seq)) as { enrolled?: number; semDado?: number; jaInscrito?: number; outros?: number; error?: string };
-      if (res?.error) setMsg(res.error);
-      else {
+      try {
+        const res = (await bulkEnroll([...sel], seq)) as
+          { enrolled?: number; semDado?: number; jaInscrito?: number; suprimidos?: number;
+            outros?: number; tarefas?: number; truncado?: boolean; error?: string } | undefined;
+
+        // `res` PODE vir undefined: quando a função do servidor é morta por tempo, a
+        // resposta que chega não é um payload de server action e o Next resolve vazio.
+        // Antes isto explodia em `res.enrolled` e derrubava a tela inteira — foi o
+        // "Cannot read properties of undefined (reading 'enrolled')".
+        if (!res) {
+          setMsg(
+            "A inscrição não retornou resposta — normalmente é tempo esgotado no servidor. " +
+            "Parte pode ter entrado: confira em Resultados → Registro ANTES de tentar de novo, " +
+            "para não inscrever duas vezes."
+          );
+          router.refresh();
+          return;
+        }
+        if (res.error) { setMsg(res.error); return; }
+
         const partes = [`✓ ${res.enrolled ?? 0} inscrito(s)`];
+        if (res.tarefas) partes.push(`${res.tarefas} tarefa(s) criadas`);
         if (res.semDado) partes.push(`⚠ ${res.semDado} sem e-mail/telefone — complete o cadastro (visão “A completar”)`);
         if (res.jaInscrito) partes.push(`${res.jaInscrito} já em cadência`);
-        if (res.outros) partes.push(`${res.outros} não entraram`);
+        if (res.suprimidos) partes.push(`${res.suprimidos} suprimidos (pediram para parar)`);
+        if (res.truncado) partes.push("teto de 2.000 por vez — selecione o resto e repita");
         setMsg(partes.join(" · "));
         clear();
         setSeq("");
+        router.refresh();
+      } catch (e: any) {
+        setMsg(
+          `A inscrição foi interrompida (${e?.message || "falha de conexão"}). ` +
+          `Parte pode ter entrado — confira em Resultados → Registro antes de repetir.`
+        );
+        router.refresh();
       }
     });
   }

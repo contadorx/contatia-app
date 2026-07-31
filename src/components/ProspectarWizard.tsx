@@ -248,9 +248,11 @@ export default function ProspectarWizard({
     if (waPronto) await rodarEtapa("whats");
   }
 
-  // limite por clique: bulkEnroll matricula um por um (cria as tarefas de cada passo),
-  // e passar de ~200 estoura o tempo da função. Melhor dizer isso do que travar.
-  const MAX_INSCRICAO = 200;
+  // Limite por clique. Era 200 porque o bulkEnroll matriculava UM POR VEZ (~10 idas ao
+  // banco por contato) e passar disso estourava o tempo da função. Agora ele resolve o
+  // lote inteiro de uma vez — 307 contatos custam 18 idas ao banco, medido — então o
+  // teto sobe. Continua existindo por segurança, não por limitação.
+  const MAX_INSCRICAO = 1000;
 
   async function inscrever() {
     // usa prontosIds (TODOS os com canal), não a amostra da tabela (20 linhas)
@@ -260,7 +262,16 @@ export default function ProspectarWizard({
     try {
       const ids = todos.slice(0, MAX_INSCRICAO);
       const r: any = await bulkEnroll(ids, cadencia);
-      if (r?.error) { setErro(r.error); return; }
+      // resposta vazia = função morta por tempo. Antes isso virava "0 inscritos" em
+      // silêncio, e o operador clicava de novo sem saber que parte já tinha entrado.
+      if (!r) {
+        setErro(
+          "A inscrição não retornou resposta (tempo esgotado). Parte pode ter entrado — " +
+          "confira em Resultados → Registro antes de tentar de novo."
+        );
+        return;
+      }
+      if (r.error) { setErro(r.error); return; }
       const extras = [
         r?.semDado ? `${r.semDado} sem canal` : "",
         r?.jaInscrito ? `${r.jaInscrito} já estavam` : "",
