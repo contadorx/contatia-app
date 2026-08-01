@@ -48,14 +48,17 @@ export default async function Cadencias({
     .order("created_at", { ascending: false });
   if (!gerente) seqQuery = seqQuery.eq("created_by", user?.id ?? "");
 
-  const [{ data: sequences }, { templates }, { data: products }, { data: accounts }] = await Promise.all([
+  const [{ data: sequences }, { templates }, { data: products }, { data: accounts }, { data: docs }] = await Promise.all([
     seqQuery,
     listTemplates(),
     supabase.from("products").select("id, name").eq("active", true).order("name", { ascending: true }),
     supabase.from("email_accounts").select("id, from_email, display_name").eq("is_active", true).order("created_at", { ascending: true }),
+    // documentos (propostas) — para inserir link rastreável por destinatário no passo
+    supabase.from("documents").select("id, name").order("created_at", { ascending: false }).limit(100),
   ]);
   const productOpts = (products as any[]) || [];
   const accountOpts = (accounts as any[]) || [];
+  const docOpts = ((docs as any[]) || []).map((d) => ({ id: d.id as string, name: d.name as string }));
 
   const todas = ((sequences as any[]) || []);
   const lista = todas.filter((s: any) => {
@@ -79,7 +82,7 @@ export default async function Cadencias({
       </p>
 
       <div className="mt-6">
-        <CadenceStart templates={(templates as any[]) || []} products={productOpts} accounts={accountOpts} />
+        <CadenceStart templates={(templates as any[]) || []} products={productOpts} accounts={accountOpts} documentos={docOpts} />
       </div>
 
       {todas.length > 0 && (
@@ -167,7 +170,7 @@ export default async function Cadencias({
                     </p>
                   )}
                   <div className="mt-2 flex items-center gap-3">
-                    <EditSequenceButton sequenceId={s.id} products={productOpts} accounts={accountOpts} />
+                    <EditSequenceButton sequenceId={s.id} products={productOpts} accounts={accountOpts} documentos={docOpts} />
                     <span className="text-xs text-subtle">·</span>
                     <SaveAsTemplateButton sequenceId={s.id} />
                   </div>

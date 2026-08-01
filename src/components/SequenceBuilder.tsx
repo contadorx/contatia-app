@@ -29,6 +29,7 @@ export default function SequenceBuilder({
   initialName,
   initialAudience,
   initialGoal,
+  documentos = [],
   initialSteps,
   products = [],
   accounts = [],
@@ -42,6 +43,7 @@ export default function SequenceBuilder({
   initialName?: string;
   initialAudience?: string;
   initialGoal?: string;
+  documentos?: { id: string; name: string }[];
   initialSteps?: StepInput[];
   products?: ProductOpt[];
   accounts?: AccountOpt[];
@@ -152,8 +154,8 @@ export default function SequenceBuilder({
   // E-mail usa o editor visual (RichTextHandle); os demais canais usam textarea.
   const bodyRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
   const editorRefs = useRef<(RichTextHandle | null)[]>([]);
-  function insertVar(i: number, v: string) {
-    const token = `{{${v}}}`;
+  function insertVar(i: number, v: string, tokenCru?: string) {
+    const token = tokenCru ?? `{{${v}}}`;
     if (steps[i]?.channel === "email") {
       editorRefs.current[i]?.insertText(token);
       return;
@@ -449,10 +451,38 @@ export default function SequenceBuilder({
                   {c.l}
                 </button>
               ))}
+              {documentos.length > 0 && (
+                <>
+                  <span className="text-subtle">·</span>
+                  <select
+                    className="rounded-lg border border-signal/40 bg-signal/10 px-2 py-0.5 text-xs text-signal"
+                    value=""
+                    onChange={(e) => {
+                      if (!e.target.value) return;
+                      insertVar(i, "", `{{documento:${e.target.value}}}`);
+                      e.currentTarget.value = "";
+                    }}
+                    title="Insere um link da proposta que é ÚNICO para cada destinatário — a abertura fica registrada por pessoa."
+                  >
+                    <option value="">+ Link de proposta…</option>
+                    {documentos.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                </>
+              )}
             </div>
             <p className="mt-1 text-[11px] text-subtle">
               Cada campo vira o dado do contato ao enviar. Os de <b>rapport</b> (Interesses, Contexto) personalizam sem custo de IA — use numa frase que também leia bem se estiver vazia.
             </p>
+            {documentos.length > 0 && (
+              <p className="mt-1 text-[11px] text-subtle">
+                <b>Link de proposta:</b> cada destinatário recebe um link próprio, então a
+                abertura é registrada <b>por pessoa</b> (vale 15 pontos e dispara a automação
+                &ldquo;abriu proposta&rdquo;). Colar o link direto no texto não faz isso — seria o
+                mesmo link para todo mundo.
+              </p>
+            )}
             {s.channel === "email" ? (
               <>
                 <div className="mt-1">

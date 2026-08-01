@@ -226,6 +226,20 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     taskId: (task as any).id ?? null,
     stepPosition: (task as any).step_position ?? null,
   };
+  // ORDEM IMPORTA: primeiro a etiqueta {{documento:…}} vira um link /s/{token}, e só
+  // depois o wrapLinks passa. Invertido, o wrapLinks embrulharia o link da proposta
+  // num /l/ e o clique deixaria de contar como ABERTURA de proposta (doc_opened) —
+  // trocaria o sinal forte pelo fraco.
+  try {
+    if (baseUrl) {
+      const { expandirDocumentos, temTagDocumento } = await import("@/lib/docLink");
+      if (temTagDocumento(bodyText)) {
+        bodyText = await expandirDocumentos(supabase, atribuicao, bodyText, baseUrl);
+      }
+    }
+  } catch {
+    /* link de documento não deve bloquear o envio */
+  }
   try {
     if (baseUrl) {
       const { wrapLinks } = await import("@/lib/linktrack");

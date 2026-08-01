@@ -4,7 +4,6 @@ import { useState, useTransition, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AssignSelect from "@/components/AssignSelect";
-import EnrollButton from "@/components/EnrollButton";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { bulkAssign, bulkEnroll } from "@/app/dashboard/contatos/bulk-actions";
 import { bulkTag, createTag } from "@/app/dashboard/contatos/tag-actions";
@@ -16,6 +15,7 @@ import { descobrirEmailsLote } from "@/app/dashboard/prospectar/actions";
 import { UltimoToque } from "@/lib/lastTouch";
 import ExportarCsv from "@/components/ExportarCsv";
 import { useExclusaoLote } from "@/components/useExclusaoLote";
+import RevisarCanaisLote from "@/components/RevisarCanaisLote";
 
 type Contact = {
   id: string;
@@ -485,11 +485,22 @@ export default function ContactsTable({
             {pending ? "..." : "Capturar do site"}
           </button>
 
+          {/* Revisar canais = WhatsApp + e-mail numa passada só, em lotes, com barra e
+              tempo. É o que resolve "quero rodar as duas em 200 contatos": a descoberta
+              de e-mail processa 6 por chamada, então sem andamento a tela parece travada. */}
+          <RevisarCanaisLote
+            alvos={contacts.filter((c) => sel.has(c.id)).map((c) => ({
+              id: c.id,
+              temEmail: !!c.email,
+              temTelefone: !!c.phone,
+            }))}
+          />
+
           <button
             className="rounded-lg border border-signal/40 bg-signal/5 px-3 py-1.5 text-sm font-medium text-signal hover:bg-signal/10"
             onClick={doVerifyWa}
             disabled={pending || apagando}
-            title="Descobre quais números têm WhatsApp (checa com e sem o 9º dígito). Exige o modo Evolution."
+            title="Só o WhatsApp, numa chamada. Para as duas verificações de uma vez, use “Revisar canais”."
           >
             {pending ? "..." : "Verificar WhatsApp"}
           </button>
@@ -498,7 +509,7 @@ export default function ContactsTable({
             className="rounded-lg border border-brand/40 bg-brand-soft/60 px-3 py-1.5 text-sm font-medium text-brand-dark hover:bg-brand-soft"
             onClick={doDescobrirEmail}
             disabled={pending || apagando}
-            title="Testa os padrões de e-mail (nome@domínio) no servidor do destinatário e só grava o que for confirmado. Precisa do contato SEM e-mail e COM domínio corporativo."
+            title="Só o e-mail, um lote de 6. Para as duas verificações com andamento, use “Revisar canais”."
           >
             {pending ? "..." : "Descobrir e-mail"}
           </button>
@@ -568,11 +579,20 @@ export default function ContactsTable({
         )}
       </div>
 
-      {/* overflow-x-auto: a tabela tem 9 colunas e largura mínima maior que a área útil.
-          Sem isso ela empurrava a PÁGINA INTEIRA para o lado — por isso só cabia a 70%
-          de zoom. Agora quem rola é a tabela, não a tela. */}
+      {/* ============================================================
+          A COLUNA "AÇÃO" SAIU
+          
+          Ela carregava um botão de inscrever em cadência por LINHA — 200 botões numa
+          página, cada um com sua lista de cadências, para uma ação que quase nunca é
+          feita um contato de cada vez. Era a coluna que empurrava a tabela além da
+          largura da tela (a causa do "só cabe a 70%"), e a mais cara de renderizar.
+          
+          A mesma ação continua existindo, e melhor: marque as linhas e ela aparece na
+          barra de seleção, valendo para todos de uma vez. Para um contato só, o nome
+          leva à ficha, que tem tudo.
+          ============================================================ */}
       <div className="card overflow-x-auto">
-        <table className="w-full min-w-[1040px] text-sm">
+        <table className="w-full min-w-[880px] text-sm">
           <thead className="border-b border-line text-left text-subtle">
             <tr>
               <th className="px-3 py-3">
@@ -585,7 +605,6 @@ export default function ContactsTable({
               <th className="px-4 py-3 font-medium" title="Quanto o contato está engajado. Quente a partir de 25.">Score</th>
               <th className="px-4 py-3 font-medium" title="Última atividade com este contato.">Último toque</th>
               <th className="px-4 py-3 font-medium">Responsável</th>
-              <th className="px-4 py-3 font-medium text-right">Ação</th>
             </tr>
           </thead>
           <tbody>
@@ -712,9 +731,6 @@ export default function ContactsTable({
                   </td>
                   <td className="px-4 py-3">
                     <AssignSelect contactId={c.id} current={c.assigned_to} members={members} />
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <EnrollButton contactId={c.id} sequences={sequences} />
                   </td>
                 </tr>
               );

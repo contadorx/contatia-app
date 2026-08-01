@@ -24,6 +24,13 @@ import { findPublishedEmail } from "@/lib/webEmail";
 // (o maxDuration de 60s é declarado na página /dashboard/prospectar)
 const LOTE_EMAIL = 6;
 
+// provedores de e-mail pessoal: o domínio deles não diz nada sobre a empresa
+const GENERICOS = new Set([
+  "gmail.com", "hotmail.com", "outlook.com", "outlook.com.br", "live.com", "msn.com",
+  "yahoo.com", "yahoo.com.br", "bol.com.br", "uol.com.br", "terra.com.br", "ig.com.br",
+  "globo.com", "icloud.com", "me.com", "aol.com", "protonmail.com", "zipmail.com.br",
+]);
+
 async function ctx() {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -55,7 +62,43 @@ export async function descobrirEmailsLote(contactIds: string[]): Promise<{
   // só quem AINDA não tem e-mail e tem domínio corporativo para testar
   const alvos = ((rows as any[]) || [])
     .filter((c) => !c.email)
-    .map((c) => ({ id: c.id, name: c.name as string, dominio: dominioDe(c.company_domain || c.accounts?.domain || null) }));
+    .map((c) => ({
+      id: c.id,
+      name: c.name as string,
+      account_id: (c.account_id as string) || null,
+      dominio: dominioDe(c.company_domain || c.accounts?.domain || null),
+    }));
+
+  // ============================================================
+  // O DOMÍNIO PODE VIR DO E-MAIL DE UM COLEGA DA MESMA EMPRESA
+  //
+  // Muito contato do Radar entra sem `company_domain` — e era descartado por isso,
+  // mesmo quando OUTRO sócio da mesma empresa já tinha e-mail corporativo cadastrado.
+  // O domínio estava ali, depois do @, e ninguém olhava.
+  //
+  // Provedor genérico (gmail, hotmail…) é ignorado de propósito: testar padrões contra
+  // gmail.com não descobre nada da empresa e ainda gasta a conversa SMTP.
+  // ============================================================
+  const semDom = alvos.filter((a) => !a.dominio && a.account_id);
+  if (semDom.length) {
+    const contas = Array.from(new Set(semDom.map((a) => a.account_id))) as string[];
+    const { data: irmaos } = await supabase
+      .from("contacts")
+      .select("account_id, email")
+      .in("account_id", contas.slice(0, 200))
+      .not("email", "is", null);
+    const domPorConta: Record<string, string> = {};
+    for (const ir of ((irmaos as any[]) || [])) {
+      if (!ir.account_id || domPorConta[ir.account_id]) continue;
+      const d = String(ir.email || "").split("@")[1]?.trim().toLowerCase() || "";
+      if (d && !GENERICOS.has(d)) domPorConta[ir.account_id] = d;
+    }
+    for (const a of semDom) {
+      const d = a.account_id ? domPorConta[a.account_id] : "";
+      if (d) a.dominio = d;
+    }
+  }
+
   const comDominio = alvos.filter((c) => c.dominio);
   const semDominio = alvos.length - comDominio.length;
 

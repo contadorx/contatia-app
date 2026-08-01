@@ -80,13 +80,20 @@ export async function sendQuickEmail(contactId: string, subject: string, body: s
       : "Limite diário atingido em todas as caixas (Envio Seguro). Tente amanhã." };
   }
 
-  // links rastreados
+  // links rastreados + proposta por destinatário + pixel de abertura
   let bodyText = body;
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+  const atribuicao = { tenantId: tenant_id, contactId };
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+    if (baseUrl) {
+      const { expandirDocumentos, temTagDocumento } = await import("@/lib/docLink");
+      if (temTagDocumento(bodyText)) bodyText = await expandirDocumentos(supabase, atribuicao, bodyText, baseUrl);
+    }
+  } catch { /* link de documento não bloqueia o envio */ }
+  try {
     if (baseUrl) {
       const { wrapLinks } = await import("@/lib/linktrack");
-      bodyText = await wrapLinks(supabase, { tenantId: tenant_id, contactId, body: bodyText, baseUrl });
+      bodyText = await wrapLinks(supabase, { ...atribuicao, body: bodyText, baseUrl });
     }
   } catch { /* rastreio não bloqueia o envio */ }
 
@@ -98,8 +105,17 @@ export async function sendQuickEmail(contactId: string, subject: string, body: s
   const sigRendered = signature?.trim() ? renderTemplate(signature, { name: (contact as any).name, company: null, ...(contact as any) }) : "";
   // corpo + assinatura, ciente de HTML (ver task-actions / lib/richtext)
   const built = buildEmailHtml(bodyText, sigRendered);
-  const html = built.html;
+  let html = built.html;
   bodyText = built.text;
+
+  // pixel de abertura também no envio avulso (mesma regra: só em corpo HTML)
+  if (html && baseUrl) {
+    try {
+      const { tagDePixel } = await import("@/lib/aberturas");
+      const tag = await tagDePixel(supabase, atribuicao, baseUrl);
+      if (tag) html = html.includes("</body>") ? html.replace("</body>", `${tag}</body>`) : html + tag;
+    } catch { /* rastreio nunca impede o envio */ }
+  }
 
   const { sendEmail } = await import("@/lib/mailer");
   try {

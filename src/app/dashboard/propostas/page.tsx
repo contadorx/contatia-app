@@ -26,7 +26,9 @@ export default async function Propostas({
     supabase.from("contacts").select("id, name").order("name", { ascending: true }).limit(500),
     supabase
       .from("document_shares")
-      .select("id, token, total_opens, first_open_at, sent_at, contacts(name), documents(name)")
+      // select("*"): sequence_id/step_position nascem na 0109 — pedir pelo nome
+      // esvaziaria a tabela inteira antes da migration.
+      .select("*, contacts(name), documents(name)")
       .order("sent_at", { ascending: false })
       .limit(50),
   ]);
@@ -40,6 +42,13 @@ export default async function Propostas({
   const tiposExistentes = Array.from(new Set(docsTodos.map((d) => d.type).filter(Boolean))) as string[];
   const contactList = (contacts as { id: string; name: string }[]) || [];
   const sharesTodos = (shares as any[]) || [];
+  // nome da cadência que gerou cada envio (quando veio de {{documento:…}} num passo)
+  const seqIds = Array.from(new Set(sharesTodos.map((s: any) => s.sequence_id).filter(Boolean)));
+  const nomeSeq: Record<string, string> = {};
+  if (seqIds.length) {
+    const { data: sq } = await supabase.from("sequences").select("id, name").in("id", seqIds as string[]);
+    for (const x of ((sq as any[]) || [])) nomeSeq[x.id] = x.name;
+  }
   const shareList = sharesTodos.filter((s: any) => {
     if (envioF === "abertos" && !(s.total_opens > 0)) return false;
     if (envioF === "naoabertos" && s.total_opens > 0) return false;
@@ -152,6 +161,7 @@ export default async function Propostas({
                 <tr>
                   <th className="px-4 py-3 font-medium">Documento</th>
                   <th className="px-4 py-3 font-medium">Contato</th>
+                  <th className="px-4 py-3 font-medium">Origem</th>
                   <th className="px-4 py-3 font-medium">Aberturas</th>
                   <th className="px-4 py-3 font-medium">1ª abertura</th>
                 </tr>
@@ -161,6 +171,11 @@ export default async function Propostas({
                   <tr key={s.id} className="border-b border-line last:border-0">
                     <td className="px-4 py-3">{s.documents?.name || "—"}</td>
                     <td className="px-4 py-3 text-subtle">{s.contacts?.name || "—"}</td>
+                    <td className="px-4 py-3 text-xs text-subtle">
+                      {s.sequence_id && nomeSeq[s.sequence_id]
+                        ? <>{nomeSeq[s.sequence_id]}{s.step_position != null ? ` · passo ${s.step_position + 1}` : ""}</>
+                        : "envio manual"}
+                    </td>
                     <td className="px-4 py-3">
                       <span className={s.total_opens > 0 ? "font-semibold text-signal" : "text-subtle"}>{s.total_opens || 0}</span>
                     </td>

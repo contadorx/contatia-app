@@ -25,6 +25,18 @@ const ICONE: Record<string, string> = {
   sem_worker: "⚙",
 };
 
+// provedores de e-mail pessoal: o domínio deles não diz nada sobre a empresa
+const GENERICOS = new Set([
+  "gmail.com", "hotmail.com", "outlook.com", "outlook.com.br", "live.com", "msn.com",
+  "yahoo.com", "yahoo.com.br", "bol.com.br", "uol.com.br", "terra.com.br", "ig.com.br",
+  "globo.com", "icloud.com", "me.com", "aol.com", "protonmail.com", "zipmail.com.br",
+]);
+
+function dominioDoEmail(email?: string | null): string {
+  const d = (email || "").split("@")[1]?.trim().toLowerCase() || "";
+  return d && !GENERICOS.has(d) ? d : "";
+}
+
 const COR: Record<string, string> = {
   valid: "border-signal/30 bg-signal/10 text-signal",
   published: "border-brand/30 bg-brand-soft text-brand-dark",
@@ -54,7 +66,18 @@ export function EmailFinder({
   revisao?: boolean;
   emailAtual?: string | null;
 }) {
-  const [dominio, setDominio] = useState(companyDomain || "");
+  // ============================================================
+  // O DOMÍNIO NÃO PRECISA SER DIGITADO
+  //
+  // Ao abrir a revisão de um contato que JÁ tem e-mail, o campo vinha vazio e pedia o
+  // domínio — sendo que ele está bem ali, depois do @. Perguntar o que já se sabe é
+  // atrito puro. Ordem: o domínio cadastrado da empresa (mais confiável, é o
+  // corporativo) e, na falta dele, o domínio do e-mail atual.
+  //
+  // Provedor genérico (gmail, hotmail…) NÃO serve: testar padrões contra o gmail.com
+  // não descobre nada sobre a empresa e ainda gasta a conversa SMTP.
+  // ============================================================
+  const [dominio, setDominio] = useState(companyDomain || dominioDoEmail(emailAtual) || "");
   const [res, setRes] = useState<ResultadoBusca | null>(null);
   const [pending, start] = useTransition();
   const [verDetalhes, setVerDetalhes] = useState(false);

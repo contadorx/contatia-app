@@ -26,7 +26,12 @@ export async function wrapLinks(
 ): Promise<string> {
   const { tenantId, contactId, body, baseUrl } = params;
   if (!body) return body;
-  const urls = Array.from(new Set((body.match(URL_RE) || []))).filter((u) => !u.includes("/l/"));
+  // Pula o que já é rastreado: /l/ (este mesmo mecanismo) e /s/ (link de proposta por
+  // destinatário). Embrulhar um /s/ num /l/ trocaria a ABERTURA DE PROPOSTA — 15 pontos,
+  // dispara automação doc_opened — por um clique genérico de 10.
+  const urls = Array.from(new Set((body.match(URL_RE) || []))).filter(
+    (u) => !u.includes("/l/") && !u.includes("/s/")
+  );
   if (!urls.length) return body;
 
   const map: Record<string, string> = {};

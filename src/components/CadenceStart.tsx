@@ -10,12 +10,12 @@ type AccountOpt = { id: string; from_email: string; display_name?: string | null
 
 // Entrada única "Começar": três caminhos claros (do zero / com IA / template).
 // Ao escolher, revela o construtor certo; ao terminar/cancelar, volta às opções.
-export default function CadenceStart({ templates, products = [], accounts = [] }: { templates: Template[]; products?: ProductOpt[]; accounts?: AccountOpt[] }) {
+export default function CadenceStart({ templates, products = [], accounts = [], documentos = [] }: { templates: Template[]; products?: ProductOpt[]; accounts?: AccountOpt[]; documentos?: { id: string; name: string }[] }) {
   const [mode, setMode] = useState<"idle" | "scratch" | "ai" | "template">("idle");
   const back = () => setMode("idle");
 
-  if (mode === "scratch") return <SequenceBuilder autoOpen onDone={back} products={products} accounts={accounts} />;
-  if (mode === "ai") return <SequenceBuilder autoOpen autoAi onDone={back} products={products} accounts={accounts} />;
+  if (mode === "scratch") return <SequenceBuilder autoOpen onDone={back} products={products} accounts={accounts} documentos={documentos} />;
+  if (mode === "ai") return <SequenceBuilder autoOpen autoAi onDone={back} products={products} accounts={accounts} documentos={documentos} />;
   if (mode === "template") return <TemplateGallery templates={templates} autoOpen onDone={back} />;
 
   const opts: { key: "scratch" | "ai" | "template"; icon: string; title: string; desc: string }[] = [

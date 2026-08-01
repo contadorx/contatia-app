@@ -10,7 +10,7 @@ type AccountOpt = { id: string; from_email: string; display_name?: string | null
 
 // Botão "editar" numa cadência salva → carrega os passos e abre o construtor
 // em modo edição (mesma UI de criar). Ao salvar/fechar, recarrega a lista.
-export default function EditSequenceButton({ sequenceId, products = [], accounts = [] }: { sequenceId: string; products?: ProductOpt[]; accounts?: AccountOpt[] }) {
+export default function EditSequenceButton({ sequenceId, products = [], accounts = [], documentos = [] }: { sequenceId: string; products?: ProductOpt[]; accounts?: AccountOpt[]; documentos?: { id: string; name: string }[] }) {
   const router = useRouter();
   const [data, setData] = useState<{ name: string; audience: string; goal: string; steps: StepInput[]; product_id: string; email_account_id: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -25,6 +25,7 @@ export default function EditSequenceButton({ sequenceId, products = [], accounts
           initialName={data.name}
           initialAudience={data.audience}
           initialGoal={data.goal}
+          documentos={documentos}
           initialSteps={data.steps}
           initialProductId={data.product_id}
           initialEmailAccountId={data.email_account_id}
