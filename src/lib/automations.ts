@@ -21,7 +21,7 @@ export async function runAutomations(
 
   const { data: rules } = await db
     .from("automations")
-    .select("id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, action_owner, action_product, product_id, source_seq, priority, stop_on_match, end_current, set_state, cond_state, cond_owner_id, cond_has_tag, cond_not_tag")
+    .select("*")   // "*" de propósito: ver nota sobre colunas novas no fim do arquivo
     .eq("tenant_id", tenantId)
     .eq("is_active", true)
     .eq("trigger_type", trigger)
@@ -183,10 +183,89 @@ async function applyAction(
       await db.from("contacts").update({ score: (c?.score || 0) + bump }).eq("id", contactId);
       return true;
     }
+    // ============================================================
+    // BUG QUE ESTAVA AQUI: a coluna se chama `primary_contact_id`.
+    //
+    // Este filtro usava `contact_id`, que NÃO EXISTE em `opportunities`. O PostgREST
+    // devolvia erro, o erro era ignorado, e a função retornava `true` assim mesmo — ou
+    // seja, a automação "mover para estágio" era registrada como EXECUTADA e não movia
+    // nada. Provavelmente nunca funcionou. (A ação vizinha, `set_product`, sempre usou
+    // o nome certo — foi a comparação entre as duas que revelou.)
+    //
+    // Agora o erro do banco derruba a ação em vez de virar sucesso silencioso, e a
+    // ação só conta como executada se ALGUMA oportunidade tiver sido movida.
+    // ============================================================
     case "move_stage": {
       if (!rule.action_stage) return false;
-      // move a oportunidade aberta do contato (se houver)
-      await db.from("opportunities").update({ stage_id: rule.action_stage }).eq("contact_id", contactId).eq("status", "open");
+      const { data: movidas, error: errMove } = await db
+        .from("opportunities")
+        .update({ stage_id: rule.action_stage })
+        .eq("primary_contact_id", contactId)
+        .eq("status", "open")
+        .select("id");
+      if (errMove) return false;
+      return ((movidas as any[]) || []).length > 0;
+    }
+
+    // ============================================================
+    // CRIAR OPORTUNIDADE — o que faltava para "respondeu → vira negócio"
+    //
+    // `move_stage` só serve para quem JÁ tem negócio aberto. O caso mais comum de
+    // todos — o prospect reagiu e ainda não existe oportunidade nenhuma — não tinha
+    // como ser automatizado.
+    //
+    // A trava que importa: **um negócio aberto por contato**. Sem ela, cada abertura
+    // de e-mail criaria uma oportunidade nova e o funil viraria lixo em uma semana.
+    // Se já houver aberta, a regra não faz nada e diz isso no registro.
+    // ============================================================
+    case "create_opportunity": {
+      const { data: jaTem } = await db
+        .from("opportunities")
+        .select("id")
+        .eq("primary_contact_id", contactId)
+        .eq("status", "open")
+        .limit(1);
+      if (((jaTem as any[]) || []).length > 0) return false;  // já existe negócio aberto
+
+      const { data: ct } = await db
+        .from("contacts")
+        .select("id, name, company, account_id, assigned_to, accounts(name)")
+        .eq("id", contactId)
+        .maybeSingle();
+      if (!ct) return false;
+
+      // estágio: o configurado na regra, senão o PRIMEIRO do funil (position asc).
+      let stageId = rule.action_stage || null;
+      if (!stageId) {
+        const { data: st } = await db
+          .from("pipeline_stages")
+          .select("id")
+          .order("position", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        stageId = (st as any)?.id || null;
+      }
+      if (!stageId) return false;  // funil sem estágio: não dá para criar
+
+      const nome = ((ct as any).name as string) || "contato";
+      const empresa =
+        ((ct as any).accounts?.name as string) || ((ct as any).company as string) || "";
+      const titulo = (rule.action_title || "Oportunidade — {contato}")
+        .replace(/\{contato\}/g, nome)
+        .replace(/\{empresa\}/g, empresa || nome);
+
+      const { error: errIns } = await db.from("opportunities").insert({
+        tenant_id: tenantId,
+        primary_contact_id: contactId,
+        account_id: (ct as any).account_id || null,
+        owner_id: rule.action_owner || (ct as any).assigned_to || null,
+        title: titulo,
+        value_mrr: rule.action_value != null ? Number(rule.action_value) : 0,
+        stage_id: stageId,
+        status: "open",
+        product_id: rule.action_product || rule.product_id || null,
+      } as any);
+      if (errIns) return false;
       return true;
     }
     case "assign_owner": {
@@ -249,7 +328,7 @@ export async function runTimeAutomations(admin: DB): Promise<{ ran: number }> {
   let ran = 0;
   const { data: rules } = await admin
     .from("automations")
-    .select("id, tenant_id, trigger_type, trigger_value, action_type, action_seq, action_stage, action_tag, action_owner, action_product, product_id, source_seq, end_current, set_state, cond_state, cond_owner_id, cond_has_tag, cond_not_tag")
+    .select("*")   // idem
     .eq("is_active", true)
     .in("trigger_type", TIME_TRIGGERS);
 
@@ -522,3 +601,16 @@ async function enrollViaEngine(
   });
   if (tasks.length) await db.from("tasks").insert(tasks);
 }
+
+// ============================================================
+// POR QUE AS CONSULTAS DE REGRAS USAM select("*")
+//
+// `action_value` e `action_title` só existem depois da migration 0107. Se elas fossem
+// pedidas PELO NOME, o PostgREST recusaria a consulta inteira enquanto a migration não
+// estivesse aplicada — e sem regras carregadas o motor de automação simplesmente para,
+// sem erro visível em lugar nenhum.
+//
+// Já aconteceu neste projeto por outro caminho (events.user_id, 31/07): uma coluna nova
+// pedida pelo nome fez 257 envios sumirem do registro. A regra que ficou: coluna nova
+// não entra em select nomeado enquanto a migration puder não estar aplicada.
+// ============================================================

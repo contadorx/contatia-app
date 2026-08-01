@@ -3,7 +3,19 @@
 import { useState, useTransition } from "react";
 import { createOpportunityForContact } from "@/app/dashboard/contatos/ficha-actions";
 
-export default function NewOpportunityForContact({ contactId, defaultTitle }: { contactId: string; defaultTitle: string }) {
+// `compacto` deixa o botão caber onde o espaço é curto (cabeçalho da conversa na caixa,
+// linha de reunião) sem virar um segundo componente com a mesma lógica.
+export default function NewOpportunityForContact({
+  contactId,
+  defaultTitle,
+  compacto = false,
+  rotulo,
+}: {
+  contactId: string;
+  defaultTitle: string;
+  compacto?: boolean;
+  rotulo?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState(defaultTitle);
   const [valor, setValor] = useState("");
@@ -21,7 +33,18 @@ export default function NewOpportunityForContact({ contactId, defaultTitle }: { 
   }
 
   if (!open) {
-    return <button className="btn-brand py-1.5 text-sm" onClick={() => setOpen(true)}>+ Nova oportunidade</button>;
+    return compacto ? (
+      <button
+        type="button"
+        className="rounded-lg border border-brand/40 px-2 py-1 text-xs font-semibold text-brand-dark hover:bg-brand-soft"
+        onClick={() => setOpen(true)}
+        title="Abre um negócio no pipeline com este contato."
+      >
+        {rotulo || "+ Negócio"}
+      </button>
+    ) : (
+      <button className="btn-brand py-1.5 text-sm" onClick={() => setOpen(true)}>+ Nova oportunidade</button>
+    );
   }
 
   return (

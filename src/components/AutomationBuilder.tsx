@@ -28,6 +28,7 @@ const ACTIONS = [
   { v: "enroll", l: "Inscrever numa cadência" },
   { v: "pause_all", l: "Pausar cadências ativas" },
   { v: "move_stage", l: "Mover para um estágio" },
+  { v: "create_opportunity", l: "Criar oportunidade no pipeline" },
   { v: "mark_hot", l: "Marcar como quente" },
   { v: "add_tag", l: "Aplicar uma tag" },
   { v: "assign_owner", l: "Trocar o responsável (dono)" },
@@ -46,12 +47,14 @@ export type AutoForm = {
   source_seq: string; priority: string; set_state: string; cond_state: string;
   cond_owner_id: string; cond_has_tag: string; cond_not_tag: string;
   action_owner: string; action_product: string; stop_on_match: boolean; end_current: boolean;
+  action_value: string; action_title: string;
 };
 export const BLANK_FORM: AutoForm = {
   name: "", trigger_type: "doc_opened", trigger_value: "", action_type: "enroll",
   action_seq: "", action_stage: "", action_tag: "", product_id: "", source_seq: "",
   priority: "100", set_state: "", cond_state: "", cond_owner_id: "", cond_has_tag: "",
   cond_not_tag: "", action_owner: "", action_product: "", stop_on_match: false, end_current: false,
+  action_value: "", action_title: "",
 };
 
 export default function AutomationBuilder({
@@ -211,6 +214,40 @@ export default function AutomationBuilder({
               onValueChange={(v) => up("action_stage", v)}
               options={stages.map((s): SmartOption => ({ value: s.id, label: s.name }))}
             />
+          )}
+          {f.action_type === "create_opportunity" && (
+            <div className="mt-2 space-y-2">
+              <SmartSelect
+                placeholder="Estágio inicial (vazio = o primeiro do funil)"
+                clearable
+                value={f.action_stage}
+                onValueChange={(v) => up("action_stage", v)}
+                options={stages.map((s): SmartOption => ({ value: s.id, label: s.name }))}
+              />
+              <input
+                className="input"
+                value={f.action_title}
+                onChange={(e) => up("action_title", e.target.value)}
+                placeholder="Título do negócio (padrão: Oportunidade — {contato})"
+              />
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step="0.01"
+                value={f.action_value}
+                onChange={(e) => up("action_value", e.target.value)}
+                placeholder="Valor mensal estimado (opcional)"
+              />
+              <p className="rounded-lg bg-white/60 p-2 text-[11px] text-subtle">
+                No título dá para usar <b>{"{contato}"}</b> e <b>{"{empresa}"}</b>.
+                <br />
+                <b>Só cria se o contato NÃO tiver negócio aberto.</b> Sem essa trava, cada
+                abertura de e-mail viraria uma oportunidade nova e o funil viraria lixo em
+                uma semana. O dono é o responsável pelo contato, salvo se você escolher outro
+                em Avançado.
+              </p>
+            </div>
           )}
           {f.action_type === "add_tag" && (
             <SmartSelect

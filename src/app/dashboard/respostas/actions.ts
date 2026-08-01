@@ -158,7 +158,7 @@ async function porFatias<T>(itens: T[], fn: (fatia: T[]) => Promise<any>): Promi
 // Aplica uma operação (apagar ou marcar como lida) às conversas selecionadas.
 async function operarConversas(
   alvos: AlvoConversa[],
-  op: "excluir" | "marcarLida"
+  op: "excluir" | "marcarLida" | "arquivar" | "desarquivar"
 ): Promise<{ ok?: boolean; whatsapp?: number; email?: number; mensagens?: number; error?: string }> {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
@@ -180,6 +180,10 @@ async function operarConversas(
   const aplicar = (q: any) =>
     op === "excluir"
       ? q.delete({ count: "exact" })
+      : op === "arquivar"
+      ? q.update({ archived_at: agora }, { count: "exact" })
+      : op === "desarquivar"
+      ? q.update({ archived_at: null }, { count: "exact" })
       : q.update({ read_at: agora }, { count: "exact" });
 
   let mensagens = 0;
@@ -210,6 +214,8 @@ async function operarConversas(
       error:
         op === "excluir"
           ? "Nenhuma mensagem foi apagada. As conversas selecionadas não bateram com nada no banco — me avise se isso se repetir."
+          : op === "arquivar" || op === "desarquivar"
+          ? "Nada mudou. Se a coluna de arquivo ainda não existe no banco, falta aplicar a migration 0107."
           : "Nenhuma conversa foi marcada como lida (talvez já estivessem todas lidas).",
     };
   }
@@ -236,6 +242,21 @@ async function operarConversas(
 
 export async function excluirConversas(alvos: AlvoConversa[]) {
   return operarConversas(alvos, "excluir");
+}
+
+// ============================================================
+// ARQUIVAR — o meio-termo que faltava
+//
+// A caixa só tinha "excluir": destrutivo, definitivo, e apaga histórico de conversa
+// que às vezes você quer manter. Quem só quer LIMPAR A TELA era obrigado a apagar de
+// verdade. Arquivar tira da caixa e mantém tudo no banco (coluna `archived_at`, 0107).
+// Reversível pelo botão "ver arquivadas".
+// ============================================================
+export async function arquivarConversas(alvos: AlvoConversa[]) {
+  return operarConversas(alvos, "arquivar");
+}
+export async function desarquivarConversas(alvos: AlvoConversa[]) {
+  return operarConversas(alvos, "desarquivar");
 }
 
 export async function marcarConversasLidas(alvos: AlvoConversa[]) {

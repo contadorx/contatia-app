@@ -35,13 +35,23 @@ type RegraInput = {
   cond_not_tag?: string;
   action_owner?: string;
   action_product?: string;
+  action_value?: string;
+  action_title?: string;
 };
+
+// Colunas que só existem depois da migration 0107. Ficam listadas aqui porque a
+// gravação sabe REMOVÊ-LAS e tentar de novo se o banco ainda não as tiver — ver
+// `gravar()` abaixo.
+const COLUNAS_0107 = ["action_value", "action_title"] as const;
 
 // Valida + monta a linha da regra (compartilhado por criar e editar).
 function montarRegra(input: RegraInput): { row?: Record<string, unknown>; error?: string } {
   if (!input.name.trim()) return { error: "Dê um nome à automação." };
   if (input.action_type === "enroll" && !input.action_seq) return { error: "Escolha a cadência para inscrever." };
   if (input.action_type === "move_stage" && !input.action_stage) return { error: "Escolha o estágio de destino." };
+  if (input.action_type === "create_opportunity" && input.action_value && Number(input.action_value) < 0) {
+    return { error: "O valor da oportunidade não pode ser negativo." };
+  }
   if (input.action_type === "add_tag" && !input.action_tag) return { error: "Escolha a tag a aplicar." };
   if (input.action_type === "set_product" && !input.action_product) return { error: "Escolha o produto de destino." };
   if (input.action_type === "mark_state" && !(input.set_state || "").trim()) return { error: "Informe o estado a marcar (ex.: dormente)." };
@@ -56,7 +66,7 @@ function montarRegra(input: RegraInput): { row?: Record<string, unknown>; error?
       trigger_value: input.trigger_value || null,
       action_type: input.action_type,
       action_seq: input.action_type === "enroll" ? input.action_seq : null,
-      action_stage: input.action_type === "move_stage" ? input.action_stage : null,
+      action_stage: ["move_stage", "create_opportunity"].includes(input.action_type) ? input.action_stage || null : null,
       action_tag: (input.action_type === "add_tag" || input.action_type === "suppress") ? input.action_tag || null : null,
       product_id: input.product_id || null,
       source_seq: input.trigger_type === "cadence_completed" ? input.source_seq || null : null,
@@ -68,10 +78,43 @@ function montarRegra(input: RegraInput): { row?: Record<string, unknown>; error?
       cond_owner_id: input.cond_owner_id || null,
       cond_has_tag: input.cond_has_tag || null,
       cond_not_tag: input.cond_not_tag || null,
-      action_owner: input.action_type === "assign_owner" ? input.action_owner || null : null,
+      action_owner: ["assign_owner", "create_opportunity"].includes(input.action_type) ? input.action_owner || null : null,
       action_product: input.action_type === "set_product" ? input.action_product || null : null,
+      // criar oportunidade: título e valor (o dono sai de action_owner, em Avançado)
+      action_value:
+        input.action_type === "create_opportunity" && input.action_value !== "" && input.action_value != null
+          ? Number(input.action_value)
+          : null,
+      action_title:
+        input.action_type === "create_opportunity" ? (input.action_title || "").trim() || null : null,
     },
   };
+}
+
+// ============================================================
+// GRAVAR COM TOLERÂNCIA À MIGRATION NÃO APLICADA
+//
+// `action_value` e `action_title` nascem na 0107. Se o app subir antes da migration,
+// um insert que cite essas colunas falha inteiro — e a pessoa não consegue salvar
+// automação NENHUMA, nem as que não usam os campos novos.
+//
+// A regra que ficou do bug dos 257 envios perdidos (31/07): não condicionar ao código
+// de erro — o PostgREST devolve PGRST204, não o 42703 do Postgres. Falhou? Tira as
+// colunas novas e tenta de novo. Se a segunda também falhar, aí sim é erro de verdade.
+// ============================================================
+async function gravar(exec: (linha: Record<string, unknown>) => PromiseLike<any>, row: Record<string, unknown>) {
+  const r1: any = await exec(row);
+  if (!r1?.error) return { ok: true as const };
+  const usaNovas = COLUNAS_0107.some((c) => row[c] !== undefined && row[c] !== null);
+  const semNovas = { ...row };
+  for (const c of COLUNAS_0107) delete semNovas[c];
+  const r2: any = await exec(semNovas);
+  if (!r2?.error) {
+    return usaNovas
+      ? { ok: true as const, aviso: "Salvo, mas o título e o valor da oportunidade foram ignorados: falta aplicar a migration 0107 no banco." }
+      : { ok: true as const };
+  }
+  return { ok: false as const, error: erroDb(r1.error) };
 }
 
 function erroDb(error: any): string {
@@ -85,10 +128,10 @@ export async function createAutomation(input: RegraInput) {
   const { row, error: vErr } = montarRegra(input);
   if (vErr) return { error: vErr };
   try {
-    const { error } = await supabase.from("automations").insert({ ...row, tenant_id, created_by: user_id });
-    if (error) return { error: erroDb(error) };
+    const r = await gravar((linha) => supabase.from("automations").insert(linha), { ...row!, tenant_id, created_by: user_id });
+    if (!r.ok) return { error: r.error };
     revalidatePath("/dashboard/automacoes");
-    return { ok: true };
+    return { ok: true, aviso: r.aviso };
   } catch (e: any) {
     return { error: "Falha ao salvar: " + (e?.message || String(e)) };
   }
@@ -100,10 +143,10 @@ export async function updateAutomation(id: string, input: RegraInput) {
   const { row, error: vErr } = montarRegra(input);
   if (vErr) return { error: vErr };
   try {
-    const { error } = await supabase.from("automations").update(row!).eq("id", id).eq("tenant_id", tenant_id);
-    if (error) return { error: erroDb(error) };
+    const r = await gravar((linha) => supabase.from("automations").update(linha).eq("id", id).eq("tenant_id", tenant_id), row!);
+    if (!r.ok) return { error: r.error };
     revalidatePath("/dashboard/automacoes");
-    return { ok: true };
+    return { ok: true, aviso: r.aviso };
   } catch (e: any) {
     return { error: "Falha ao salvar: " + (e?.message || String(e)) };
   }

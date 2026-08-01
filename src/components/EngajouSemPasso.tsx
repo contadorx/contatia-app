@@ -14,6 +14,7 @@
 
 import Link from "next/link";
 import EnrollButton from "@/components/EnrollButton";
+import NewOpportunityForContact from "@/components/NewOpportunityForContact";
 
 const ROTULO: Record<string, { txt: string; cls: string }> = {
   replied: { txt: "respondeu", cls: "bg-signal/15 text-signal" },
@@ -74,6 +75,7 @@ export default function EngajouSemPasso({
               {l.score >= 25 && <span className="text-xs font-semibold text-warn">score {l.score}</span>}
               <span className="ml-auto flex items-center gap-2">
                 <EnrollButton contactId={l.id} sequences={sequences} />
+                <NewOpportunityForContact contactId={l.id} defaultTitle={`Oportunidade — ${l.name}`} compacto />
                 <Link
                   href={`/dashboard/contatos/${l.id}#enviar`}
                   className="rounded-lg border border-line bg-white px-2 py-1 text-xs font-medium hover:bg-muted"

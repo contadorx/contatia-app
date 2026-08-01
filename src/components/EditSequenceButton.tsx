@@ -12,7 +12,7 @@ type AccountOpt = { id: string; from_email: string; display_name?: string | null
 // em modo edição (mesma UI de criar). Ao salvar/fechar, recarrega a lista.
 export default function EditSequenceButton({ sequenceId, products = [], accounts = [] }: { sequenceId: string; products?: ProductOpt[]; accounts?: AccountOpt[] }) {
   const router = useRouter();
-  const [data, setData] = useState<{ name: string; audience: string; steps: StepInput[]; product_id: string; email_account_id: string } | null>(null);
+  const [data, setData] = useState<{ name: string; audience: string; goal: string; steps: StepInput[]; product_id: string; email_account_id: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -24,6 +24,7 @@ export default function EditSequenceButton({ sequenceId, products = [], accounts
           editId={sequenceId}
           initialName={data.name}
           initialAudience={data.audience}
+          initialGoal={data.goal}
           initialSteps={data.steps}
           initialProductId={data.product_id}
           initialEmailAccountId={data.email_account_id}
@@ -45,7 +46,7 @@ export default function EditSequenceButton({ sequenceId, products = [], accounts
           setMsg(null);
           const r = (await loadSequence(sequenceId)) as any;
           if (r?.error) setMsg(r.error);
-          else setData({ name: r.name, audience: r.audience, steps: r.steps, product_id: r.product_id || "", email_account_id: r.email_account_id || "" });
+          else setData({ name: r.name, audience: r.audience, goal: (r as any).goal || "", steps: r.steps, product_id: r.product_id || "", email_account_id: r.email_account_id || "" });
         })}
       >
         {pending ? "abrindo..." : "editar"}

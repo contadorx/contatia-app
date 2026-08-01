@@ -15,11 +15,14 @@ import {
   blockEmailThread,
   excluirConversas,
   marcarConversasLidas,
+  arquivarConversas,
+  desarquivarConversas,
   fetchMedia,
 } from "@/app/dashboard/respostas/actions";
 import { waLink } from "@/lib/cadence";
 import RichTextEditor from "@/components/RichTextEditor";
 import TriageDecisionBar from "@/components/TriageDecisionBar";
+import NewOpportunityForContact from "@/components/NewOpportunityForContact";
 import type { ReplyIntent } from "@/lib/replyIntent";
 
 export type TriageItem = { id: string; intent: ReplyIntent };
@@ -55,11 +58,13 @@ export default function RespostasInbox({
   canReply,
   triageByContact = {},
   sequences = [],
+  verArquivadas = false,
 }: {
   threads: Thread[];
   canReply: boolean;
   triageByContact?: Record<string, TriageItem>;
   sequences?: Seq[];
+  verArquivadas?: boolean;
 }) {
   const router = useRouter();
   const [sel, setSel] = useState<string | null>(threads[0]?.key ?? null);
@@ -128,7 +133,7 @@ export default function RespostasInbox({
   }
   // Executa a ação em lote e SEMPRE devolve um recado na própria barra: quantas
   // mensagens saíram, ou o motivo de não ter saído nenhuma.
-  function agirEmLote(fn: (alvos: any[]) => Promise<any>, verbo: "excluídas" | "marcadas como lidas") {
+  function agirEmLote(fn: (alvos: any[]) => Promise<any>, verbo: "excluídas" | "marcadas como lidas" | "arquivadas" | "devolvidas à caixa") {
     const alvos = alvosSelecionados();
     if (!alvos.length) return;
     const quantas = alvos.length;
@@ -207,14 +212,24 @@ export default function RespostasInbox({
           <div className="mt-2 px-1 text-xs">
             {!selMode ? (
               // Botão de verdade, com borda: o texto cinza de antes não parecia clicável.
-              <button
-                type="button"
-                className="w-full rounded-lg border border-line bg-white px-2 py-1.5 font-semibold text-brand-dark hover:bg-brand-soft disabled:opacity-40"
-                onClick={() => { setSelMode(true); limparRecados(); }}
-                disabled={!selecionaveis.length}
-              >
-                ☑ Selecionar conversas
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="flex-1 rounded-lg border border-line bg-white px-2 py-1.5 font-semibold text-brand-dark hover:bg-brand-soft disabled:opacity-40"
+                  onClick={() => { setSelMode(true); limparRecados(); }}
+                  disabled={!selecionaveis.length}
+                >
+                  ☑ Selecionar conversas
+                </button>
+                <Link
+                  href={verArquivadas ? "/dashboard/respostas" : "/dashboard/respostas?arquivadas=1"}
+                  className={`shrink-0 rounded-lg border px-2 py-1.5 font-medium ${
+                    verArquivadas ? "border-brand bg-brand-soft text-brand-dark" : "border-line bg-white text-subtle hover:bg-muted"
+                  }`}
+                >
+                  {verArquivadas ? "← caixa" : "arquivadas"}
+                </Link>
+              </div>
             ) : (
               <div className="space-y-2 rounded-lg border border-brand/30 bg-brand-soft/40 p-2">
                 <div className="flex items-center justify-between gap-2">
@@ -245,6 +260,21 @@ export default function RespostasInbox({
                       title="Zera o não-lido dessas conversas sem abrir uma por uma."
                     >
                       {pending ? "…" : "Marcar como lida"}
+                    </button>
+                    {/* ARQUIVAR: o meio-termo. Tira da caixa sem apagar histórico —
+                        antes só existia excluir, que é definitivo. */}
+                    <button
+                      type="button"
+                      className="rounded-lg border border-line bg-white px-2 py-1 font-medium hover:bg-muted disabled:opacity-40"
+                      disabled={pending}
+                      onClick={() =>
+                        verArquivadas
+                          ? agirEmLote((a) => desarquivarConversas(a), "devolvidas à caixa")
+                          : agirEmLote((a) => arquivarConversas(a), "arquivadas")
+                      }
+                      title={verArquivadas ? "Devolve as conversas para a caixa." : "Tira da caixa sem apagar nada. Reversível em “ver arquivadas”."}
+                    >
+                      {pending ? "…" : verArquivadas ? "Desarquivar" : "Arquivar"}
                     </button>
                     <button
                       type="button"
@@ -346,9 +376,18 @@ export default function RespostasInbox({
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs">
               {active.contactId ? (
-                <Link href={`/dashboard/contatos/${active.contactId}`} className="rounded-lg border border-line px-2 py-1 text-brand-dark hover:bg-muted">
-                  Ver contato
-                </Link>
+                <>
+                  <Link href={`/dashboard/contatos/${active.contactId}`} className="rounded-lg border border-line px-2 py-1 text-brand-dark hover:bg-muted">
+                    Ver contato
+                  </Link>
+                  {/* Quem acabou de responder é o melhor candidato a virar negócio —
+                      e este era o único lugar da jornada onde não dava para abrir um. */}
+                  <NewOpportunityForContact
+                    contactId={active.contactId}
+                    defaultTitle={`Oportunidade — ${active.name}`}
+                    compacto
+                  />
+                </>
               ) : active.channel === "whatsapp" ? (
                 <button
                   className="rounded-lg border border-brand/40 px-2 py-1 font-semibold text-brand-dark hover:bg-brand-soft"

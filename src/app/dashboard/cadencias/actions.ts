@@ -43,6 +43,7 @@ export type StepInput = {
 export async function createSequence(input: {
   name: string;
   audience: string;
+  goal?: string;
   steps: StepInput[];
   product_id?: string | null;
   email_account_id?: string | null;
@@ -57,18 +58,26 @@ export async function createSequence(input: {
   if (!input.name.trim()) return { error: "Dê um nome à sequência." };
   if (!input.steps.length) return { error: "Adicione ao menos um passo." };
 
-  const { data: seq, error } = await supabase
+  // `goal` nasce na migration 0107. Se ela ainda não estiver aplicada, o insert com a
+  // coluna falha inteiro e a pessoa não consegue criar cadência NENHUMA — por isso a
+  // segunda tentativa sem o campo. Mesma regra do bug dos 257 envios: não depender do
+  // código de erro, só tentar de novo sem a coluna nova.
+  const baseSeq = {
+    tenant_id,
+    name: input.name.trim(),
+    audience: input.audience || null,
+    created_by: user_id,
+    product_id: input.product_id || null,
+    email_account_id: input.email_account_id || null,
+  };
+  let { data: seq, error } = await supabase
     .from("sequences")
-    .insert({
-      tenant_id,
-      name: input.name.trim(),
-      audience: input.audience || null,
-      created_by: user_id,
-      product_id: input.product_id || null,
-      email_account_id: input.email_account_id || null,
-    })
+    .insert({ ...baseSeq, goal: (input.goal || "").trim() || null })
     .select()
     .single();
+  if (error) {
+    ({ data: seq, error } = await supabase.from("sequences").insert(baseSeq).select().single());
+  }
   if (error) return { error: msgErro(error) };
 
   const steps = input.steps.map((s, i) => ({
@@ -92,7 +101,8 @@ export async function createSequence(input: {
 export async function loadSequence(id: string) {
   const { supabase, user_id } = await ctx();
   if (!(await canUseSequence(supabase, user_id, id))) return { error: "Cadência não encontrada." };
-  const { data: seq } = await supabase.from("sequences").select("id, name, audience, product_id, email_account_id").eq("id", id).maybeSingle();
+  // select("*"): pedir `goal` pelo nome quebraria a edição enquanto a 0107 não for aplicada.
+  const { data: seq } = await supabase.from("sequences").select("*").eq("id", id).maybeSingle();
   if (!seq) return { error: "Cadência não encontrada." };
   const { data: steps } = await supabase
     .from("sequence_steps")
@@ -103,6 +113,7 @@ export async function loadSequence(id: string) {
     ok: true,
     name: (seq as any).name || "",
     audience: (seq as any).audience || "",
+    goal: (seq as any).goal || "",
     product_id: (seq as any).product_id || "",
     email_account_id: (seq as any).email_account_id || "",
     steps: ((steps as any[]) || []).map((s) => ({
@@ -118,23 +129,27 @@ export async function loadSequence(id: string) {
 // Atualiza uma cadência salva (nome/público + substitui os passos).
 // As inscrições JÁ FEITAS não mudam — as tarefas delas foram geradas na inscrição
 // (snapshot). A edição vale para as PRÓXIMAS inscrições.
-export async function updateSequence(id: string, input: { name: string; audience: string; steps: StepInput[]; product_id?: string | null; email_account_id?: string | null }) {
+export async function updateSequence(id: string, input: { name: string; audience: string; goal?: string; steps: StepInput[]; product_id?: string | null; email_account_id?: string | null }) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace atribuído." };
   if (!(await canUseSequence(supabase, user_id, id))) return { error: "Você não pode editar esta cadência." };
   if (!input.name.trim()) return { error: "Dê um nome à sequência." };
   if (!input.steps.length) return { error: "Adicione ao menos um passo." };
 
-  const { error: e1 } = await supabase
+  const baseUpd = {
+    name: input.name.trim(),
+    audience: input.audience || null,
+    product_id: input.product_id || null,
+    email_account_id: input.email_account_id || null,
+  };
+  let { error: e1 } = await supabase
     .from("sequences")
-    .update({
-      name: input.name.trim(),
-      audience: input.audience || null,
-      product_id: input.product_id || null,
-      email_account_id: input.email_account_id || null,
-    })
+    .update({ ...baseUpd, goal: (input.goal || "").trim() || null })
     .eq("id", id)
     .eq("tenant_id", tenant_id);
+  if (e1) {
+    ({ error: e1 } = await supabase.from("sequences").update(baseUpd).eq("id", id).eq("tenant_id", tenant_id));
+  }
   if (e1) return { error: msgErro(e1) };
 
   // M2: delete + insert dos passos numa ÚNICA transação (RPC) — se algo falhar, os

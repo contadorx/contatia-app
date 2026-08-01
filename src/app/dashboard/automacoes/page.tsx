@@ -11,7 +11,8 @@ export default async function Automacoes() {
     // SEM embeds: automations tem DUAS FKs para sequences (action_seq e source_seq), o que
     // torna qualquer embed "sequences(...)" ambíguo e quebra a consulta inteira (lista vazia).
     // Buscamos as colunas cruas e resolvemos os nomes com mapas no painel — à prova de embed.
-    supabase.from("automations").select("id, name, trigger_type, trigger_value, action_type, is_active, product_id, cond_state, set_state, action_seq, action_stage, source_seq, action_tag, cond_owner_id, cond_has_tag, cond_not_tag, action_owner, action_product, priority, stop_on_match, end_current").order("priority", { ascending: true }).order("created_at", { ascending: false }),
+    // "*" também protege contra coluna nova (0107) ainda não aplicada
+    supabase.from("automations").select("*").order("priority", { ascending: true }).order("created_at", { ascending: false }),
     supabase.from("sequences").select("id, name").eq("is_active", true),
     supabase.from("sequences").select("id, name"),
     supabase.from("pipeline_stages").select("id, name").order("position", { ascending: true }),

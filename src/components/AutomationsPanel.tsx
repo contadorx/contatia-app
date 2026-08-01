@@ -19,6 +19,7 @@ const ACTION_LABEL: Record<string, string> = {
   enroll: "inscrever na cadência", pause_all: "pausar cadências", move_stage: "mover de estágio",
   mark_hot: "marcar quente", add_tag: "aplicar tag", assign_owner: "trocar responsável",
   set_product: "trocar produto", mark_state: "marcar estado", suppress: "suprimir (parar definitivo)",
+  create_opportunity: "criar oportunidade no pipeline",
 };
 const DIAS_TRIGGERS = ["no_activity_days", "cadence_completed", "opportunity_lost", "opportunity_won", "state_days"];
 
@@ -33,6 +34,8 @@ const EXAMPLES: { cat: string; name: string; desc: string; needs?: string; form:
   { cat: "sinais", name: "Abriu a proposta → marcar quente", desc: "Quem abre a proposta demonstra intenção.", form: { trigger_type: "doc_opened", action_type: "mark_hot" } },
   { cat: "sinais", name: "Clicou no link → marcar quente", desc: "Clique é sinal.", form: { trigger_type: "link_clicked", action_type: "mark_hot" } },
   { cat: "sinais", name: "Score atingiu 25 → mover no funil", desc: "Engajamento cruzou 25.", needs: "escolha o estágio", form: { trigger_type: "score_gte", trigger_value: "25", action_type: "move_stage" } },
+  { cat: "sinais", name: "Respondeu → abrir negócio no funil", desc: "Quem responde vira oportunidade na hora — e só se ainda não tiver uma aberta.", needs: "confira o estágio inicial", form: { trigger_type: "replied", action_type: "create_opportunity" } },
+  { cat: "sinais", name: "Abriu a proposta → abrir negócio", desc: "Abrir proposta é intenção de compra; o funil deve refletir isso.", needs: "confira o estágio inicial", form: { trigger_type: "doc_opened", action_type: "create_opportunity" } },
   { cat: "sinais", name: "Recebeu tag → acelerar", desc: "Ao receber a tag, entra numa cadência de aceleração.", needs: "escolha a tag e a cadência", form: { trigger_type: "tag_added", action_type: "enroll", end_current: true } },
   // B) Reciclagem
   { cat: "reciclagem", name: "Fim de cadência → dormente", desc: "Terminou sem resposta → marca dormente.", form: { trigger_type: "cadence_completed", trigger_value: "0", action_type: "mark_state", set_state: "dormente", priority: "50" } },
@@ -67,6 +70,8 @@ function ruleToForm(r: Rule): AutoForm {
     cond_not_tag: r.cond_not_tag || "",
     action_owner: r.action_owner || "",
     action_product: r.action_product || "",
+    action_value: (r as any).action_value != null ? String((r as any).action_value) : "",
+    action_title: (r as any).action_title || "",
     stop_on_match: !!r.stop_on_match,
     end_current: !!r.end_current,
   };

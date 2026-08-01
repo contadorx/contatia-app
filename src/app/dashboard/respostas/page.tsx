@@ -3,8 +3,13 @@ import RespostasInbox, { type Thread, type TriageItem, type Seq } from "@/compon
 
 export const dynamic = "force-dynamic";
 
-export default async function Respostas() {
+export default async function Respostas({
+  searchParams,
+}: {
+  searchParams: { arquivadas?: string };
+}) {
   const supabase = createClient();
+  const verArquivadas = searchParams?.arquivadas === "1";
 
   const { data: tenant } = await supabase.from("tenants").select("whatsapp_mode").maybeSingle();
   const canReply = (((tenant as any)?.whatsapp_mode as string) || "assistido") === "evolution";
@@ -12,12 +17,14 @@ export default async function Respostas() {
   const [{ data: msgs }, { data: emails }, { data: triage }, { data: sequences }] = await Promise.all([
     supabase
       .from("whatsapp_messages")
-      .select("id, contact_id, phone, direction, text, media_type, read_at, created_at, contacts(name)")
+      // select("*") + filtro em memória: `archived_at` nasce na 0107, e filtrar por
+      // uma coluna que ainda não existe deixaria a CAIXA INTEIRA vazia, sem erro visível.
+      .select("*, contacts(name)")
       .order("created_at", { ascending: false })
       .limit(1000),
     supabase
       .from("email_messages")
-      .select("id, contact_id, email, direction, subject, text, read_at, created_at, contacts(name)")
+      .select("*, contacts(name)")
       .order("created_at", { ascending: false })
       .limit(1000),
     supabase
@@ -38,8 +45,11 @@ export default async function Respostas() {
 
   const map = new Map<string, Thread>();
 
+  // arquivadas ficam fora da caixa por padrão (e só elas aparecem em ?arquivadas=1)
+  const visivel = (m: any) => (verArquivadas ? !!m.archived_at : !m.archived_at);
+
   // conversas de WHATSAPP (por contato, ou por telefone quando não há contato)
-  for (const m of ((msgs as any[]) || []).slice().reverse()) {
+  for (const m of ((msgs as any[]) || []).filter(visivel).slice().reverse()) {
     const key = m.contact_id ? `w:c:${m.contact_id}` : `w:p:${m.phone || "?"}`;
     let th = map.get(key);
     if (!th) {
@@ -53,7 +63,7 @@ export default async function Respostas() {
   }
 
   // conversas de E-MAIL (por contato, ou por endereço quando não há contato)
-  for (const m of ((emails as any[]) || []).slice().reverse()) {
+  for (const m of ((emails as any[]) || []).filter(visivel).slice().reverse()) {
     const key = m.contact_id ? `e:c:${m.contact_id}` : `e:a:${(m.email || "?").toLowerCase()}`;
     let th = map.get(key);
     if (!th) {
@@ -76,7 +86,13 @@ export default async function Respostas() {
         Caixa única das respostas — WhatsApp e e-mail no mesmo lugar. Quem respondeu e precisa de decisão aparece marcado com <b>decidir</b>: você resolve dentro da própria conversa.
       </p>
       <div className="mt-6">
-        <RespostasInbox threads={threads} canReply={canReply} triageByContact={triageByContact} sequences={seqs} />
+        <RespostasInbox
+          threads={threads}
+          canReply={canReply}
+          triageByContact={triageByContact}
+          sequences={seqs}
+          verArquivadas={verArquivadas}
+        />
       </div>
     </div>
   );

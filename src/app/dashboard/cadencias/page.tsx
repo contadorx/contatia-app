@@ -6,13 +6,14 @@ import { CadenceReport } from "@/components/CadenceReport";
 import { listTemplates } from "@/app/dashboard/cadencias/actions";
 import { channelLabel, type Channel } from "@/lib/cadence";
 import { isManager } from "@/lib/permissions";
+import { OBJETIVOS, OBJETIVO_LABEL } from "@/lib/objetivosCadencia";
 
 export const dynamic = "force-dynamic";
 
 export default async function Cadencias({
   searchParams,
 }: {
-  searchParams: { q?: string; estado?: string; produto?: string; canal?: string };
+  searchParams: { q?: string; estado?: string; produto?: string; canal?: string; objetivo?: string };
 }) {
   const supabase = createClient();
   // ============================================================
@@ -28,6 +29,7 @@ export default async function Cadencias({
   const estado = searchParams.estado || "";     // ativa | inativa
   const produtoF = searchParams.produto || "";
   const canalF = searchParams.canal || "";      // email | whatsapp | call | linkedin
+  const objetivoF = searchParams.objetivo || "";
 
   // Visibilidade por papel: Dono/Admin/Gestor veem as cadências de toda a equipe;
   // Vendedor/SDR veem só as que criaram (decisão do produto).
@@ -41,6 +43,7 @@ export default async function Cadencias({
 
   let seqQuery = supabase
     .from("sequences")
+    // `goal` (0107) NÃO entra nomeado: quebraria a lista inteira antes da migration.
     .select("id, name, audience, is_active, created_at, created_by, product_id, email_account_id, sequence_steps(channel, position), products(name), email_accounts(from_email)")
     .order("created_at", { ascending: false });
   if (!gerente) seqQuery = seqQuery.eq("created_by", user?.id ?? "");
@@ -60,11 +63,12 @@ export default async function Cadencias({
     if (estado === "inativa" && s.is_active) return false;
     if (produtoF && s.product_id !== produtoF) return false;
     if (canalF && !((s.sequence_steps as any[]) || []).some((st) => st.channel === canalF)) return false;
+    if (objetivoF && s.goal !== objetivoF) return false;
     if (!q) return true;
     const prod = Array.isArray(s.products) ? s.products[0] : s.products;
     return `${s.name} ${s.audience || ""} ${prod?.name || ""}`.toLowerCase().includes(q);
   });
-  const filtrando = !!(q || estado || produtoF || canalF);
+  const filtrando = !!(q || estado || produtoF || canalF || objetivoF);
 
   return (
     <div>
@@ -91,6 +95,12 @@ export default async function Cadencias({
               <option value="">Ativas e inativas</option>
               <option value="ativa">Só ativas</option>
               <option value="inativa">Só inativas</option>
+            </select>
+            <select name="objetivo" defaultValue={objetivoF} className="input w-auto py-1.5 text-sm">
+              <option value="">Qualquer objetivo</option>
+              {OBJETIVOS.map((o) => (
+                <option key={o.v} value={o.v}>{o.l}</option>
+              ))}
             </select>
             <select name="canal" defaultValue={canalF} className="input w-auto py-1.5 text-sm">
               <option value="">Qualquer canal</option>
@@ -137,6 +147,11 @@ export default async function Cadencias({
               <div key={s.id} className="card flex items-center justify-between p-5">
                 <div>
                   <p className="font-display text-base font-bold">{s.name}</p>
+                  {s.goal && OBJETIVO_LABEL[s.goal] && (
+                    <span className="mt-1 inline-block rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand-dark">
+                      {OBJETIVO_LABEL[s.goal]}
+                    </span>
+                  )}
                   <p className="mt-1 text-sm text-subtle">
                     {s.audience ? `${s.audience} · ` : ""}
                     {steps.length} passo(s):{" "}

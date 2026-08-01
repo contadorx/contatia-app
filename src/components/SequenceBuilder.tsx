@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect, useRef } from "react";
+import { OBJETIVOS } from "@/lib/objetivosCadencia";
 import { createSequence, updateSequence, generateSequenceAI, loadAiContext, saveAiContext, opusRemaining, type StepInput } from "@/app/dashboard/cadencias/actions";
 import { checkSpamContent } from "@/app/dashboard/config/domain-actions";
 import type { Channel } from "@/lib/cadence";
@@ -27,6 +28,7 @@ export default function SequenceBuilder({
   editId,
   initialName,
   initialAudience,
+  initialGoal,
   initialSteps,
   products = [],
   accounts = [],
@@ -39,6 +41,7 @@ export default function SequenceBuilder({
   editId?: string;
   initialName?: string;
   initialAudience?: string;
+  initialGoal?: string;
   initialSteps?: StepInput[];
   products?: ProductOpt[];
   accounts?: AccountOpt[];
@@ -48,6 +51,10 @@ export default function SequenceBuilder({
   const [open, setOpen] = useState(autoOpen);
   const [name, setName] = useState(initialName ?? "");
   const [audience, setAudience] = useState(initialAudience ?? "");
+  // OBJETIVO: "público-alvo" responde PARA QUEM a cadência é; faltava PARA QUÊ ela
+  // serve. É por isso que se filtra ("me mostra as de reativação"), e é o que decide
+  // se um passo faz sentido dentro dela.
+  const [goal, setGoal] = useState(initialGoal ?? "");
   const [productId, setProductId] = useState(initialProductId ?? "");
   const [emailAccountId, setEmailAccountId] = useState(initialEmailAccountId ?? "");
   const [steps, setSteps] = useState<StepInput[]>(initialSteps?.length ? initialSteps : [emptyStep()]);
@@ -177,8 +184,8 @@ export default function SequenceBuilder({
     setMsg(null);
     start(async () => {
       const res = editId
-        ? await updateSequence(editId, { name, audience, steps, product_id: productId || null, email_account_id: emailAccountId || null })
-        : await createSequence({ name, audience, steps, product_id: productId || null, email_account_id: emailAccountId || null });
+        ? await updateSequence(editId, { name, audience, goal, steps, product_id: productId || null, email_account_id: emailAccountId || null })
+        : await createSequence({ name, audience, goal, steps, product_id: productId || null, email_account_id: emailAccountId || null });
       if (res?.error) setMsg(res.error);
       else {
         if (!editId) {
@@ -319,6 +326,15 @@ export default function SequenceBuilder({
         <div>
           <label className="label">Público-alvo</label>
           <input className="input mt-1" value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="Ex.: Diretores de operações" />
+        </div>
+        <div>
+          <label className="label">Objetivo</label>
+          <select className="input mt-1" value={goal} onChange={(e) => setGoal(e.target.value)}>
+            <option value="">— sem objetivo definido —</option>
+            {OBJETIVOS.map((o) => (
+              <option key={o.v} value={o.v}>{o.l}</option>
+            ))}
+          </select>
         </div>
       </div>
 

@@ -14,6 +14,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import MeetingOutcome from "@/components/MeetingOutcome";
+import NewOpportunityForContact from "@/components/NewOpportunityForContact";
 
 export type ReuniaoPassada = {
   id: string;
@@ -146,7 +147,18 @@ export default function ReunioesPassadas({
                   </p>
                   {m.outcome && <p className="mt-1 text-xs text-ink/70">↳ {m.outcome}</p>}
                 </div>
-                <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${st.c}`}>{st.l}</span>
+                <div className="flex shrink-0 items-center gap-2">
+                  {/* A reunião acontecida é o momento mais óbvio de abrir negócio — e
+                      era o único lugar da jornada onde isso não existia. */}
+                  {m.contact_id && m.status === "realizada" && (
+                    <NewOpportunityForContact
+                      contactId={m.contact_id}
+                      defaultTitle={`${m.empresa || m.contatoNome || "Negócio"} — pós-reunião`}
+                      compacto
+                    />
+                  )}
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${st.c}`}>{st.l}</span>
+                </div>
               </div>
               {needsOutcome && <MeetingOutcome id={m.id} contactId={m.contact_id} />}
             </div>
