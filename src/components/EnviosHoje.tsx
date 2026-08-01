@@ -11,6 +11,7 @@
 // ============================================================
 
 import { useState } from "react";
+import Link from "next/link";
 import type { ResumoEnvios } from "@/lib/enviosHoje";
 
 const hora = (iso: string | null) =>
@@ -151,7 +152,17 @@ export default function EnviosHoje({ dados, gestor }: { dados: ResumoEnvios; ges
                           {l.tipo === "email_sent" ? "@" : "WA"}
                         </span>
                       </td>
-                      <td className="max-w-[180px] truncate px-2 py-1.5" title={l.contato || ""}>{l.contato || "—"}</td>
+                      {/* o nome leva à ficha: era texto morto justamente na linha em
+                          que a pessoa quer conferir com quem falou. */}
+                      <td className="max-w-[180px] truncate px-2 py-1.5" title={l.contato || ""}>
+                        {l.contatoId && l.contato ? (
+                          <Link href={`/dashboard/contatos/${l.contatoId}`} className="text-brand-dark hover:underline">
+                            {l.contato}
+                          </Link>
+                        ) : (
+                          l.contato || "—"
+                        )}
+                      </td>
                       <td className="max-w-[180px] truncate px-2 py-1.5 text-subtle" title={l.caixa || ""}>{l.caixa || "—"}</td>
                       {gestor && <td className="max-w-[140px] truncate px-2 py-1.5 text-subtle">{l.autor}</td>}
                     </tr>

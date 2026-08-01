@@ -102,7 +102,11 @@ export async function testarWorker(): Promise<{ ok: boolean; titulo: string; det
   };
 }
 
-export async function buscarEmailAgora(contactId: string, siteOuDominio: string): Promise<ResultadoBusca> {
+// `forcar` atende o caso "o contato já tem e-mail, mas quero ver se existe um mais
+// atual". Antes a função recusava com "apague o e-mail atual se quiser procurar outro" —
+// o que obriga a jogar fora o dado bom ANTES de saber se há um melhor. Forçado, ele só
+// troca o endereço quando o servidor CONFIRMA o novo.
+export async function buscarEmailAgora(contactId: string, siteOuDominio: string, forcar = false): Promise<ResultadoBusca> {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const { data: prof } = await supabase.from("profiles").select("tenant_id").eq("id", user?.id ?? "").maybeSingle();
@@ -131,12 +135,13 @@ export async function buscarEmailAgora(contactId: string, siteOuDominio: string)
   if (!contact) {
     return { ok: false, status: "error", titulo: "Contato não encontrado", detalhe: "" };
   }
-  if ((contact as any).email) {
+  const emailAtual = ((contact as any).email as string | null) || null;
+  if (emailAtual && !forcar) {
     return {
       ok: false,
       status: "error",
       titulo: "Este contato já tem e-mail",
-      detalhe: "Apague o e-mail atual se quiser procurar outro.",
+      detalhe: "Use “procurar um e-mail mais atual” na ficha, ou apague o atual antes de buscar outro.",
     };
   }
 
@@ -161,21 +166,51 @@ export async function buscarEmailAgora(contactId: string, siteOuDominio: string)
     workerStatus = r.status;
 
     if (r.status === "valid" && r.email) {
+      const igual = emailAtual && emailAtual.toLowerCase() === r.email.toLowerCase();
       await supabase
         .from("contacts")
         .update({ email: r.email, email_status: "ok", email_discovery: "valid", email_discovered_at: new Date().toISOString() } as any)
         .eq("id", contactId);
       await supabase.from("events").insert({
         tenant_id, contact_id: contactId, type: "note",
-        meta: { text: `E-mail do decisor confirmado no servidor: ${r.email}` },
+        meta: {
+          text: igual
+            ? `E-mail reconfirmado no servidor: ${r.email}`
+            : emailAtual
+            ? `E-mail atualizado: ${emailAtual} → ${r.email} (confirmado no servidor)`
+            : `E-mail do decisor confirmado no servidor: ${r.email}`,
+        },
       } as any);
       revalidatePath(`/dashboard/contatos/${contactId}`);
-      return { ok: true, email: r.email, status: "valid", ...EXPLICACAO.valid, tentativas };
+      return {
+        ok: true,
+        email: r.email,
+        status: "valid",
+        ...EXPLICACAO.valid,
+        ...(igual
+          ? { titulo: "O e-mail atual continua válido", detalhe: `O servidor confirmou ${r.email}. Nada mudou.` }
+          : emailAtual
+          ? { titulo: "E-mail atualizado", detalhe: `Troquei ${emailAtual} por ${r.email} — este o servidor confirmou.` }
+          : {}),
+        tentativas,
+      };
     }
   }
 
   // ---- 2) CAMADA 0: e-mail publicado no site (funciona SEM worker, sem porta 25) ----
   const pub = await findPublishedEmail(dominio);
+  // Revisão de um contato que JÁ tem e-mail: um endereço genérico do site
+  // (contato@, faleconosco@) é quase sempre PIOR que o que já está lá. Sugiro, não troco.
+  if (pub && emailAtual && pub.email.toLowerCase() !== emailAtual.toLowerCase()) {
+    return {
+      ok: false,
+      email: emailAtual,
+      status: "published",
+      titulo: "Mantive o e-mail atual",
+      detalhe: `No site aparece ${pub.email} (${pub.source}), mas é um endereço geral — normalmente pior que o do decisor. O servidor não confirmou nenhum endereço novo, então não troquei nada. Se quiser usar o do site, edite o contato à mão.`,
+      tentativas,
+    };
+  }
   if (pub) {
     await supabase
       .from("contacts")

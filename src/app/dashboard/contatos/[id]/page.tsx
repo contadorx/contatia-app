@@ -15,6 +15,7 @@ import EditContactButton from "@/components/EditContactButton";
 import DeleteContactButton from "@/components/DeleteContactButton";
 import ContactExtras from "@/components/ContactExtras";
 import ProdutoBadges from "@/components/ProdutoBadges";
+import RevisarContato from "@/components/RevisarContato";
 import { EmailVerifyBadge, TestEmailBox } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
 import { produtosDoContato } from "@/lib/produtos";
@@ -62,7 +63,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
 
   const { data: contact } = await supabase
     .from("contacts")
-    .select("id, name, email, phone, company, company_domain, email_discovery, role_title, cnpj, origin, status, score, account_id, custom, accounts(name, domain, website, cnpj, cnae, uf, municipio, porte)")
+    .select("id, name, email, phone, company, company_domain, email_discovery, wa_status, wa_checked_at, role_title, cnpj, origin, status, score, account_id, custom, accounts(name, domain, website, cnpj, cnae, uf, municipio, porte)")
     .eq("id", params.id)
     .maybeSingle();
   if (!contact) notFound();
@@ -142,7 +143,8 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+        {/* âncora #enviar — os selos de canal na lista de Contatos apontam para cá */}
+        <div id="enviar" className="mt-4 flex scroll-mt-24 flex-wrap items-center gap-2">
           <EnrollButton contactId={c.id} sequences={(sequences as { id: string; name: string }[]) || []} />
           <QuickSend contactId={c.id} hasEmail={!!c.email} hasPhone={!!c.phone} />
           <ScheduleMeetingForContact contactId={c.id} contactName={c.name} />
@@ -167,6 +169,19 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
             </div>
           </>
         )}
+
+        {/* Manutenção do cadastro: reverificar WhatsApp e conferir se há e-mail mais
+            atual. Fechado por padrão — é revisão, não é o trabalho do dia. */}
+        <RevisarContato
+          contactId={c.id}
+          contactName={c.name}
+          email={c.email || null}
+          phone={c.phone || null}
+          waStatus={(c as any).wa_status || null}
+          waCheckedAt={(c as any).wa_checked_at || null}
+          companyDomain={(c as any).company_domain || (c as any).accounts?.domain || null}
+          discovery={(c as any).email_discovery || null}
+        />
 
         {/* Dados do contato/empresa (o que já está no banco e antes ficava escondido) */}
         <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 border-t border-line pt-4 text-sm sm:grid-cols-3">

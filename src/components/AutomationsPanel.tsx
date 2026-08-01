@@ -84,12 +84,36 @@ export default function AutomationsPanel({
   const [showSug, setShowSug] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  // ============================================================
+  // FILTROS DA LISTA DE REGRAS
+  //
+  // Com 20+ automações a pergunta deixa de ser "quais existem" e passa a ser "o que
+  // dispara quando o cara responde?" ou "quem mexe no pipeline?". Sem filtro, isso
+  // era leitura linha a linha. O filtro é por GATILHO e por AÇÃO porque é assim que
+  // se pensa em automação: causa e efeito.
+  // ============================================================
+  const [q, setQ] = useState("");
+  const [fGatilho, setFGatilho] = useState("");
+  const [fAcao, setFAcao] = useState("");
+  const [fEstado, setFEstado] = useState("");   // ativa | inativa
 
   const seqName = useMemo(() => new Map(allSeqs.map((s) => [s.id, s.name])), [allSeqs]);
   const stageName = useMemo(() => new Map(stages.map((s) => [s.id, s.name])), [stages]);
   const prodName = useMemo(() => new Map(allProducts.map((p) => [p.id, p.name])), [allProducts]);
   const tagName = useMemo(() => new Map(tags.map((t) => [t.id, t.name])), [tags]);
   const memberName = useMemo(() => new Map(members.map((m) => [m.id, m.full_name || m.email])), [members]);
+
+  const regrasFiltradas = useMemo(() => {
+    const termo = q.trim().toLowerCase();
+    return rules.filter((r) => {
+      if (fGatilho && r.trigger_type !== fGatilho) return false;
+      if (fAcao && r.action_type !== fAcao) return false;
+      if (fEstado === "ativa" && !r.is_active) return false;
+      if (fEstado === "inativa" && r.is_active) return false;
+      if (!termo) return true;
+      return (r.name || "").toLowerCase().includes(termo);
+    });
+  }, [rules, q, fGatilho, fAcao, fEstado]);
 
   function novo() { setEditingId(null); setInitial(BLANK_FORM); setOpen(true); }
   function editar(r: Rule) { setEditingId(r.id); setInitial(ruleToForm(r)); setOpen(true); }
@@ -156,10 +180,47 @@ export default function AutomationsPanel({
         </div>
       )}
 
+      {/* Filtros */}
+      {rules.length > 3 && (
+        <div className="mt-6 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-3">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Buscar pelo nome da regra…"
+            className="input min-w-[200px] flex-1 py-1.5 text-sm"
+          />
+          <select className="input w-auto py-1.5 text-sm" value={fGatilho} onChange={(e) => setFGatilho(e.target.value)}>
+            <option value="">Qualquer gatilho</option>
+            {Object.entries(TRIGGER_LABEL).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+          <select className="input w-auto py-1.5 text-sm" value={fAcao} onChange={(e) => setFAcao(e.target.value)}>
+            <option value="">Qualquer ação</option>
+            {Object.entries(ACTION_LABEL).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+          <select className="input w-auto py-1.5 text-sm" value={fEstado} onChange={(e) => setFEstado(e.target.value)}>
+            <option value="">Ativas e inativas</option>
+            <option value="ativa">Só ativas</option>
+            <option value="inativa">Só inativas</option>
+          </select>
+          {(q || fGatilho || fAcao || fEstado) && (
+            <button type="button" className="text-xs text-subtle underline hover:text-ink" onClick={() => { setQ(""); setFGatilho(""); setFAcao(""); setFEstado(""); }}>
+              limpar
+            </button>
+          )}
+          <span className="w-full text-xs text-subtle">{regrasFiltradas.length} de {rules.length} regras.</span>
+        </div>
+      )}
+
       {/* Lista */}
       <div className="mt-6 space-y-2">
-        {rules.length ? (
-          rules.map((r) => (
+        {!rules.length ? (
+          <EmptyRules />
+        ) : regrasFiltradas.length ? (
+          regrasFiltradas.map((r) => (
             <div key={r.id} className={`card flex items-center justify-between gap-3 p-4 ${r.is_active ? "" : "opacity-60"}`}>
               <div className="min-w-0">
                 <p className="text-sm font-semibold">{r.name}{!r.is_active && <span className="ml-1 text-xs text-subtle">(inativa)</span>}</p>
@@ -186,10 +247,19 @@ export default function AutomationsPanel({
           ))
         ) : (
           <div className="card p-8 text-center text-sm text-subtle">
-            Nenhuma automação ainda. Crie uma nova ou use as <b>Sugestões prontas</b> acima.
+            Nenhuma regra bate com esse filtro.
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Estado vazio real (nenhuma regra cadastrada) — diferente de "o filtro não achou nada".
+function EmptyRules() {
+  return (
+    <div className="card p-8 text-center text-sm text-subtle">
+      Nenhuma automação ainda. Crie uma nova ou use as <b>Sugestões prontas</b> acima.
     </div>
   );
 }

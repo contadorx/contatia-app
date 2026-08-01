@@ -24,6 +24,7 @@ import "server-only";
 export type LinhaEnvio = {
   quando: string;          // ISO
   tipo: "email_sent" | "whatsapp_sent";
+  contatoId: string | null; // para abrir a ficha direto da linha
   contato: string | null;
   caixa: string | null;    // from_email, quando for e-mail
   autor: string;           // nome de quem enviou (ou "— sem autor —")
@@ -103,6 +104,7 @@ export async function enviosDeHoje(
   const linhas: LinhaEnvio[] = visiveis.map((e) => ({
     quando: e.created_at,
     tipo: e.type,
+    contatoId: e.contact_id || null,
     contato: e.contact_id ? (nomeContato[e.contact_id] || null) : null,
     caixa: e.email_account_id ? (emailCaixa[e.email_account_id] || null) : null,
     autor: e.user_id ? (nomePessoa[e.user_id] || "outro membro") : SEM_AUTOR,

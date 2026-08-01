@@ -11,6 +11,8 @@ import {
   createContactFromEmailThread,
   blockThread,
   deleteThread,
+  deleteEmailThread,
+  blockEmailThread,
   excluirConversas,
   marcarConversasLidas,
   fetchMedia,
@@ -66,9 +68,26 @@ export default function RespostasInbox({
   const [err, setErr] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<"block" | "delete" | null>(null);
   const [pending, start] = useTransition();
-  // seleção múltipla (só WhatsApp — é o canal com exclusão)
+  // ============================================================
+  // SELEÇÃO MÚLTIPLA — o que estava errado
+  //
+  // 1) O gatilho era um texto cinza ("Selecionar conversas") sem cara de botão. Não
+  //    parecia clicável, e num painel cheio de conversas passava por rótulo.
+  // 2) A confirmação usava window.confirm(). O Chrome BLOQUEIA esse diálogo depois que
+  //    a pessoa marca "impedir que esta página crie mais diálogos" — e aí confirm()
+  //    devolve false na hora, para sempre. O clique em Excluir vira nada. Sem aviso.
+  // 3) O erro (`err`) só era desenhado DENTRO do painel da conversa, do outro lado da
+  //    tela — e nem isso quando nenhuma conversa estava aberta. Qualquer falha do
+  //    servidor ficava invisível.
+  //
+  // Agora: botão de verdade, confirmação dentro da própria barra, e o resultado
+  // (sucesso ou erro) aparece ali mesmo, com o número de mensagens afetadas.
+  // ============================================================
   const [selMode, setSelMode] = useState(false);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [confirmaLote, setConfirmaLote] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
+  const [erroLote, setErroLote] = useState<string | null>(null);
 
   const active = threads.find((t) => t.key === sel) || null;
   const visibleThreads = busca
@@ -78,17 +97,23 @@ export default function RespostasInbox({
   // canais — quem tem a caixa cheia de e-mail também precisa limpar.
   const selecionaveis = visibleThreads;
 
+  function limparRecados() {
+    setErr(null);
+    setErroLote(null);
+    setAviso(null);
+    setConfirmaLote(false);
+  }
   function toggleCheck(key: string) {
     setChecked((s) => {
       const n = new Set(s);
       n.has(key) ? n.delete(key) : n.add(key);
       return n;
     });
-    setErr(null);
+    limparRecados();
   }
   function toggleTodas() {
     setChecked((s) => (selecionaveis.length > 0 && selecionaveis.every((t) => s.has(t.key)) ? new Set() : new Set(selecionaveis.map((t) => t.key))));
-    setErr(null);
+    limparRecados();
   }
   // as conversas marcadas, no formato que o servidor entende (canal + quem é)
   function alvosSelecionados() {
@@ -99,26 +124,38 @@ export default function RespostasInbox({
   function sairSelecao() {
     setSelMode(false);
     setChecked(new Set());
-    setErr(null);
+    limparRecados();
   }
-  function excluirSelecionadas() {
+  // Executa a ação em lote e SEMPRE devolve um recado na própria barra: quantas
+  // mensagens saíram, ou o motivo de não ter saído nenhuma.
+  function agirEmLote(fn: (alvos: any[]) => Promise<any>, verbo: "excluídas" | "marcadas como lidas") {
     const alvos = alvosSelecionados();
     if (!alvos.length) return;
+    const quantas = alvos.length;
+    setErroLote(null);
+    setAviso(null);
+    start(async () => {
+      let res: any;
+      try {
+        res = await fn(alvos);
+      } catch (e: any) {
+        setErroLote(e?.message || "Falha ao falar com o servidor. Recarregue a página e tente de novo.");
+        return;
+      }
+      if (res?.error) { setErroLote(res.error); return; }
+      const msgs = res?.mensagens ?? 0;
+      setChecked(new Set());
+      setConfirmaLote(false);
+      setAviso(`${quantas} conversa${quantas === 1 ? "" : "s"} ${verbo} (${msgs} mensagem${msgs === 1 ? "" : "s"}).`);
+      if (verbo === "excluídas") setSel(null);
+      router.refresh();
+    });
+  }
+  const contagemSelecionada = () => {
+    const alvos = alvosSelecionados();
     const nWa = alvos.filter((a) => a.channel === "whatsapp").length;
-    const nEm = alvos.length - nWa;
-    const detalhe = [nWa ? `${nWa} de WhatsApp` : "", nEm ? `${nEm} de e-mail` : ""].filter(Boolean).join(" e ");
-    if (!window.confirm(
-      `Excluir ${alvos.length} conversa(s) (${detalhe})?\n\n` +
-      `As mensagens saem da caixa. Os CONTATOS não são apagados — só o histórico da conversa. ` +
-      `Isso não pode ser desfeito.`
-    )) return;
-    act(() => excluirConversas(alvos as any), () => { sairSelecao(); setSel(null); });
-  }
-  function marcarLidasSelecionadas() {
-    const alvos = alvosSelecionados();
-    if (!alvos.length) return;
-    act(() => marcarConversasLidas(alvos as any), () => sairSelecao());
-  }
+    return { total: alvos.length, wa: nWa, em: alvos.length - nWa };
+  };
 
   useEffect(() => {
     setConfirm(null);
@@ -166,41 +203,93 @@ export default function RespostasInbox({
             placeholder="Buscar conversa…"
             className="input py-1.5 text-sm"
           />
-          {/* barra de seleção múltipla (WhatsApp) */}
-          <div className="mt-2 flex items-center justify-between gap-2 px-1 text-xs">
+          {/* ---- barra de seleção múltipla (WhatsApp + e-mail) ---- */}
+          <div className="mt-2 px-1 text-xs">
             {!selMode ? (
-              <button className="font-medium text-subtle hover:text-brand" onClick={() => setSelMode(true)} disabled={!selecionaveis.length}>
-                Selecionar conversas
+              // Botão de verdade, com borda: o texto cinza de antes não parecia clicável.
+              <button
+                type="button"
+                className="w-full rounded-lg border border-line bg-white px-2 py-1.5 font-semibold text-brand-dark hover:bg-brand-soft disabled:opacity-40"
+                onClick={() => { setSelMode(true); limparRecados(); }}
+                disabled={!selecionaveis.length}
+              >
+                ☑ Selecionar conversas
               </button>
             ) : (
-              <>
-                <label className="flex items-center gap-1.5 text-subtle">
-                  <input
-                    type="checkbox"
-                    checked={selecionaveis.length > 0 && selecionaveis.every((t) => checked.has(t.key))}
-                    onChange={toggleTodas}
-                  />
-                  {checked.size > 0 ? `${checked.size} selecionada(s)` : "Selecionar todas"}
-                </label>
-                <div className="flex items-center gap-2">
-                  <button
-                    className="rounded-lg border border-line bg-white px-2 py-1 font-medium hover:bg-muted disabled:opacity-40"
-                    disabled={pending || checked.size === 0}
-                    onClick={marcarLidasSelecionadas}
-                    title="Zera o não-lido dessas conversas sem abrir uma por uma."
-                  >
-                    Marcar como lida
+              <div className="space-y-2 rounded-lg border border-brand/30 bg-brand-soft/40 p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="flex cursor-pointer items-center gap-1.5 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={selecionaveis.length > 0 && selecionaveis.every((t) => checked.has(t.key))}
+                      onChange={toggleTodas}
+                    />
+                    {checked.size > 0 ? `${checked.size} selecionada(s)` : `Selecionar todas (${selecionaveis.length})`}
+                  </label>
+                  <button type="button" className="text-subtle underline hover:text-ink" onClick={sairSelecao}>
+                    Sair da seleção
                   </button>
-                  <button
-                    className="rounded-lg bg-danger px-2 py-1 font-bold text-white disabled:opacity-40"
-                    disabled={pending || checked.size === 0}
-                    onClick={excluirSelecionadas}
-                  >
-                    Excluir
-                  </button>
-                  <button className="text-subtle hover:text-ink" onClick={sairSelecao}>Cancelar</button>
                 </div>
-              </>
+
+                {checked.size === 0 ? (
+                  <p className="text-[11px] text-subtle">
+                    Clique nas conversas da lista para marcar. Depois escolha a ação.
+                  </p>
+                ) : !confirmaLote ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-lg border border-line bg-white px-2 py-1 font-medium hover:bg-muted disabled:opacity-40"
+                      disabled={pending}
+                      onClick={() => agirEmLote((a) => marcarConversasLidas(a), "marcadas como lidas")}
+                      title="Zera o não-lido dessas conversas sem abrir uma por uma."
+                    >
+                      {pending ? "…" : "Marcar como lida"}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg bg-danger px-2 py-1 font-bold text-white disabled:opacity-40"
+                      disabled={pending}
+                      onClick={() => { setConfirmaLote(true); setAviso(null); setErroLote(null); }}
+                    >
+                      Excluir
+                    </button>
+                  </div>
+                ) : (
+                  // Confirmação DENTRO da tela. window.confirm() é bloqueável pelo
+                  // navegador — e quando é bloqueado, o clique simplesmente não faz nada.
+                  <div className="rounded-lg border border-danger/40 bg-danger/5 p-2">
+                    {(() => {
+                      const c = contagemSelecionada();
+                      const det = [c.wa ? `${c.wa} de WhatsApp` : "", c.em ? `${c.em} de e-mail` : ""].filter(Boolean).join(" e ");
+                      return (
+                        <p className="text-[11px] text-danger">
+                          Excluir <b>{c.total} conversa{c.total === 1 ? "" : "s"}</b> ({det})? As mensagens saem da
+                          caixa. Os <b>contatos não são apagados</b> — só o histórico da conversa. Não dá para desfazer.
+                        </p>
+                      );
+                    })()}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className="rounded-lg bg-danger px-2 py-1 font-bold text-white disabled:opacity-40"
+                        disabled={pending}
+                        onClick={() => agirEmLote((a) => excluirConversas(a), "excluídas")}
+                      >
+                        {pending ? "Excluindo…" : "Confirmar exclusão"}
+                      </button>
+                      <button type="button" className="text-subtle underline hover:text-ink" onClick={() => setConfirmaLote(false)}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* o resultado aparece AQUI — antes só existia no painel da conversa,
+                    do outro lado da tela, e sumia junto com ela. */}
+                {aviso && <p className="rounded-lg bg-brand-soft px-2 py-1 text-[11px] font-medium text-brand-dark">{aviso}</p>}
+                {erroLote && <p className="rounded-lg bg-danger/10 px-2 py-1 text-[11px] font-medium text-danger">{erroLote}</p>}
+              </div>
             )}
           </div>
         </div>
@@ -214,6 +303,7 @@ export default function RespostasInbox({
           return (
           <button
             key={t.key}
+            type="button"
             onClick={() => (selectable ? toggleCheck(t.key) : setSel(t.key))}
             className={`flex w-full items-start gap-2 p-3 text-left transition ${
               selectable && isChecked ? "bg-brand-soft/60" : sel === t.key && !selMode ? "bg-brand-soft/50" : "hover:bg-muted"
@@ -276,17 +366,15 @@ export default function RespostasInbox({
                   + Cadastrar contato para responder
                 </button>
               )}
-              {/* bloquear/excluir são do WhatsApp (por número) */}
-              {active.channel === "whatsapp" && (
-                <>
-                  <button className="rounded-lg border border-line px-2 py-1 text-subtle hover:text-warn" disabled={pending} onClick={() => setConfirm(confirm === "block" ? null : "block")}>
-                    Bloquear
-                  </button>
-                  <button className="rounded-lg border border-line px-2 py-1 text-subtle hover:text-danger" disabled={pending} onClick={() => setConfirm(confirm === "delete" ? null : "delete")}>
-                    Excluir
-                  </button>
-                </>
-              )}
+              {/* Bloquear/Excluir valem para os DOIS canais. Antes existiam só no
+                  WhatsApp ("por número"), e a conversa de e-mail não tinha gestão
+                  nenhuma: não dava para tirar da caixa nem para parar de receber. */}
+              <button className="rounded-lg border border-line px-2 py-1 text-subtle hover:text-warn" disabled={pending} onClick={() => setConfirm(confirm === "block" ? null : "block")}>
+                Bloquear
+              </button>
+              <button className="rounded-lg border border-line px-2 py-1 text-subtle hover:text-danger" disabled={pending} onClick={() => setConfirm(confirm === "delete" ? null : "delete")}>
+                Excluir
+              </button>
             </div>
           </div>
 
@@ -295,18 +383,30 @@ export default function RespostasInbox({
             <div className={`border-b border-line p-3 text-sm ${confirm === "delete" ? "bg-danger/5" : "bg-warn/5"}`}>
               <p className={confirm === "delete" ? "text-danger" : "text-warn"}>
                 {confirm === "block"
-                  ? "Bloquear este número? Ele para de aparecer aqui, novas mensagens são ignoradas e o contato (se houver) vira opt-out."
-                  : "Excluir esta conversa? As mensagens deste número são apagadas da caixa."}
+                  ? active.channel === "email"
+                    ? "Bloquear este endereço? Ele entra na lista de supressão — nenhum e-mail seu sai mais para ele, em cadência nenhuma — e o contato (se houver) vira opt-out."
+                    : "Bloquear este número? Ele para de aparecer aqui, novas mensagens são ignoradas e o contato (se houver) vira opt-out."
+                  : active.channel === "email"
+                    ? "Excluir esta conversa? As mensagens deste endereço são apagadas da caixa. O CONTATO não é apagado — só o histórico."
+                    : "Excluir esta conversa? As mensagens deste número são apagadas da caixa."}
               </p>
               <div className="mt-2 flex gap-2">
                 {confirm === "block" ? (
                   <button className="rounded-lg bg-warn px-3 py-1 text-xs font-bold text-white" disabled={pending}
-                    onClick={() => act(() => blockThread({ phone: active.phone, contactId: active.contactId }), () => setSel(null))}>
+                    onClick={() => act(
+                      () => active.channel === "email"
+                        ? blockEmailThread({ email: active.email, contactId: active.contactId })
+                        : blockThread({ phone: active.phone, contactId: active.contactId }),
+                      () => setSel(null))}>
                     Bloquear
                   </button>
                 ) : (
                   <button className="rounded-lg bg-danger px-3 py-1 text-xs font-bold text-white" disabled={pending}
-                    onClick={() => act(() => deleteThread({ phone: active.phone, contactId: active.contactId }), () => setSel(null))}>
+                    onClick={() => act(
+                      () => active.channel === "email"
+                        ? deleteEmailThread({ email: active.email, contactId: active.contactId })
+                        : deleteThread({ phone: active.phone, contactId: active.contactId }),
+                      () => setSel(null))}>
                     Excluir
                   </button>
                 )}

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import MeetingForm from "@/components/MeetingForm";
 import MeetingStatusButtons from "@/components/MeetingStatusButtons";
 import MeetingOutcome from "@/components/MeetingOutcome";
+import ReunioesPassadas from "@/components/ReunioesPassadas";
 import MeetingsTabs from "@/components/MeetingsTabs";
 
 export const dynamic = "force-dynamic";
@@ -38,16 +39,34 @@ export default async function Reunioes() {
       .select("id, title, datetime, duration_min, location, notes, status, contact_id, google_event_link, contacts(name, company)")
       .gte("datetime", nowISO)
       .order("datetime", { ascending: true }),
+    // Passadas: a lista trazia só título + nome. Sem empresa, sem responsável e sem
+    // filtro, "com quem eu falei em julho?" era impossível de responder aqui. Agora
+    // traz a empresa (do contato e da conta vinculada) e o dono; o limite subiu de 30
+    // para 300 — com busca na tela, lista maior vira informação em vez de ruído.
     supabase
       .from("meetings")
-      .select("id, title, datetime, status, outcome, outcome_status, contact_id, contacts(name, company)")
+      .select("id, title, datetime, status, outcome, outcome_status, contact_id, assigned_to, contacts(name, company, accounts(name))")
       .lt("datetime", nowISO)
       .order("datetime", { ascending: false })
-      .limit(30),
+      .limit(300),
   ]);
 
   const up = (upcoming as any[]) || [];
   const pastList = (past as any[]) || [];
+  // achata o join do PostgREST: a empresa pode vir da conta vinculada (accounts.name)
+  // ou do campo texto do contato — nessa ordem, porque a conta é o dado canônico.
+  const passadas = pastList.map((m: any) => ({
+    id: m.id,
+    title: m.title,
+    datetime: m.datetime,
+    status: m.status,
+    outcome: m.outcome ?? null,
+    outcome_status: m.outcome_status ?? null,
+    contact_id: m.contact_id ?? null,
+    assigned_to: m.assigned_to ?? null,
+    contatoNome: m.contacts?.name ?? null,
+    empresa: m.contacts?.accounts?.name || m.contacts?.company || null,
+  }));
 
   // ---- Calendário: time, permissões de agenda e reuniões do período ----
   const { data: { user } } = await supabase.auth.getUser();
@@ -60,6 +79,11 @@ export default async function Reunioes() {
     .select("id, full_name, email, role")
     .eq("tenant_id", (meuPerfil as any)?.tenant_id ?? "")
     .order("full_name", { ascending: true });
+
+  const membrosDoTime = (((time as any[]) || []).map((p) => ({
+    id: p.id as string,
+    nome: (p.full_name as string) || (p.email as string) || "—",
+  })));
 
   // agendas que posso VER e em quais posso MARCAR
   const { data: perms } = await supabase
@@ -192,31 +216,8 @@ export default async function Reunioes() {
                 <div className="card p-6 text-sm text-subtle">Nenhuma reunião agendada.</div>
               )}
 
-              {/* Passadas — registrar resultado */}
-              {pastList.length > 0 && (
-                <>
-                  <h2 className="mt-8 mb-3 font-display text-lg font-bold">Passadas</h2>
-                  <div className="space-y-2">
-                    {pastList.map((m) => {
-                      const st = STATUS_LABEL[m.status] || STATUS_LABEL.agendada;
-                      const needsOutcome = m.status !== "realizada" && m.status !== "no_show";
-                      return (
-                        <div key={m.id} className="card p-4">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <p className="text-sm font-semibold"><a href={`/dashboard/reunioes/${m.id}`} className="hover:text-brand-dark hover:underline">{m.title}</a> <span className="font-normal text-subtle">· {m.contacts?.name || "—"}</span></p>
-                              <p className="text-xs text-subtle">{new Date(m.datetime).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</p>
-                              {m.outcome && <p className="mt-1 text-xs text-ink/70">↳ {m.outcome}</p>}
-                            </div>
-                            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${st.c}`}>{st.l}</span>
-                          </div>
-                          {needsOutcome && <MeetingOutcome id={m.id} contactId={m.contact_id} />}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
+              {/* Passadas — com contato, empresa, responsável e filtros */}
+              <ReunioesPassadas reunioes={passadas} membros={membrosDoTime} />
             </>
           }
         />

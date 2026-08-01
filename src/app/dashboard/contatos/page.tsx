@@ -54,7 +54,7 @@ export default async function Contatos({
     { gerente, userId: user?.id },
     {
       select:
-        "id, name, email, phone, company, origin, status, score, assigned_to, created_at, last_activity_at, wa_status, web_capture, contact_tags(tag_id, tags(id, name, color))",
+        "id, name, email, phone, company, origin, status, score, assigned_to, created_at, last_activity_at, wa_status, wa_checked_at, web_capture, email_discovery, contact_tags(tag_id, tags(id, name, color))",
       limit: 200,
     }
   );

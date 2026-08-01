@@ -44,6 +44,7 @@ export default async function Relatorios({
     vendedor?: string | string[];
     logAcao?: string | string[];
     logUser?: string | string[];
+    quentes?: string;   // sem | com | todos
   };
 }) {
   const supabase = createClient();
@@ -152,11 +153,19 @@ export default async function Relatorios({
     .filter((a) => a.nContatos === 0 || a.nOpps === 0)
     .sort((a, b) => a.nContatos - b.nContatos || a.nOpps - b.nOpps);
 
-  // ================= 4) LEADS QUENTES SEM AÇÃO =================
-  const quentesFrios = cts
+  // ================= 4) LEADS QUENTES =================
+  // Antes existia SÓ a lista dos esquecidos. Faltava a outra metade da pergunta —
+  // "quem está quente E sendo trabalhado" —, que é o que mostra se a operação está
+  // aproveitando o interesse que ela mesma gerou. As duas listas saem do mesmo recorte
+  // e a aba alterna entre elas com ?quentes=sem|com|todos.
+  const quentesTodos = cts
     .filter((c) => (c.score ?? 0) >= HOT_THRESHOLD)
-    .filter((c) => { const d = diasSemToque(c.last_activity_at); return d === null || d >= frio; })
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const semAcao = (c: any) => { const d = diasSemToque(c.last_activity_at); return d === null || d >= frio; };
+  const quentesFrios = quentesTodos.filter(semAcao);
+  const quentesAtivos = quentesTodos.filter((c) => !semAcao(c));
+  const quentesView = (searchParams.quentes as string) || "sem";   // sem | com | todos
+  const quentesLista = quentesView === "com" ? quentesAtivos : quentesView === "todos" ? quentesTodos : quentesFrios;
 
   // ================= 5) PRODUTIVIDADE POR VENDEDOR =================
   // toques/respostas por dono (via contato); reuniões por assigned_to; opps criadas/ganhas por owner
@@ -213,8 +222,8 @@ export default async function Relatorios({
   const topLinks = ((topRows as any[]) || []).map((r) => ({ url: r.url, n: Number(r.cliques || 0) }));
   // últimos cliques (limit 30 — barato em qualquer volume), filtrando por dono se houver
   let ultQ = ownerParam
-    ? supabase.from("link_clicks").select("id, url, clicks, first_click_at, contacts!inner(name, assigned_to)").gt("clicks", 0).eq("contacts.assigned_to", ownerParam)
-    : supabase.from("link_clicks").select("id, url, clicks, first_click_at, contacts(name)").gt("clicks", 0);
+    ? supabase.from("link_clicks").select("id, url, clicks, first_click_at, contact_id, contacts!inner(name, assigned_to)").gt("clicks", 0).eq("contacts.assigned_to", ownerParam)
+    : supabase.from("link_clicks").select("id, url, clicks, first_click_at, contact_id, contacts(name)").gt("clicks", 0);
   const { data: ultRows } = await ultQ.order("first_click_at", { ascending: false, nullsFirst: false }).limit(30);
   const ultimosCliques = (ultRows as any[]) || [];
 
@@ -613,12 +622,33 @@ export default async function Relatorios({
         />
       </Secao>
           ) },
-          { id: "quentes", label: "Quentes sem ação", node: (
-      <Secao id="quentes" titulo="Leads quentes sem ação" desc={`Score alto (≥${HOT_THRESHOLD}) mas frios há +${frio} dias — prioridade máxima: interesse quente esfriando.`}>
+          { id: "quentes", label: "Quentes", node: (
+      <Secao
+        id="quentes"
+        titulo="Leads quentes"
+        desc={`Score ≥${HOT_THRESHOLD}. "Sem ação" = nenhum toque há +${frio} dias — interesse quente esfriando, prioridade máxima. "Com ação" = quentes que estão sendo trabalhados.`}
+      >
+        <div className="mb-3 flex flex-wrap gap-2 text-xs">
+          {[
+            { k: "sem", txt: `Sem ação (${quentesFrios.length})` },
+            { k: "com", txt: `Com ação (${quentesAtivos.length})` },
+            { k: "todos", txt: `Todos (${quentesTodos.length})` },
+          ].map((o) => (
+            <Link
+              key={o.k}
+              href={`?${new URLSearchParams({ ...(searchParams as any), quentes: o.k }).toString()}#quentes`}
+              className={`rounded-full border px-3 py-1 font-semibold ${
+                quentesView === o.k ? "border-brand bg-brand-soft text-brand-dark" : "border-line bg-white text-subtle hover:bg-muted"
+              }`}
+            >
+              {o.txt}
+            </Link>
+          ))}
+        </div>
         <Tabela
-          vazio="Nenhum lead quente esquecido. 👏"
+          vazio={quentesView === "com" ? "Nenhum lead quente em movimento." : "Nenhum lead quente esquecido. 👏"}
           head={["Contato", "Empresa", "Score", "Último toque", "Responsável"]}
-          rows={quentesFrios.slice(0, 50).map((c) => ({
+          rows={quentesLista.slice(0, 50).map((c) => ({
             key: c.id,
             cells: [
               <Link href={`/dashboard/contatos/${c.id}`} className="font-medium text-brand-dark hover:underline">{c.name}</Link>,
@@ -711,7 +741,11 @@ export default async function Relatorios({
               rows={ultimosCliques.map((l) => ({
                 key: l.id,
                 cells: [
-                  <span className="font-medium">{l.contacts?.name || "—"}</span>,
+                  l.contact_id && l.contacts?.name ? (
+                    <Link href={`/dashboard/contatos/${l.contact_id}`} className="font-medium text-brand-dark hover:underline">{l.contacts.name}</Link>
+                  ) : (
+                    <span className="font-medium">{l.contacts?.name || "—"}</span>
+                  ),
                   <a href={l.url} target="_blank" rel="noreferrer" className="block max-w-[220px] truncate text-brand-dark hover:underline" title={l.url}>{l.url}</a>,
                   <span className="text-subtle">{l.first_click_at ? new Date(l.first_click_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—"}</span>,
                 ],

@@ -72,6 +72,41 @@ export async function blockThread(input: { phone: string; contactId?: string | n
   return { ok: true };
 }
 
+// ============================================================
+// AS MESMAS AÇÕES, NOS DOIS CANAIS
+//
+// "Bloquear" e "Excluir" só existiam para WhatsApp — a conversa de e-mail não tinha
+// nenhuma gestão, nem para tirar da caixa nem para parar de receber. Estas duas
+// funções fecham a lacuna reaproveitando o que já existe:
+//   · excluir  → `excluirConversas`, que desde a última entrega apaga os dois canais
+//     e devolve quantas mensagens saíram;
+//   · bloquear → `email_suppressions` (a lista que o envio já consulta antes de
+//     mandar qualquer e-mail) + opt-out no contato, que é o equivalente honesto do
+//     bloqueio por número.
+// ============================================================
+export async function deleteEmailThread(input: { email?: string | null; contactId?: string | null }) {
+  const r = await excluirConversas([{ channel: "email", email: input.email || null, contactId: input.contactId || null }]);
+  return r;
+}
+
+export async function blockEmailThread(input: { email?: string | null; contactId?: string | null }) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const email = (input.email || "").trim().toLowerCase();
+  if (!email || !email.includes("@")) return { error: "Conversa sem endereço de e-mail válido." };
+
+  const { error } = await supabase
+    .from("email_suppressions")
+    .upsert({ tenant_id, email, reason: "manual" }, { onConflict: "tenant_id,email", ignoreDuplicates: true });
+  if (error) return { error: msgErro(error) };
+
+  if (input.contactId) {
+    await supabase.from("contacts").update({ opted_out: true }).eq("id", input.contactId);
+  }
+  revalidatePath("/dashboard/respostas");
+  return { ok: true };
+}
+
 // Remove a conversa da caixa (apaga as mensagens desse número/contato).
 export async function deleteThread(input: { phone: string; contactId?: string | null }) {
   const { supabase, tenant_id } = await ctx();
@@ -106,18 +141,25 @@ export type AlvoConversa = {
 
 const FATIA = 150;   // ids por consulta (limite de tamanho da URL do PostgREST)
 
-async function porFatias<T>(itens: T[], fn: (fatia: T[]) => Promise<any>) {
+// Devolve QUANTAS LINHAS foram realmente afetadas. Sem isso, uma operação que não
+// mexe em nada (RLS, filtro que não bate) é indistinguível de sucesso: a tela some
+// com a barra de seleção, o usuário acha que apagou, e as conversas continuam lá.
+// É exatamente o sintoma de "seleciono e não acontece nada".
+async function porFatias<T>(itens: T[], fn: (fatia: T[]) => Promise<any>): Promise<number> {
+  let total = 0;
   for (let i = 0; i < itens.length; i += FATIA) {
     const r = await fn(itens.slice(i, i + FATIA));
     if (r?.error) throw r.error;
+    total += r?.count ?? 0;
   }
+  return total;
 }
 
 // Aplica uma operação (apagar ou marcar como lida) às conversas selecionadas.
 async function operarConversas(
   alvos: AlvoConversa[],
   op: "excluir" | "marcarLida"
-): Promise<{ ok?: boolean; whatsapp?: number; email?: number; error?: string }> {
+): Promise<{ ok?: boolean; whatsapp?: number; email?: number; mensagens?: number; error?: string }> {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
 
@@ -133,27 +175,43 @@ async function operarConversas(
   const emEnderecos = Array.from(new Set(em.filter((t) => !t.contactId).map((t) => (t.email || "").trim().toLowerCase()).filter(Boolean)));
 
   const agora = new Date().toISOString();
-  const aplicar = (q: any) => (op === "excluir" ? q.delete() : q.update({ read_at: agora }));
+  // `count: "exact"` faz o PostgREST devolver quantas linhas foram afetadas sem trazer
+  // os dados. É o número que a tela precisa para nunca mais mentir "pronto" sem ter feito nada.
+  const aplicar = (q: any) =>
+    op === "excluir"
+      ? q.delete({ count: "exact" })
+      : q.update({ read_at: agora }, { count: "exact" });
 
+  let mensagens = 0;
   try {
     if (waContatos.length) {
-      await porFatias(waContatos, (f) =>
+      mensagens += await porFatias(waContatos, (f) =>
         aplicar(supabase.from("whatsapp_messages")).eq("tenant_id", tenant_id).in("contact_id", f));
     }
     if (waFones.length) {
-      await porFatias(waFones, (f) =>
+      mensagens += await porFatias(waFones, (f) =>
         aplicar(supabase.from("whatsapp_messages")).eq("tenant_id", tenant_id).in("phone", f).is("contact_id", null));
     }
     if (emContatos.length) {
-      await porFatias(emContatos, (f) =>
+      mensagens += await porFatias(emContatos, (f) =>
         aplicar(supabase.from("email_messages")).eq("tenant_id", tenant_id).in("contact_id", f));
     }
     if (emEnderecos.length) {
-      await porFatias(emEnderecos, (f) =>
+      mensagens += await porFatias(emEnderecos, (f) =>
         aplicar(supabase.from("email_messages")).eq("tenant_id", tenant_id).in("email", f).is("contact_id", null));
     }
   } catch (e: any) {
     return { error: msgErro(e) };
+  }
+
+  // Zero linhas com conversas selecionadas é FALHA, não sucesso silencioso.
+  if (mensagens === 0) {
+    return {
+      error:
+        op === "excluir"
+          ? "Nenhuma mensagem foi apagada. As conversas selecionadas não bateram com nada no banco — me avise se isso se repetir."
+          : "Nenhuma conversa foi marcada como lida (talvez já estivessem todas lidas).",
+    };
   }
 
   // Exclusão em massa na caixa é destrutiva e some com histórico de conversa —
@@ -167,13 +225,13 @@ async function operarConversas(
       action: "thread_delete_bulk",
       entity: "message",
       qtd: lista.length,
-      detail: `Excluiu ${lista.length} conversa(s) da caixa (${wa.length} WhatsApp, ${em.length} e-mail).`,
-      meta: { whatsapp: wa.length, email: em.length },
+      detail: `Excluiu ${lista.length} conversa(s) da caixa (${wa.length} WhatsApp, ${em.length} e-mail) — ${mensagens} mensagens.`,
+      meta: { whatsapp: wa.length, email: em.length, mensagens },
     });
   }
 
   revalidatePath("/dashboard/respostas");
-  return { ok: true, whatsapp: wa.length, email: em.length };
+  return { ok: true, whatsapp: wa.length, email: em.length, mensagens };
 }
 
 export async function excluirConversas(alvos: AlvoConversa[]) {

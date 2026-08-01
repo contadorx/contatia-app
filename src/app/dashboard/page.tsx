@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import TaskQueue from "@/components/TaskQueue";
+import EngajouSemPasso from "@/components/EngajouSemPasso";
 import EnviosHoje from "@/components/EnviosHoje";
 import { enviosDeHoje } from "@/lib/enviosHoje";
 import { isManager } from "@/lib/permissions";
@@ -111,8 +112,9 @@ export default async function Today() {
     if (!lastActivity[e.contact_id]) lastActivity[e.contact_id] = { type: e.type, created_at: e.created_at, text: e.meta?.text };
   }
 
-  // "quente agora": engajamento forte (respondeu / abriu proposta / abriu e-mail) nas últimas 48h
-  const HOT_NOW_TYPES = new Set(["replied", "doc_opened", "email_opened"]);
+  // "quente agora": engajamento forte (respondeu / abriu proposta / abriu e-mail / clicou)
+  // nas últimas 48h
+  const HOT_NOW_TYPES = new Set(["replied", "doc_opened", "email_opened", "link_clicked"]);
   const now48 = Date.now() - 48 * 3600000;
   const hotNowByContact: Record<string, { type: string; created_at: string }> = {};
   for (const e of (evs as any[]) || []) {
@@ -121,6 +123,48 @@ export default async function Today() {
       hotNowByContact[e.contact_id] = { type: e.type, created_at: e.created_at };
     }
   }
+
+  // ============================================================
+  // ENGAJOU E NÃO TEM PRÓXIMO PASSO
+  //
+  // O "Engajou agora" era derivado das TAREFAS PENDENTES: a página buscava as tarefas,
+  // tirava os contact_id delas e só então olhava os eventos. Quem respondeu mas terminou
+  // (ou nunca teve) cadência não tem tarefa — e por isso ficava INVISÍVEL. É o pior caso
+  // possível: o lead mais quente do dia, escondido justamente por não ter mais nada
+  // agendado.
+  //
+  // Agora os eventos são consultados por conta própria, no workspace inteiro, e este
+  // bloco mostra a diferença: quem engajou e NÃO tem tarefa pendente.
+  // ============================================================
+  const desde48 = new Date(now48).toISOString();
+  const { data: evsLivres } = await supabase
+    .from("events")
+    .select("contact_id, type, created_at")
+    .in("type", ["replied", "doc_opened", "email_opened", "link_clicked"])
+    .gte("created_at", desde48)
+    .order("created_at", { ascending: false })
+    .limit(300);
+
+  const comTarefa = new Set(contactIds as string[]);
+  const semPasso: Record<string, { type: string; created_at: string }> = {};
+  for (const e of (evsLivres as any[]) || []) {
+    if (!e.contact_id || comTarefa.has(e.contact_id) || semPasso[e.contact_id]) continue;
+    semPasso[e.contact_id] = { type: e.type, created_at: e.created_at };
+  }
+  const idsSemPasso = Object.keys(semPasso).slice(0, 30);
+  const { data: ctsSemPasso } = idsSemPasso.length
+    ? await supabase.from("contacts").select("id, name, company, score").in("id", idsSemPasso)
+    : { data: [] as any[] };
+  const engajouSemPasso = ((ctsSemPasso as any[]) || [])
+    .map((c) => ({
+      id: c.id as string,
+      name: c.name as string,
+      company: (c.company as string) || null,
+      score: (c.score as number) ?? 0,
+      tipo: semPasso[c.id].type as string,
+      quando: semPasso[c.id].created_at as string,
+    }))
+    .sort((a, b) => (b.quando || "").localeCompare(a.quando || ""));
 
   // anexa cadência + tags a cada task; separa "hoje/atrasados" de "próximos"
   const tasks = sorted.map((t) => ({
@@ -141,6 +185,13 @@ export default async function Today() {
 
   // tags disponíveis para o filtro
   const { data: allTags } = await supabase.from("tags").select("id, name, color").order("name", { ascending: true });
+  // cadências ativas: o bloco "engajou e está sem próximo passo" precisa oferecer
+  // a matrícula ali mesmo — mandar a pessoa até a ficha para isso seria um passo a mais
+  // justamente no momento em que a pressa importa.
+  const { data: seqsHome } = engajouSemPasso.length
+    ? await supabase.from("sequences").select("id, name").eq("is_active", true).order("created_at", { ascending: false })
+    : { data: [] as any[] };
+  const seqsAtivas = ((seqsHome as any[]) || []).map((s) => ({ id: s.id as string, name: s.name as string }));
   const todayCount = tasks.filter((t) => !t.is_future).length;
   const hotNowCount = new Set(tasks.filter((t) => t.hot_now).map((t) => t.contact_id)).size;
 
@@ -200,7 +251,9 @@ export default async function Today() {
         <EnviosHoje dados={envios} gestor={souGestor} />
       </div>
 
-      <h2 className="mb-3 font-display text-lg font-bold">Fila de hoje</h2>
+      <EngajouSemPasso linhas={engajouSemPasso} sequences={seqsAtivas} />
+
+      <h2 className="mb-3 mt-8 font-display text-lg font-bold">Fila de hoje</h2>
       <TaskQueue tasks={tasks} hotThreshold={HOT_THRESHOLD} lastActivity={lastActivity} allTags={(allTags as any[]) || []} waMode={waMode} />
     </div>
   );

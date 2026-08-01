@@ -41,11 +41,18 @@ export function EmailFinder({
   contactName,
   companyDomain,
   discovery,
+  // `revisao`: o contato JÁ tem e-mail e a pessoa quer saber se existe um mais atual.
+  // Muda o texto (não é "achar", é "conferir") e libera a busca forçada — que só
+  // substitui o endereço quando o servidor CONFIRMA o novo.
+  revisao = false,
+  emailAtual = null,
 }: {
   contactId: string;
   contactName?: string;
   companyDomain?: string | null;
   discovery?: string | null;
+  revisao?: boolean;
+  emailAtual?: string | null;
 }) {
   const [dominio, setDominio] = useState(companyDomain || "");
   const [res, setRes] = useState<ResultadoBusca | null>(null);
@@ -80,7 +87,7 @@ export function EmailFinder({
     setDominio(limpo);
     setRes(null);
     start(async () => {
-      const r = await buscarEmailAgora(contactId, limpo);
+      const r = await buscarEmailAgora(contactId, limpo, revisao);
       setRes(r);
       // NÃO recarrega sozinho — deixa o resultado na tela até o usuário atualizar
     });
@@ -97,12 +104,23 @@ export function EmailFinder({
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-lg">🔎</div>
         <div className="min-w-0 flex-1">
-          <p className="font-display font-semibold">Achar o e-mail de {contactName || "quem decide"}</p>
-          <p className="mt-1 text-sm text-subtle">
-            O LinkedIn não mostra e-mail. Diga o <b>site da empresa</b> e eu testo os padrões
-            (joao.silva@, jsilva@, joao@…), <b>confirmando com o servidor dela</b> se a caixa
-            existe. Se não confirmar, procuro o e-mail que a empresa <b>publicou no site</b>.
+          <p className="font-display font-semibold">
+            {revisao ? `Conferir o e-mail de ${contactName || "quem decide"}` : `Achar o e-mail de ${contactName || "quem decide"}`}
           </p>
+          {revisao ? (
+            <p className="mt-1 text-sm text-subtle">
+              Hoje está <b>{emailAtual}</b>. Eu testo de novo os padrões do decisor contra o
+              servidor do domínio. <b>Só troco se o servidor confirmar</b> um endereço
+              diferente — endereço genérico do site (contato@, faleconosco@) eu apenas
+              informo, sem substituir o atual.
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-subtle">
+              O LinkedIn não mostra e-mail. Diga o <b>site da empresa</b> e eu testo os padrões
+              (joao.silva@, jsilva@, joao@…), <b>confirmando com o servidor dela</b> se a caixa
+              existe. Se não confirmar, procuro o e-mail que a empresa <b>publicou no site</b>.
+            </p>
+          )}
           {semSobrenome && (
             <p className="mt-2 rounded-lg bg-warn/10 p-2 text-xs text-warn">
               Este contato tem só um nome. Adicione o <b>sobrenome</b> em “Editar dados” para testar todos os padrões (nome.sobrenome@, nsobrenome@…). Só com o primeiro nome, testamos um único palpite.
@@ -125,7 +143,7 @@ export function EmailFinder({
           />
         </div>
         <button className="btn-brand" onClick={buscar} disabled={pending || !dominio.trim()}>
-          {pending ? "Procurando…" : "Procurar e-mail"}
+          {pending ? "Procurando…" : revisao ? "Conferir agora" : "Procurar e-mail"}
         </button>
       </div>
 

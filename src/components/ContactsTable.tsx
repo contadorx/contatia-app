@@ -28,10 +28,40 @@ type Contact = {
   assigned_to: string | null;
   last_activity_at?: string | null;
   wa_status?: string | null;
+  wa_checked_at?: string | null;
   web_capture?: string | null;
+  email_discovery?: string | null;
   emailPendente?: boolean;
   contact_tags?: { tag_id: string; tags: { id: string; name: string; color: string } | null }[];
 };
+
+// ============================================================
+// A COLUNA "CONTATO" — de texto para AÇÃO
+//
+// Antes ela imprimia o e-mail cru (e o telefone só quando não havia e-mail). Isso
+// gastava a maior largura da tabela com uma informação que quase nunca precisa ser
+// LIDA — e escondia o telefone de quem tem os dois. Agora ela mostra o que dá para
+// FAZER com o contato: escrever, chamar no WhatsApp, ou resolver o que falta.
+//
+// E resolve a outra queixa: quem teve problema na verificação não tinha nenhum sinal.
+// `precisaRevisar` transforma os estados de falha (wa_status='error', descoberta que
+// voltou 'not_found'/'uncertain'/'blocked', captura de site com erro) num selo âmbar
+// clicável, em vez de silêncio.
+// ============================================================
+type Revisao = { label: string; title: string } | null;
+function precisaRevisar(c: Contact): Revisao {
+  if (c.wa_status === "error")
+    return { label: "revisar WhatsApp", title: "A verificação do WhatsApp falhou neste número. Selecione o contato e rode “Verificar WhatsApp” de novo." };
+  if (c.web_capture === "error")
+    return { label: "revisar site", title: "A captura no site da empresa deu erro. Selecione o contato e rode “Capturar do site” de novo." };
+  if (!c.email && c.email_discovery === "uncertain")
+    return { label: "e-mail incerto", title: "A descoberta encontrou um endereço provável mas o servidor não confirmou. Abra a ficha para decidir." };
+  if (!c.email && c.email_discovery === "blocked")
+    return { label: "domínio bloqueia", title: "O servidor do domínio recusa a verificação por SMTP. Descobrir o e-mail aí depende do site ou de contato humano." };
+  if (!c.email && c.email_discovery === "not_found")
+    return { label: "e-mail não achado", title: "A descoberta rodou e não confirmou nenhum endereço. Abra a ficha para tentar de novo com outro nome/domínio." };
+  return null;
+}
 
 // Estágio da esteira do Radar, derivado dos campos existentes (sem query extra por linha).
 // Ordem: raspando o site → descobrindo e-mail → verificando WhatsApp → pronto → sem canal.
@@ -538,8 +568,11 @@ export default function ContactsTable({
         )}
       </div>
 
-      <div className="card overflow-visible">
-        <table className="w-full text-sm">
+      {/* overflow-x-auto: a tabela tem 9 colunas e largura mínima maior que a área útil.
+          Sem isso ela empurrava a PÁGINA INTEIRA para o lado — por isso só cabia a 70%
+          de zoom. Agora quem rola é a tabela, não a tela. */}
+      <div className="card overflow-x-auto">
+        <table className="w-full min-w-[1040px] text-sm">
           <thead className="border-b border-line text-left text-subtle">
             <tr>
               <th className="px-3 py-3">
@@ -563,8 +596,8 @@ export default function ContactsTable({
                   <td className="px-3 py-3">
                     <input type="checkbox" checked={checked} onChange={() => toggle(c.id)} aria-label={`Selecionar ${c.name}`} />
                   </td>
-                  <td className="px-4 py-3 font-medium">
-                    <Link href={`/dashboard/contatos/${c.id}`} className="text-brand-dark hover:underline">
+                  <td className="max-w-[260px] px-4 py-3 font-medium">
+                    <Link href={`/dashboard/contatos/${c.id}`} className="text-brand-dark hover:underline" title={c.name}>
                       {c.name}
                     </Link>
                     {(() => {
@@ -598,40 +631,78 @@ export default function ContactsTable({
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-subtle">{c.company || "—"}</td>
-                  <td className="px-4 py-3 text-subtle">
-                    {c.email ? (
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        {c.email}
-                        {c.wa_status === "valid" && (
-                          <span className="rounded-full bg-signal/10 px-1.5 py-0.5 text-[10px] font-semibold text-signal">WhatsApp ✓</span>
-                        )}
-                      </span>
-                    ) : c.phone ? (
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        {c.phone}
-                        {c.wa_status === "valid" ? (
-                          <span className="rounded-full bg-signal/10 px-1.5 py-0.5 text-[10px] font-semibold text-signal">WhatsApp ✓</span>
-                        ) : c.wa_status === "invalid" ? (
-                          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-subtle">sem WhatsApp</span>
-                        ) : (
-                          <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] font-semibold text-warn">
-                            sem e-mail
-                          </span>
-                        )}
-                      </span>
-                    ) : (
-                      <Link
-                        href={`/dashboard/contatos/${c.id}`}
-                        className="rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-semibold text-danger hover:bg-danger/20"
-                        title="Sem e-mail nem telefone — clique para completar o cadastro. Sem um deles, o contato não entra em cadência."
-                      >
-                        sem contato — preencher
-                      </Link>
-                    )}
-                  </td>
+                  <td className="max-w-[200px] truncate px-4 py-3 text-subtle" title={c.company || ""}>{c.company || "—"}</td>
                   <td className="px-4 py-3">
-                    {c.origin ? <span className="rounded-full bg-brand-soft px-2 py-0.5 text-xs text-brand-dark">{c.origin}</span> : "—"}
+                    {(() => {
+                      const rev = precisaRevisar(c);
+                      const temAlgo = c.email || c.phone;
+                      if (!temAlgo) {
+                        return (
+                          <Link
+                            href={`/dashboard/contatos/${c.id}`}
+                            className="rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-semibold text-danger hover:bg-danger/20"
+                            title="Sem e-mail nem telefone — clique para completar o cadastro. Sem um deles, o contato não entra em cadência."
+                          >
+                            sem contato — preencher
+                          </Link>
+                        );
+                      }
+                      return (
+                        <div className="flex flex-wrap items-center gap-1">
+                          {c.email && (
+                            <Link
+                              href={`/dashboard/contatos/${c.id}#enviar`}
+                              title={`Escrever para ${c.email}`}
+                              className="inline-flex items-center gap-1 rounded-full border border-brand/30 bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand-dark hover:border-brand"
+                            >
+                              ✉ E-mail
+                            </Link>
+                          )}
+                          {c.phone && c.wa_status === "valid" && (
+                            <Link
+                              href={`/dashboard/contatos/${c.id}#enviar`}
+                              title={`Conversar no WhatsApp — ${c.phone}`}
+                              className="inline-flex items-center gap-1 rounded-full border border-signal/30 bg-signal/10 px-2 py-0.5 text-[11px] font-semibold text-signal hover:border-signal"
+                            >
+                              WhatsApp ✓
+                            </Link>
+                          )}
+                          {c.phone && c.wa_status !== "valid" && (
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                c.wa_status === "invalid" ? "bg-muted text-subtle" : "bg-muted text-subtle"
+                              }`}
+                              title={
+                                c.wa_status === "invalid"
+                                  ? `${c.phone} — verificado e não tem WhatsApp.`
+                                  : c.wa_status === "queued"
+                                  ? `${c.phone} — na fila de verificação.`
+                                  : `${c.phone} — WhatsApp ainda não verificado. Selecione o contato e use “Verificar WhatsApp”.`
+                              }
+                            >
+                              {c.wa_status === "invalid" ? "sem WhatsApp" : c.wa_status === "queued" ? "verificando…" : "WA não verificado"}
+                            </span>
+                          )}
+                          {!c.email && (
+                            <span className="rounded-full bg-warn/10 px-2 py-0.5 text-[11px] font-semibold text-warn" title="Sem e-mail: só dá para trabalhar por WhatsApp.">
+                              sem e-mail
+                            </span>
+                          )}
+                          {rev && (
+                            <Link
+                              href={`/dashboard/contatos/${c.id}`}
+                              title={rev.title}
+                              className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700 hover:bg-amber-200"
+                            >
+                              ⚠ {rev.label}
+                            </Link>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </td>
+                  <td className="max-w-[140px] truncate px-4 py-3">
+                    {c.origin ? <span className="rounded-full bg-brand-soft px-2 py-0.5 text-xs text-brand-dark" title={c.origin}>{c.origin}</span> : "—"}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-sm font-semibold ${(c.score ?? 0) >= 25 ? "text-warn" : "text-subtle"}`}>{c.score ?? 0}</span>
