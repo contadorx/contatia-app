@@ -34,6 +34,9 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   // resultados
   const [resultados, setResultados] = useState<Empresa[]>([]);
   const [total, setTotal] = useState<number | null>(null);
+  // busca ampla (sem UF e sem termo): a contagem não é pedida de propósito — contar um
+  // CNAE no Brasil inteiro é o que fazia a busca estourar o tempo.
+  const [semContagem, setSemContagem] = useState(false);
   const [casadas, setCasadas] = useState<Atividade[]>([]);
   const [temMais, setTemMais] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
@@ -107,6 +110,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       if (offset === 0) {
         setResultados(novas);
         setTotal(r.total);
+        setSemContagem(r.semContagem === true);
         setCasadas(r.atividades || []);
         setSel(new Set());
       } else {
@@ -342,7 +346,9 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <p className="text-sm text-subtle">
               {total === null
-                ? <>Muitos resultados — refine UF/município. Mostrando {resultados.length}.</>
+                ? semContagem
+                  ? <>Mostrando <b>{resultados.length}</b>. <span className="text-xs">Sem estado escolhido eu não conto o total — contar um CNAE no Brasil inteiro demora mais que a própria busca. Escolha uma UF para ver o número exato.</span></>
+                  : <>Muitos resultados — refine UF/município. Mostrando {resultados.length}.</>
                 : <><b>{total.toLocaleString("pt-BR")}</b> empresa(s) encontradas — mostrando {resultados.length}.</>}
             </p>
             {casadas.length > 0 && (

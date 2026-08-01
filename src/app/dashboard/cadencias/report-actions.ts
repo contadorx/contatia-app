@@ -24,6 +24,10 @@ export type StepReport = {
   subject_b: string | null;
   sent: number;       // tasks concluídas (enviadas) nesse passo
   replied: number;    // respostas atribuíveis a esse passo
+  rastreados: number; // e-mails deste passo com pixel (base honesta da taxa de abertura)
+  abertos: number;    // quantos desses foram abertos ao menos uma vez
+  comLink: number;    // e-mails deste passo que tinham link rastreado
+  clicados: number;   // quantos desses tiveram ao menos um clique
   ab?: { a: { sent: number; replied: number }; b: { sent: number; replied: number } } | null;
 };
 
@@ -77,6 +81,37 @@ export async function getCadenceReport(sequenceId: string) {
     }
   }
 
+  // ============================================================
+  // ABERTURAS E CLIQUES POR PASSO (0108)
+  //
+  // A base da taxa NÃO é "quantos enviei": é "quantos foram RASTREADOS". E-mail em
+  // texto puro não leva pixel, e e-mail sem link nenhum não tem o que clicar — contar
+  // esses no denominador faria toda cadência parecer pior do que é.
+  //
+  // As duas consultas usam select("*"): pedir sequence_id/step_position pelo nome
+  // quebraria o relatório inteiro enquanto a 0108 não estiver aplicada.
+  // ============================================================
+  const abrePorPasso: Record<number, { total: number; abertos: number }> = {};
+  const cliquePorPasso: Record<number, { total: number; clicados: number }> = {};
+  try {
+    const { data: opens } = await supabase.from("email_opens").select("*").eq("sequence_id", sequenceId);
+    for (const o of ((opens as any[]) || [])) {
+      const pos = o.step_position ?? 0;
+      const a = (abrePorPasso[pos] ||= { total: 0, abertos: 0 });
+      a.total++;
+      if ((o.opens || 0) > 0) a.abertos++;
+    }
+  } catch { /* sem 0108: fica zerado, e a tela diz por quê */ }
+  try {
+    const { data: cliques } = await supabase.from("link_clicks").select("*").eq("sequence_id", sequenceId);
+    for (const c of ((cliques as any[]) || [])) {
+      const pos = c.step_position ?? 0;
+      const a = (cliquePorPasso[pos] ||= { total: 0, clicados: 0 });
+      a.total++;
+      if ((c.clicks || 0) > 0) a.clicados++;
+    }
+  } catch { /* idem */ }
+
   const report: StepReport[] = (steps as any[]).map((s) => {
     const pos = s.position;
     const sentTasks = tasks.filter((t) => (t.step_position ?? 0) === pos && t.status === "done");
@@ -104,6 +139,10 @@ export async function getCadenceReport(sequenceId: string) {
       subject_b: s.subject_b,
       sent: sentTasks.length,
       replied,
+      rastreados: abrePorPasso[pos]?.total ?? 0,
+      abertos: abrePorPasso[pos]?.abertos ?? 0,
+      comLink: cliquePorPasso[pos]?.total ?? 0,
+      clicados: cliquePorPasso[pos]?.clicados ?? 0,
       ab: hasAB ? { a: abA, b: abB } : null,
     };
   });

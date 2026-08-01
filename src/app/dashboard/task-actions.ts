@@ -98,7 +98,10 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
 
   const { data: task } = await supabase
     .from("tasks")
-    .select("id, channel, title, generated_content, contact_id, email_account_id, contacts(email, name, email_status)")
+    // enrollment_id/step_position entram aqui para o rastreio saber DE QUAL PASSO o
+    // e-mail saiu — sem isso, "cliques e aberturas por passo" é impossível de montar
+    // depois: a origem só é conhecida no momento do envio.
+    .select("id, channel, title, generated_content, contact_id, email_account_id, enrollment_id, step_position, contacts(email, name, email_status)")
     .eq("id", taskId)
     .single();
   if (!task) return { error: "Tarefa não encontrada." };
@@ -205,13 +208,28 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
       : "Limite diário atingido em todas as caixas (Envio Seguro). Tente amanhã ou conecte outra caixa." };
   }
 
-  // reescreve links para rastreados (ativa o gatilho link_clicked)
+  // ---- RASTREIO: links + pixel de abertura, ambos atribuídos ao passo ----
   let bodyText = task.generated_content || "";
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL ? (process.env.NEXT_PUBLIC_APP_URL || `https://${process.env.VERCEL_URL}`) : "";
+  // a cadência de onde veio a tarefa (para o relatório por passo)
+  let sequenceId: string | null = null;
+  if ((task as any).enrollment_id) {
+    const { data: enr } = await supabase
+      .from("enrollments").select("sequence_id").eq("id", (task as any).enrollment_id).maybeSingle();
+    sequenceId = ((enr as any)?.sequence_id as string) || null;
+  }
+  const atribuicao = {
+    tenantId: tenant_id,
+    contactId: (task as any).contact_id ?? null,
+    enrollmentId: (task as any).enrollment_id ?? null,
+    sequenceId,
+    taskId: (task as any).id ?? null,
+    stepPosition: (task as any).step_position ?? null,
+  };
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL ? (process.env.NEXT_PUBLIC_APP_URL || `https://${process.env.VERCEL_URL}`) : "";
     if (baseUrl) {
       const { wrapLinks } = await import("@/lib/linktrack");
-      bodyText = await wrapLinks(supabase, { tenantId: tenant_id, contactId: (task as any).contact_id ?? null, body: bodyText, baseUrl });
+      bodyText = await wrapLinks(supabase, { ...atribuicao, body: bodyText, baseUrl });
     }
   } catch {
     /* rastreio de link não deve bloquear o envio */
@@ -227,7 +245,20 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   // Monta o corpo final (corpo + assinatura), ciente de HTML: se o corpo OU a
   // assinatura tiverem formatação, vai como HTML; senão, texto puro (legado).
   const built = buildEmailHtml(bodyText, sigRendered);
-  const html = built.html;
+  let html = built.html;
+
+  // ---- PIXEL DE ABERTURA ----
+  // Só em e-mail HTML. Converter um corpo de texto puro em HTML só para medir seria
+  // piorar o e-mail em nome de um número fraco (ver a nota em @/lib/aberturas).
+  if (html && baseUrl) {
+    try {
+      const { tagDePixel } = await import("@/lib/aberturas");
+      const tag = await tagDePixel(supabase, atribuicao, baseUrl);
+      if (tag) html = html.includes("</body>") ? html.replace("</body>", `${tag}</body>`) : html + tag;
+    } catch {
+      /* rastreio nunca impede o envio */
+    }
+  }
   bodyText = built.text;
 
   // ============================================================

@@ -176,14 +176,31 @@ export async function buscarNaBase(input: any, offset = 0) {
   // valor entrou no filtro — a tela avisa em vez de mentir um resultado "completo".
   const pediuMulti = (f.ufs?.length || 0) > 1 || (f.portes?.length || 0) > 1;
 
+  // ============================================================
+  // A CONTAGEM É A PARTE CARA
+  //
+  // "Atividade sem estado" nunca foi proibido — o filtro acima aceita atividade
+  // sozinha. O que acontecia é que a busca ESTOURAVA O TEMPO: contar quantas empresas
+  // de um CNAE existem no Brasil inteiro obriga o Postgres a varrer a base toda, e
+  // isso demora mais que a página de 100 resultados. A tela dizia "Base demorou a
+  // responder" (ou morria antes disso), e a impressão foi de que a busca tinha
+  // deixado de aceitar atividade sem UF.
+  //
+  // Agora: busca ampla (sem estado, sem CNPJ, sem termo) NÃO pede a contagem. Os
+  // resultados chegam rápido e a tela mostra "muitos resultados" em vez de um total
+  // exato que ninguém usa para decidir. Com estado escolhido, a contagem volta.
+  // ============================================================
+  const buscaAmpla = !f.uf && (!f.ufs || f.ufs.length === 0) && !f.termo;
+
   // Caminho normal (sem ocultar): uma página de 100 direto da base.
   if (!ocultar) {
-    const r = await buscarEmpresas({ ...f, limit: 100, offset: off, contar: off === 0 });
+    const r = await buscarEmpresas({ ...f, limit: 100, offset: off, contar: off === 0 && !buscaAmpla });
     if (r.error) return { error: r.error };
     const rows = await marcarJaTem(r.rows);
     return {
       ok: true, total: r.total, atividades: r.atividades, rows, offset: off,
       nextOffset: off + r.rows.length, temMais: r.rows.length === 100,
+      semContagem: buscaAmpla,
       avisoMulti: pediuMulti && !r.multi ? avisoApiAntiga(f) : undefined,
     };
   }

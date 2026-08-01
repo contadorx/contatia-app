@@ -9,8 +9,17 @@ function fmt(iso: string | null) {
   return iso ? new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
 }
 
-export default async function Propostas() {
+export default async function Propostas({
+  searchParams,
+}: {
+  searchParams: { q?: string; tipo?: string; envio?: string };
+}) {
   const supabase = createClient();
+  // Filtros em memória: a lista é pequena (documentos do workspace) e assim o recorte
+  // de "só os abertos" — que é o que interessa de verdade — sai de graça.
+  const q = (searchParams?.q || "").trim().toLowerCase();
+  const tipoF = searchParams?.tipo || "";
+  const envioF = searchParams?.envio || "";   // abertos | naoabertos
 
   const [{ data: docs }, { data: contacts }, { data: shares }] = await Promise.all([
     supabase.from("documents").select("id, name, type, url, storage_path, created_at").order("created_at", { ascending: false }),
@@ -22,9 +31,21 @@ export default async function Propostas() {
       .limit(50),
   ]);
 
-  const docList = (docs as any[]) || [];
+  const docsTodos = (docs as any[]) || [];
+  const docList = docsTodos.filter((d) => {
+    if (tipoF && d.type !== tipoF) return false;
+    if (!q) return true;
+    return `${d.name || ""} ${d.type || ""}`.toLowerCase().includes(q);
+  });
+  const tiposExistentes = Array.from(new Set(docsTodos.map((d) => d.type).filter(Boolean))) as string[];
   const contactList = (contacts as { id: string; name: string }[]) || [];
-  const shareList = (shares as any[]) || [];
+  const sharesTodos = (shares as any[]) || [];
+  const shareList = sharesTodos.filter((s: any) => {
+    if (envioF === "abertos" && !(s.total_opens > 0)) return false;
+    if (envioF === "naoabertos" && s.total_opens > 0) return false;
+    if (!q) return true;
+    return `${s.documents?.name || ""} ${s.contacts?.name || ""}`.toLowerCase().includes(q);
+  });
   const trackingReady = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   // retenção (política do plano) para avisar expiração dos arquivos
@@ -51,6 +72,39 @@ export default async function Propostas() {
       <div className="mt-6">
         <ProposalForm />
       </div>
+
+      {docsTodos.length > 0 && (
+        <div className="mt-6 rounded-xl border border-line bg-surface p-3">
+          <form method="get" className="flex flex-wrap items-center gap-2">
+            <input
+              name="q"
+              defaultValue={searchParams?.q || ""}
+              placeholder="Buscar por documento ou contato…"
+              className="input min-w-[220px] flex-1 py-1.5 text-sm"
+            />
+            {tiposExistentes.length > 1 && (
+              <select name="tipo" defaultValue={tipoF} className="input w-auto py-1.5 text-sm">
+                <option value="">Qualquer tipo</option>
+                {tiposExistentes.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            )}
+            <select name="envio" defaultValue={envioF} className="input w-auto py-1.5 text-sm">
+              <option value="">Todos os envios</option>
+              <option value="abertos">Só os abertos</option>
+              <option value="naoabertos">Só os não abertos</option>
+            </select>
+            <button className="btn-brand py-1.5 text-sm" type="submit">Filtrar</button>
+            {(q || tipoF || envioF) && (
+              <a href="/dashboard/propostas" className="text-xs text-subtle underline hover:text-ink">limpar</a>
+            )}
+          </form>
+          <p className="mt-2 text-xs text-subtle">
+            {docList.length} de {docsTodos.length} documento(s) · {shareList.length} de {sharesTodos.length} envio(s).
+          </p>
+        </div>
+      )}
 
       <div className="mt-6 space-y-3">
         {docList.length ? (

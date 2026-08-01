@@ -48,6 +48,25 @@ export function CadenceReport({ sequenceId }: { sequenceId: string }) {
                     </span>
                   </div>
                   {s.subject && <p className="truncate text-xs text-subtle">"{s.subject}"</p>}
+                  {/* Aberturas e cliques. O denominador é o RASTREADO, não o enviado:
+                      e-mail em texto puro não leva pixel e e-mail sem link não tem o
+                      que clicar — contar esses derrubaria a taxa sem motivo. */}
+                  {(s.rastreados > 0 || s.comLink > 0) && (
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-subtle">
+                      {s.rastreados > 0 && (
+                        <span title={`${s.abertos} de ${s.rastreados} e-mails rastreados foram abertos ao menos uma vez.`}>
+                          👁 <b className="text-ink">{pct(s.abertos, s.rastreados)}</b> abertura
+                          <span className="text-subtle"> ({s.abertos}/{s.rastreados})</span>
+                        </span>
+                      )}
+                      {s.comLink > 0 && (
+                        <span title={`${s.clicados} de ${s.comLink} e-mails com link tiveram ao menos um clique.`}>
+                          🔗 <b className="text-ink">{pct(s.clicados, s.comLink)}</b> clique
+                          <span className="text-subtle"> ({s.clicados}/{s.comLink})</span>
+                        </span>
+                      )}
+                    </p>
+                  )}
                   {s.ab && (
                     <div className="mt-1 grid grid-cols-2 gap-2 rounded bg-muted/60 p-2 text-xs">
                       <div>
@@ -69,6 +88,15 @@ export function CadenceReport({ sequenceId }: { sequenceId: string }) {
                   )}
                 </div>
               ))}
+              {report.some((s) => s.rastreados > 0) && (
+                <p className="rounded-lg bg-muted/60 p-2 text-[11px] text-subtle">
+                  <b>Sobre a abertura:</b> ela é medida por uma imagem invisível no e-mail e
+                  é um sinal <b>fraco</b>. O Apple Mail baixa as imagens sozinho quando a
+                  mensagem chega (conta como aberto sem ninguém abrir), e quem lê com
+                  imagens desligadas nunca aparece. Use para <b>comparar assuntos entre si</b>,
+                  não como número absoluto. Clique e resposta são os sinais confiáveis.
+                </p>
+              )}
             </div>
           )}
         </div>
