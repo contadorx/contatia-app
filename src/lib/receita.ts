@@ -67,6 +67,31 @@ function fetchTimeout(url: string, opts: RequestInit, ms: number): Promise<Respo
   return fetch(url, { ...opts, signal: AbortSignal.timeout(ms) });
 }
 
+// ============================================================
+// BUG QUE ESTAVA AQUI: o nome do erro de timeout
+//
+// O código testava `e.name === "AbortError"` para dizer "Base demorou a responder".
+// Só que `AbortSignal.timeout()` NÃO rejeita com AbortError — rejeita com
+// **TimeoutError**. (AbortError é o que o AbortController.abort() produz.)
+//
+// Resultado: TODO timeout caía no `else` e virava "Base indisponível." — a mensagem que
+// significa "a conexão nem se estabeleceu". Passamos horas procurando um servidor
+// caído, um certificado vencido e um nginx com problema, quando o servidor estava de pé
+// e a consulta é que demorava demais. A mensagem errada custou mais que o bug.
+//
+// É a segunda vez neste projeto que um teste de NOME/CÓDIGO de erro erra o alvo (a
+// primeira foi PGRST204 vs 42703, que sumiu com 257 envios). A lição repetida: não
+// depender de um identificador exato quando dá para verificar o comportamento.
+// ============================================================
+function msgFalha(e: any): string {
+  const nome = String(e?.name || "");
+  const txt = String(e?.message || "");
+  if (/timeout|abort/i.test(nome) || /timeout|aborted/i.test(txt)) {
+    return "A base demorou demais e eu cancelei a busca. Escolha um município (ou um estado) para reduzir o volume.";
+  }
+  return "Base indisponível (não consegui nem abrir a conexão com o servidor da base).";
+}
+
 // Autocomplete de atividade (texto → lista de CNAEs com descrição).
 export async function buscarAtividades(q: string): Promise<{ atividades: { cnae: string; descricao: string }[]; error?: string }> {
   const { url, token } = cfg();
@@ -82,7 +107,7 @@ export async function buscarAtividades(q: string): Promise<{ atividades: { cnae:
     const j = await res.json();
     return { atividades: Array.isArray(j.atividades) ? j.atividades : [] };
   } catch (e: any) {
-    return { atividades: [], error: e?.name === "AbortError" ? "Base demorou a responder." : "Base indisponível." };
+    return { atividades: [], error: msgFalha(e) };
   }
 }
 
@@ -103,7 +128,7 @@ export async function buscarEmpresaPorCnpj(cnpj: string): Promise<{ empresa: Emp
     const j = await res.json();
     return { empresa: j as EmpresaReceita };
   } catch (e: any) {
-    return { empresa: null, error: e?.name === "AbortError" ? "Base demorou a responder." : "Base indisponível." };
+    return { empresa: null, error: msgFalha(e) };
   }
 }
 
@@ -111,7 +136,8 @@ export async function buscarEmpresaPorCnpj(cnpj: string): Promise<{ empresa: Emp
 // `multi` = a API do VPS confirmou que entende listas de UF/porte (v3). Se vier false
 // e o operador marcou vários, a tela avisa que só o primeiro valor foi considerado.
 export async function buscarEmpresas(
-  f: FiltroReceita
+  f: FiltroReceita,
+  timeoutMs = 25_000
 ): Promise<{ rows: EmpresaReceita[]; total: number | null; atividades: { cnae: string; descricao: string }[]; multi?: boolean; error?: string }> {
   const { url, token } = cfg();
   if (!url || !token) return { rows: [], total: null, atividades: [], error: "Base da Receita não configurada." };
@@ -124,7 +150,7 @@ export async function buscarEmpresas(
         body: JSON.stringify(f),
         cache: "no-store",
       },
-      25_000
+      timeoutMs
     );
     const j = await res.json().catch(() => ({}));
     if (!res.ok) return { rows: [], total: null, atividades: [], error: j?.error || `Base respondeu ${res.status}` };
@@ -135,6 +161,6 @@ export async function buscarEmpresas(
       multi: j?.multi === true,
     };
   } catch (e: any) {
-    return { rows: [], total: null, atividades: [], error: e?.name === "AbortError" ? "Base demorou a responder." : "Base indisponível." };
+    return { rows: [], total: null, atividades: [], error: msgFalha(e) };
   }
 }

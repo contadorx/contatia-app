@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import SmartSelect from "@/components/SmartSelect";
-import { atividadesReceita, buscarNaBase, enviarParaCadastro, descartarCnpjs, reincluirCnpjs, exportarRadar } from "@/app/dashboard/radar/actions";
+import { atividadesReceita, buscarNaBase, contarNaBase, enviarParaCadastro, descartarCnpjs, reincluirCnpjs, exportarRadar } from "@/app/dashboard/radar/actions";
 
 const UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
 
@@ -37,6 +37,8 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   // busca ampla (sem UF e sem termo): a contagem não é pedida de propósito — contar um
   // CNAE no Brasil inteiro é o que fazia a busca estourar o tempo.
   const [semContagem, setSemContagem] = useState(false);
+  const [contando, setContando] = useState(false);
+  const [erroContagem, setErroContagem] = useState<string | null>(null);
   const [casadas, setCasadas] = useState<Atividade[]>([]);
   const [temMais, setTemMais] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
@@ -97,6 +99,23 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   const buscaDigitos = busca.replace(/\D/g, "");
   const temBusca = busca.trim().length >= 3 || buscaDigitos.length === 14;
   const temFiltro = temBusca || escolhidas.length > 0 || cnaeManual.replace(/\D/g, "").length >= 7 || termo.trim().length >= 3 || ufs.length > 0;
+
+  // Contagem sob demanda — chamada à parte, com orçamento próprio de tempo.
+  function contarTotal() {
+    setErroContagem(null);
+    setContando(true);
+    (async () => {
+      try {
+        const r: any = await contarNaBase(montarInput());
+        if (r?.error) setErroContagem(r.error);
+        else if (typeof r?.total === "number") { setTotal(r.total); setSemContagem(false); }
+      } catch (e: any) {
+        setErroContagem("A contagem não voltou a tempo. A lista acima continua válida.");
+      } finally {
+        setContando(false);
+      }
+    })();
+  }
 
   function buscar(offset = 0) {
     setErro(null);
@@ -337,6 +356,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       </div>
 
       {erro && <p className="mt-3 text-sm text-red-600">{erro}</p>}
+      {erroContagem && <p className="mt-2 text-xs text-warn">{erroContagem}</p>}
       {aviso && <p className="mt-3 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-sm text-warn">{aviso}</p>}
       {msg && <p className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{msg}</p>}
 
@@ -347,7 +367,23 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
             <p className="text-sm text-subtle">
               {total === null
                 ? semContagem
-                  ? <>Mostrando <b>{resultados.length}</b>. <span className="text-xs">Sem estado escolhido eu não conto o total — contar um CNAE no Brasil inteiro demora mais que a própria busca. Escolha uma UF para ver o número exato.</span></>
+                  ? (
+                    <>
+                      Mostrando <b>{resultados.length}</b>.{" "}
+                      <span className="text-xs">
+                        Não contei o total: contar é a parte cara — a lista sai em segundos,
+                        a contagem levaria mais de um minuto.
+                      </span>{" "}
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-brand-dark underline disabled:opacity-50"
+                        disabled={contando}
+                        onClick={contarTotal}
+                      >
+                        {contando ? "contando… (pode levar 1 min)" : "contar total mesmo assim"}
+                      </button>
+                    </>
+                  )
                   : <>Muitos resultados — refine UF/município. Mostrando {resultados.length}.</>
                 : <><b>{total.toLocaleString("pt-BR")}</b> empresa(s) encontradas — mostrando {resultados.length}.</>}
             </p>

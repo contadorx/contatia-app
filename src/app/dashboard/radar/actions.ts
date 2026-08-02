@@ -141,6 +141,22 @@ export async function atividadesReceita(q: string) {
 // Busca na base — devolve uma página de resultados + total.
 // A tela mostra os resultados com checkbox; a ação em lote é o envio.
 // ============================================================
+// Contagem sob demanda: uma chamada só para o total, com orçamento próprio de tempo.
+// Fica separada do resultado de propósito — assim a lista aparece rápido e o número,
+// que é caro, só é pago por quem realmente quer.
+export async function contarNaBase(input: any) {
+  const { tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  if (!receitaConfigurada()) return { error: "Base da Receita não configurada." };
+  const f = montarFiltro(input);
+  if (!f.atividade && !f.cnae && !f.uf && !f.termo) return { error: "Escolha um filtro antes de contar." };
+  // limit 1: não queremos linhas, só o total. 50s de teto (a rota tem 60).
+  const r = await buscarEmpresas({ ...f, limit: 1, offset: 0, contar: true }, 50_000);
+  if (r.error) return { error: r.error };
+  if (typeof r.total !== "number") return { error: "A base não devolveu o total." };
+  return { ok: true, total: r.total };
+}
+
 export async function buscarNaBase(input: any, offset = 0) {
   const { tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
@@ -190,7 +206,23 @@ export async function buscarNaBase(input: any, offset = 0) {
   // resultados chegam rápido e a tela mostra "muitos resultados" em vez de um total
   // exato que ninguém usa para decidir. Com estado escolhido, a contagem volta.
   // ============================================================
-  const buscaAmpla = !f.uf && (!f.ufs || f.ufs.length === 0) && !f.termo;
+  // ============================================================
+  // QUANDO NÃO CONTAR — a lição que o diagnóstico do VPS deu
+  //
+  // O `pg_stat_activity` do servidor flagrou a consulta que estava matando a busca:
+  //
+  //     select count(*)::bigint as n from estabelecimentos e where …   → 1min 13s
+  //
+  // Ou seja: a página de 100 resultados volta rápido (o índice novo resolveu isso),
+  // mas a CONTAGEM continua varrendo tudo — e ela roda na mesma requisição. Um estado
+  // inteiro não é recorte pequeno: contabilidade em SP são dezenas de milhares de
+  // linhas, e contar todas leva mais que o tempo limite.
+  //
+  // Regra nova: só conta quando o recorte é de fato pequeno — MUNICÍPIO escolhido, ou
+  // busca por texto/CNPJ. Estado sozinho não conta mais. Quem quiser o número exato
+  // pede pelo botão "contar total", que é uma chamada à parte e pode demorar.
+  // ============================================================
+  const buscaAmpla = !f.municipio && !f.termo;
 
   // Caminho normal (sem ocultar): uma página de 100 direto da base.
   if (!ocultar) {
