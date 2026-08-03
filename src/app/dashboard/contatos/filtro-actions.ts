@@ -210,7 +210,7 @@ const TETO_EXPORT = 20000;
 export async function exportarContatosPorFiltro(
   filtro: FiltroContatos,
   opts?: { ids?: string[] }
-): Promise<{ csv?: string; linhas?: number; truncado?: boolean; error?: string }> {
+): Promise<{ csv?: string; linhas?: number; truncado?: boolean; teto?: number; error?: string }> {
   const { supabase, tenant_id, user_id, gerente } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
 
@@ -269,5 +269,5 @@ export async function exportarContatosPorFiltro(
     ])
   );
 
-  return { csv, linhas: Math.min(linhas.length, TETO_EXPORT), truncado };
+  return { csv, linhas: Math.min(linhas.length, TETO_EXPORT), truncado, teto: TETO_EXPORT };
 }

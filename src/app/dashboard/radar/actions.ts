@@ -343,6 +343,7 @@ export async function buscarNaBase(input: any, offset = 0) {
       ok: true, total: r.total, atividades: r.atividades, rows, offset: off,
       nextOffset: off + r.rows.length, temMais: r.rows.length === PAGINA,
       totalNoTeto: r.total !== null && r.total >= TETO_BASE,
+      pagina: PAGINA, tetoExport: TETO_EXPORT,
       avisoMulti: pediuMulti && !r.multi ? avisoApiAntiga(f) : undefined,
       aplicado: descreverFiltro(f, busca),
     };
@@ -375,6 +376,7 @@ export async function buscarNaBase(input: any, offset = 0) {
   return {
     ok: true, total, atividades, rows: acumulado, offset: off, nextOffset: cursor, temMais,
     totalNoTeto: total !== null && total >= TETO_BASE,
+    pagina: PAGINA, tetoExport: TETO_EXPORT,
     avisoMulti: pediuMulti && !multiOk ? avisoApiAntiga(f) : undefined,
     aplicado: descreverFiltro(f, busca),
   };

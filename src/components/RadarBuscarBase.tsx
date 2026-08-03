@@ -39,6 +39,11 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   // nesse número é o TETO, não o total — e a tela precisa dizer "mais de", não cravar.
   const [totalNoTeto, setTotalNoTeto] = useState(false);
   const TETO_BASE = 100_000;
+  // Tamanho da página e teto da exportação vêm do SERVIDOR. Nenhum número desses é
+  // escrito aqui: o texto dizia "mais 100" e "teto de 2.000" muito depois de os
+  // dois terem mudado. Rótulo que copia constante de outro arquivo mente sozinho.
+  const [pagina, setPagina] = useState<number | null>(null);
+  const [tetoExport, setTetoExport] = useState<number | null>(null);
   const [contando, setContando] = useState(false);
   const [erroContagem, setErroContagem] = useState<string | null>(null);
   const [casadas, setCasadas] = useState<Atividade[]>([]);
@@ -152,6 +157,8 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
         setResultados(novas);
         setTotal(r.total);
         setTotalNoTeto(r.totalNoTeto === true);
+        if (typeof r.pagina === "number") setPagina(r.pagina);
+        if (typeof r.tetoExport === "number") setTetoExport(r.tetoExport);
         setCasadas(r.atividades || []);
         setAplicado(typeof r.aplicado === "string" ? r.aplicado : null);
         setAssinaturaBusca(JSON.stringify(enviado));
@@ -451,7 +458,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
                     className="btn-brand py-1.5 text-xs"
                     onClick={exportarTodos}
                     disabled={exportando}
-                    title="Puxa todas as empresas da busca (não só as carregadas) e baixa o CSV. Teto de 2.000 por exportação."
+                    title={`Puxa todas as empresas da busca (não só as carregadas) e baixa o CSV.${tetoExport ? ` Teto de ${tetoExport.toLocaleString("pt-BR")} por exportação.` : ""}`}
                   >
                     {exportando ? "Exportando…" : "⬇ Exportar todos"}
                   </button>
@@ -540,7 +547,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
           {temMais && (
             <div className="mt-3 text-center">
               <button className="btn-outline px-4" onClick={() => buscar(nextOffset)} disabled={ocupado}>
-                {buscando ? "…" : "Carregar mais 100"}
+                {buscando ? "…" : pagina ? `Carregar mais ${pagina.toLocaleString("pt-BR")}` : "Carregar mais"}
               </button>
             </div>
           )}

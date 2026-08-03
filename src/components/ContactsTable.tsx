@@ -232,7 +232,7 @@ export default function ContactsTable({
       try {
         const res = (await bulkEnroll([...sel], seq)) as
           { enrolled?: number; semDado?: number; jaInscrito?: number; suprimidos?: number;
-            outros?: number; tarefas?: number; truncado?: boolean; error?: string } | undefined;
+            outros?: number; tarefas?: number; truncado?: boolean; teto?: number; error?: string } | undefined;
 
         // `res` PODE vir undefined: quando a função do servidor é morta por tempo, a
         // resposta que chega não é um payload de server action e o Next resolve vazio.
@@ -254,7 +254,8 @@ export default function ContactsTable({
         if (res.semDado) partes.push(`⚠ ${res.semDado} sem e-mail/telefone — complete o cadastro (visão “A completar”)`);
         if (res.jaInscrito) partes.push(`${res.jaInscrito} já em cadência`);
         if (res.suprimidos) partes.push(`${res.suprimidos} suprimidos (pediram para parar)`);
-        if (res.truncado) partes.push("teto de 2.000 por vez — selecione o resto e repita");
+        // idem: o número vem do servidor, não escrito aqui.
+        if (res.truncado) partes.push(`teto de ${typeof res.teto === "number" ? res.teto.toLocaleString("pt-BR") : "segurança"} por vez — selecione o resto e repita`);
         setMsg(partes.join(" · "));
         clear();
         setSeq("");

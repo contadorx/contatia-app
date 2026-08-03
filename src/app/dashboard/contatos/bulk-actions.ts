@@ -67,7 +67,13 @@ const FATIA_CONSULTA = 150;   // ids por URL (limite do PostgREST)
 const LOTE_INSERT = 300;
 const TETO_INSCRICAO = 2000;  // trava de segurança por clique
 
-export async function bulkEnroll(contactIds: string[], sequenceId: string) {
+type ResEnroll = {
+  ok?: boolean; enrolled?: number; semDado?: number; jaInscrito?: number;
+  suprimidos?: number; outros?: number; tarefas?: number;
+  truncado?: boolean; teto?: number; selecionados?: number; error?: string;
+};
+
+export async function bulkEnroll(contactIds: string[], sequenceId: string): Promise<ResEnroll> {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (!contactIds?.length) return { error: "Nenhum contato selecionado." };
@@ -163,7 +169,7 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string) {
       return {
         ok: true, enrolled: 0, semDado, jaInscrito,
         outros: suprimidos + Math.max(0, sumidos),
-        suprimidos, truncado, selecionados: ids.length,
+        suprimidos, truncado, teto: TETO_INSCRICAO, selecionados: ids.length,
       };
     }
 
@@ -257,7 +263,7 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string) {
     return {
       ok: true, enrolled, semDado, jaInscrito, suprimidos,
       outros: suprimidos + Math.max(0, sumidos),
-      tarefas: tarefas.length, truncado, selecionados: ids.length,
+      tarefas: tarefas.length, truncado, teto: TETO_INSCRICAO, selecionados: ids.length,
     };
   } catch (e: any) {
     return { error: msgErro(e) };

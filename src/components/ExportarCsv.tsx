@@ -19,7 +19,7 @@ export default function ExportarCsv({
 }: {
   nomeBase: string;                                        // ex.: "contatos" → contatos-2026-07-30.csv
   rotulo?: string;
-  exportar: () => Promise<{ csv?: string; linhas?: number; truncado?: boolean; error?: string }>;
+  exportar: () => Promise<{ csv?: string; linhas?: number; truncado?: boolean; teto?: number; error?: string }>;
   className?: string;
 }) {
   const [pending, start] = useTransition();
@@ -52,8 +52,12 @@ export default function ExportarCsv({
               if (!r?.csv) { setMsg("Nada para exportar."); return; }
               baixar(r.csv);
               setMsg(
-                `✓ ${r.linhas} linha(s)` +
-                (r.truncado ? " — teto de 20.000 por arquivo; refine o filtro para pegar o resto." : "")
+                // O teto vem do servidor: escrever "20.000" aqui é o mesmo erro que
+                // fez a tela do Radar anunciar um teto de 2.000 que já era 5.000.
+                `✓ ${(r.linhas ?? 0).toLocaleString("pt-BR")} linha(s)` +
+                (r.truncado
+                  ? ` — teto de ${typeof r.teto === "number" ? r.teto.toLocaleString("pt-BR") : "um arquivo"} por arquivo; refine o filtro para pegar o resto.`
+                  : "")
               );
             } catch (e: any) {
               setMsg(`Falhou: ${e?.message || "conexão"}. Se acabou de publicar, recarregue com Ctrl+Shift+R.`);
