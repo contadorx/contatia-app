@@ -34,6 +34,10 @@ type Contact = {
   email_discovery?: string | null;
   instagram?: string | null;
   linkedin?: string | null;
+  instagram_origem?: string | null;
+  linkedin_origem?: string | null;
+  instagram_conferido_at?: string | null;
+  linkedin_conferido_at?: string | null;
   emailPendente?: boolean;
   contact_tags?: { tag_id: string; tags: { id: string; name: string; color: string } | null }[];
 };
@@ -741,10 +745,16 @@ export default function ContactsTable({
                               target="_blank"
                               rel="noreferrer"
                               onClick={(e) => e.stopPropagation()}
-                              title={`Instagram @${String(c.instagram).replace(/^@/, "")}`}
+                              title={
+                                c.instagram_conferido_at
+                                  ? `@${String(c.instagram).replace(/^@/, "")} — conferido por alguém da equipe.`
+                                  : c.instagram_origem === "site"
+                                  ? `@${String(c.instagram).replace(/^@/, "")} — capturado do site da empresa, ainda não conferido. Costuma ser a conta institucional.`
+                                  : `@${String(c.instagram).replace(/^@/, "")} — ainda não conferido. Abra e marque "era esse" na ficha.`
+                              }
                               className="rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2 py-0.5 text-[11px] font-semibold text-fuchsia-700 hover:border-fuchsia-400"
                             >
-                              ◎ IG
+                              ◎ IG{c.instagram_conferido_at ? " ✓" : ""}
                             </a>
                           )}
                           {c.linkedin && (
@@ -753,10 +763,14 @@ export default function ContactsTable({
                               target="_blank"
                               rel="noreferrer"
                               onClick={(e) => e.stopPropagation()}
-                              title="Abrir o perfil no LinkedIn"
+                              title={
+                                c.linkedin_conferido_at
+                                  ? "LinkedIn conferido por alguém da equipe."
+                                  : "LinkedIn ainda não conferido. Abra e marque \"era esse\" na ficha."
+                              }
                               className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:border-blue-400"
                             >
-                              in
+                              in{c.linkedin_conferido_at ? " ✓" : ""}
                             </a>
                           )}
                           {rev && (

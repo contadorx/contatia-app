@@ -180,6 +180,10 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
           instagram={(c as any).instagram || null}
           linkedin={(c as any).linkedin || null}
           temDominio={!!((c as any).company_domain || (c as any).accounts?.domain || (c as any).accounts?.website)}
+          igOrigem={(c as any).instagram_origem || null}
+          igConferidoEm={(c as any).instagram_conferido_at || null}
+          liOrigem={(c as any).linkedin_origem || null}
+          liConferidoEm={(c as any).linkedin_conferido_at || null}
         />
 
         <RevisarContato

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask, sendAllEmailTasks, completeTasks, skipTasks, deleteTasks } from "@/app/dashboard/task-actions";
 import { channelLabel, waLink, type Channel } from "@/lib/cadence";
 import { linkInstagramDM, linkLinkedin, handleInstagram } from "@/lib/redes";
+import { conferirRede } from "@/app/dashboard/contatos/social-actions";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import RichTextEditor from "@/components/RichTextEditor";
 
@@ -22,6 +23,7 @@ type Task = {
   contacts: {
     name: string; company: string | null; phone: string | null; email: string | null; score: number | null;
     instagram?: string | null; linkedin?: string | null;
+    instagram_conferido_at?: string | null; linkedin_conferido_at?: string | null;
   } | null;
 };
 type LastActivity = Record<string, { type: string; created_at: string; text?: string }>;
@@ -542,9 +544,29 @@ export default function TaskQueue({
                       >
                         Abrir DM
                       </a>
+                      {/* "era esse" é a ÚNICA verificação possível nestes canais: não
+                          existe API que confirme um perfil, e conferir do servidor faria
+                          o Instagram bloquear o workspace. Quem consegue verificar é
+                          quem acabou de abrir — por isso o botão fica aqui, no momento
+                          em que a pessoa está olhando o perfil. */}
+                      {!c?.instagram_conferido_at && t.contact_id && (
+                        <button
+                          className="text-xs text-subtle underline hover:text-signal"
+                          disabled={pending}
+                          title="Abri e é o perfil certo — marca como conferido"
+                          onClick={(e) => { e.stopPropagation(); act(() => conferirRede(t.contact_id as string, "instagram", true)); }}
+                        >
+                          era esse ✓
+                        </button>
+                      )}
                     </>
                   ) : (
                     <span className="text-xs text-subtle" title="Contato sem @ do Instagram">sem @</span>
+                  )}
+                  {c?.instagram && !c?.instagram_conferido_at && (
+                    <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] font-semibold text-warn" title="Ninguém confirmou que este é o perfil certo. Confira antes de mandar.">
+                      não conferido
+                    </span>
                   )}
                   <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={() => act(() => completeTask(t.id, t.contact_id ?? undefined))}>Feito</button>
                 </>
@@ -576,9 +598,24 @@ export default function TaskQueue({
                       >
                         Abrir perfil
                       </a>
+                      {!c?.linkedin_conferido_at && t.contact_id && (
+                        <button
+                          className="text-xs text-subtle underline hover:text-signal"
+                          disabled={pending}
+                          title="Abri e é o perfil certo — marca como conferido"
+                          onClick={(e) => { e.stopPropagation(); act(() => conferirRede(t.contact_id as string, "linkedin", true)); }}
+                        >
+                          era esse ✓
+                        </button>
+                      )}
                     </>
                   ) : (
                     <span className="text-xs text-subtle" title="Contato sem perfil do LinkedIn">sem perfil</span>
+                  )}
+                  {c?.linkedin && !c?.linkedin_conferido_at && (
+                    <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[10px] font-semibold text-warn" title="Ninguém confirmou que este é o perfil certo. Confira antes de mandar.">
+                      não conferido
+                    </span>
                   )}
                   <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={() => act(() => completeTask(t.id, t.contact_id ?? undefined))}>Feito</button>
                 </>

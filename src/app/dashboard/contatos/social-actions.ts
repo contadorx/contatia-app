@@ -73,8 +73,11 @@ export async function capturarRedesDoSite(contactIds: string[]): Promise<{
       social_capture: r.instagram || r.linkedin || r.facebook ? "done" : "notfound",
       social_captured_at: agora,
     };
-    if (r.instagram) { upd.instagram = r.instagram; comIg++; }
-    if (r.linkedin) { upd.linkedin = r.linkedin; comLi++; }
+    // Origem 'site' = a empresa publicou este perfil. É o nível de confiança do meio:
+    // forte quanto ao endereço, fraco quanto a QUEM lê — costuma ser a conta
+    // institucional, não a pessoal de quem decide.
+    if (r.instagram) { upd.instagram = r.instagram; upd.instagram_origem = "site"; upd.instagram_conferido_at = null; comIg++; }
+    if (r.linkedin) { upd.linkedin = r.linkedin; upd.linkedin_origem = "site"; upd.linkedin_conferido_at = null; comLi++; }
     if (!r.instagram && !r.linkedin) semRede++;
 
     // Não sobrescreve o que já existe: quem preencheu à mão sabe mais que o robô.
@@ -129,13 +132,53 @@ export async function salvarRedes(contactId: string, input: { instagram?: string
     return { error: "O LinkedIn precisa ser o endereço do perfil (linkedin.com/in/... ou /company/...)." };
   }
 
+  // Mudou o valor? A conferência anterior morre junto — ela era sobre o perfil ANTIGO.
+  // Manter o "conferido ✓" depois de trocar o @ seria o selo mentindo, que é
+  // exatamente o que este desenho existe para evitar.
+  const { data: atual } = await supabase
+    .from("contacts").select("*").eq("id", contactId).eq("tenant_id", tenant_id).maybeSingle();
+  const igMudou = (((atual as any)?.instagram as string) || "") !== ig;
+  const liMudou = (((atual as any)?.linkedin as string) || "") !== li;
+
+  const upd: Record<string, any> = { instagram: ig || null, linkedin: li || null };
+  if (igMudou) { upd.instagram_origem = ig ? "manual" : null; upd.instagram_conferido_at = null; }
+  if (liMudou) { upd.linkedin_origem = li ? "manual" : null; upd.linkedin_conferido_at = null; }
+
   const { error } = await supabase
     .from("contacts")
-    .update({ instagram: ig || null, linkedin: li || null } as any)
+    .update(upd as any)
     .eq("id", contactId)
     .eq("tenant_id", tenant_id);
   if (error) return { error: msgErro(error) };
 
   revalidatePath(`/dashboard/contatos/${contactId}`);
+  return { ok: true };
+}
+
+// ============================================================
+// "ERA ESSE" — a única verificação que este canal permite
+//
+// Não existe API que responda "este @ é mesmo do João". IP de datacenter é bloqueado
+// pelo Instagram na hora, e o LinkedIn barra requisição não autenticada. Quem consegue
+// verificar é quem abriu o perfil e olhou: você.
+//
+// Um clique, e o selo passa a dizer a verdade.
+// ============================================================
+export async function conferirRede(contactId: string, rede: "instagram" | "linkedin", confere = true) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const campo = rede === "instagram" ? "instagram_conferido_at" : "linkedin_conferido_at";
+  const { error } = await supabase
+    .from("contacts")
+    .update({ [campo]: confere ? new Date().toISOString() : null } as any)
+    .eq("id", contactId)
+    .eq("tenant_id", tenant_id);
+  if (error) {
+    return { error: "Não consegui marcar como conferido. Se a migration 0111 ainda não foi aplicada, é isso." };
+  }
+
+  revalidatePath(`/dashboard/contatos/${contactId}`);
+  revalidatePath("/dashboard");
   return { ok: true };
 }
