@@ -19,6 +19,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   // filtros
   const [termo, setTermo] = useState("");
   const [sug, setSug] = useState<Atividade[]>([]);
+  const [erroSug, setErroSug] = useState<string | null>(null);
   const [buscandoSug, setBuscandoSug] = useState(false);
   const [escolhidas, setEscolhidas] = useState<Atividade[]>([]);
   const [cnaeManual, setCnaeManual] = useState("");
@@ -60,28 +61,37 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   // autocomplete de atividade
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
-    if (termo.trim().length < 3) { setSug([]); return; }
+    if (termo.trim().length < 3) { setSug([]); setErroSug(null); return; }
     setBuscandoSug(true);
     debounce.current = setTimeout(async () => {
       const r = await atividadesReceita(termo);
       setSug((r as any).atividades || []);
+      setErroSug((r as any).error || null);
       setBuscandoSug(false);
     }, 350);
     return () => debounce.current && clearTimeout(debounce.current);
   }, [termo]);
 
+  // Só entra na lista quem tem código de 7 dígitos. Uma atividade sem código não
+  // filtra nada — deixá-la entrar foi o que produziu a busca "contabilidade" que
+  // devolveu cultivo de arroz.
   function addAtividade(a: Atividade) {
-    if (!escolhidas.some((x) => x.cnae === a.cnae)) setEscolhidas([...escolhidas, a]);
+    const cnae = String(a?.cnae ?? "").replace(/\D/g, "");
+    if (!/^\d{7}$/.test(cnae)) { setErroSug("Essa atividade veio sem código do CNAE — não dá para filtrar por ela."); return; }
+    if (!escolhidas.some((x) => x.cnae === cnae)) setEscolhidas([...escolhidas, { cnae, descricao: a.descricao }]);
     setTermo("");
     setSug([]);
+    setErroSug(null);
   }
   const removeAtividade = (cnae: string) => setEscolhidas(escolhidas.filter((x) => x.cnae !== cnae));
 
   function montarInput() {
+    // .filter: um código vazio aqui viraria uma lista que o servidor descarta inteira,
+    // e a busca sairia SEM filtro de atividade. Melhor não deixar chegar lá.
     const cnaes = [
-      ...escolhidas.map((x) => x.cnae),
-      ...cnaeManual.split(/[,\s]+/).map((s) => s.replace(/\D/g, "")).filter((s) => s.length === 7),
-    ];
+      ...escolhidas.map((x) => String(x.cnae ?? "").replace(/\D/g, "")),
+      ...cnaeManual.split(/[,\s]+/).map((s) => s.replace(/\D/g, "")),
+    ].filter((s) => /^\d{7}$/.test(s));
     return {
       busca: busca.trim() || undefined,
       cnae: cnaes.length ? cnaes : undefined,
@@ -288,10 +298,11 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
             onChange={(e) => setTermo(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); buscar(0); } }}
           />
-          {(buscandoSug || sug.length > 0) && termo.trim().length >= 3 && (
+          {(buscandoSug || sug.length > 0 || erroSug) && termo.trim().length >= 3 && (
             <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-line bg-white shadow-lg">
               {buscandoSug && <p className="px-3 py-2 text-xs text-subtle">buscando…</p>}
-              {!buscandoSug && sug.length === 0 && <p className="px-3 py-2 text-xs text-subtle">nenhuma atividade encontrada</p>}
+              {!buscandoSug && erroSug && <p className="px-3 py-2 text-xs text-danger">{erroSug}</p>}
+              {!buscandoSug && !erroSug && sug.length === 0 && <p className="px-3 py-2 text-xs text-subtle">nenhuma atividade encontrada</p>}
               {sug.map((a) => (
                 <button key={a.cnae} type="button" className="block w-full px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => addAtividade(a)}>
                   <span className="text-subtle">{a.cnae}</span> — {a.descricao}

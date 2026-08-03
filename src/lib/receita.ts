@@ -92,6 +92,34 @@ function msgFalha(e: any): string {
   return "Base indisponível (não consegui nem abrir a conexão com o servidor da base).";
 }
 
+// ============================================================
+// O CÓDIGO DA ATIVIDADE PODE VIR COM DOIS NOMES
+//
+// A API devolve o CNAE às vezes como `cnae` (é o que /buscar usa, no campo
+// `atividades`) e às vezes como `codigo` (é o nome da coluna na tabela `cnaes`, e é
+// assim que /atividades responde em algumas versões do servidor). O app lia só
+// `cnae`: quando vinha `codigo`, cada item do autocomplete ficava com o código
+// `undefined` — a tela mostrava a descrição normalmente, mas mandava para a busca
+// uma lista de nada. Resultado: filtro de atividade descartado e a base inteira do
+// estado na tela.
+//
+// Aqui aceitamos as duas formas e DESCARTAMOS o que não tiver código de 7 dígitos —
+// um item sem código não é escolha válida, e é melhor não oferecê-lo do que oferecer
+// algo que não filtra.
+// ============================================================
+function normalizarAtividades(bruto: any): { cnae: string; descricao: string }[] {
+  if (!Array.isArray(bruto)) return [];
+  const out: { cnae: string; descricao: string }[] = [];
+  const vistos = new Set<string>();
+  for (const a of bruto) {
+    const cnae = String(a?.cnae ?? a?.codigo ?? "").replace(/\D/g, "");
+    if (!/^\d{7}$/.test(cnae) || vistos.has(cnae)) continue;
+    vistos.add(cnae);
+    out.push({ cnae, descricao: String(a?.descricao ?? a?.desc ?? "").trim() || cnae });
+  }
+  return out;
+}
+
 // Autocomplete de atividade (texto → lista de CNAEs com descrição).
 export async function buscarAtividades(q: string): Promise<{ atividades: { cnae: string; descricao: string }[]; error?: string }> {
   const { url, token } = cfg();
@@ -105,7 +133,13 @@ export async function buscarAtividades(q: string): Promise<{ atividades: { cnae:
     );
     if (!res.ok) return { atividades: [], error: `Base respondeu ${res.status}` };
     const j = await res.json();
-    return { atividades: Array.isArray(j.atividades) ? j.atividades : [] };
+    const atividades = normalizarAtividades(j?.atividades);
+    // A base respondeu, mas nenhum item tinha código utilizável. Dizer isso é melhor
+    // do que devolver uma lista vazia que parece "não achei nada".
+    if (!atividades.length && Array.isArray(j?.atividades) && j.atividades.length) {
+      return { atividades: [], error: "A base devolveu atividades sem o código do CNAE." };
+    }
+    return { atividades };
   } catch (e: any) {
     return { atividades: [], error: msgFalha(e) };
   }
@@ -157,7 +191,7 @@ export async function buscarEmpresas(
     return {
       rows: Array.isArray(j.rows) ? j.rows : [],
       total: typeof j.total === "number" ? j.total : null,
-      atividades: Array.isArray(j.atividades) ? j.atividades : [],
+      atividades: normalizarAtividades(j?.atividades),
       multi: j?.multi === true,
     };
   } catch (e: any) {

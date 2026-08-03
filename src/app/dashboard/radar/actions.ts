@@ -48,6 +48,35 @@ function listaValida(v: any, valida: (s: string) => boolean, transforma: (s: str
   return out;
 }
 
+// ============================================================
+// FILTRO QUE SOME EM SILÊNCIO — o bug do "contabilidade trouxe cultivo de arroz"
+//
+// A tela manda `cnae: [...]` com os códigos das atividades escolhidas. Se um código
+// chegar vazio ou fora do formato — foi o que aconteceu: a lista de atividades veio
+// com o código sob outro nome de campo, então cada item virou `undefined` —, a
+// validação abaixo descartava TODOS e devolvia `cnae: undefined`. A busca então
+// rodava sem filtro de atividade nenhum e trazia o que houvesse no estado: arroz,
+// milho, soja, em ordem de código.
+//
+// Pior: como a atividade não valia como filtro, a única coisa capaz de satisfazer a
+// regra "informe ao menos um filtro" era escolher um estado. Daí a impressão de que
+// o Radar "exige estado junto com a atividade". Era este mesmo bug, de outro ângulo.
+//
+// REGRA NOVA: filtro que o operador pediu e que não sobreviveu à validação vira
+// ERRO — nunca uma busca mais ampla. Mesma lição do apagar em lote que "funcionava"
+// apagando zero linhas: falhar calado é pior do que falhar.
+// ============================================================
+function cnaePerdido(input: any): boolean {
+  const pedidos = Array.isArray(input?.cnae) ? input.cnae : [];
+  if (!pedidos.length) return false;
+  return pedidos.map(soDigitos).filter((c: string) => /^\d{7}$/.test(c)).length === 0;
+}
+
+const ERRO_CNAE_PERDIDO =
+  "As atividades escolhidas vieram sem código válido, então o filtro não foi aplicado — " +
+  "eu preferi parar a te devolver a base inteira. Tire e escolha de novo na lista; " +
+  "se insistir, digite o CNAE no campo ao lado.";
+
 // Monta o filtro da API a partir do que a tela envia (validação básica).
 // UF e porte aceitam VÁRIOS valores: mandamos a lista (`ufs`/`portes`, v3 da API) e
 // também o primeiro valor no campo antigo (`uf`/`porte`), para a v2 não quebrar.
@@ -148,6 +177,7 @@ export async function contarNaBase(input: any) {
   const { tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (!receitaConfigurada()) return { error: "Base da Receita não configurada." };
+  if (cnaePerdido(input)) return { error: ERRO_CNAE_PERDIDO };
   const f = montarFiltro(input);
   if (!f.atividade && !f.cnae && !f.uf && !f.termo) return { error: "Escolha um filtro antes de contar." };
   // limit 1: não queremos linhas, só o total. 50s de teto (a rota tem 60).
@@ -162,6 +192,7 @@ export async function buscarNaBase(input: any, offset = 0) {
   if (!tenant_id) return { error: "Sem workspace." };
   if (!receitaConfigurada()) return { error: "Base da Receita não configurada (defina RECEITA_API_URL e RECEITA_API_TOKEN)." };
 
+  if (cnaePerdido(input)) return { error: ERRO_CNAE_PERDIDO };
   const f = montarFiltro(input);
   // "ocultar as empresas que já estão no meu cadastro" (dedup por CNPJ contra Empresas)
   const ocultar = input?.ocultarJaTem === true;
@@ -285,6 +316,7 @@ export async function exportarRadar(input: any): Promise<{ rows?: any[]; total?:
   if (!tenant_id) return { error: "Sem workspace." };
   if (!receitaConfigurada()) return { error: "Base da Receita não configurada." };
 
+  if (cnaePerdido(input)) return { error: ERRO_CNAE_PERDIDO };
   const f = montarFiltro(input);
   const busca = typeof input?.busca === "string" ? input.busca.trim() : "";
   const digitos = busca.replace(/\D/g, "");
