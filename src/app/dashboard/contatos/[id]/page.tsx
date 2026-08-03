@@ -21,7 +21,7 @@ import RedesContato from "@/components/RedesContato";
 import { EmailVerifyBadge, TestEmailBox } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
 import { produtosDoContato } from "@/lib/produtos";
-import { dominioCorporativo } from "@/lib/emailFinder";
+import { dominioCorporativo, ehCaixaDeBalcao } from "@/lib/emailFinder";
 
 export const dynamic = "force-dynamic";
 // A busca/verificação de e-mail conversa com o servidor SMTP do destino, que pode
@@ -112,10 +112,9 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
   // Um contato importado com "joao@escritoriosilva.com.br" e nada mais tinha, para o
   // app, "nenhum domínio" — e portanto nenhum caminho para o site nem para as redes.
   // Mas o domínio está ali, na frente. `dominioCorporativo` devolve null para gmail e
-  // afins, então isso não transforma um e-mail pessoal em site de empresa.
+  // afins, então isto não transforma e-mail pessoal em site de empresa.
   // ============================================================
-  const dominioContato =
-    c.company_domain || acc.domain || dominioCorporativo(c.email) || "";
+  const dominioContato = c.company_domain || acc.domain || dominioCorporativo(c.email) || "";
   const enr = (enrollments as any[]) || [];
   const activeEnr = enr.find((e) => e.status === "active");
   const pendingTasks = (tasks as any[]) || [];
@@ -191,8 +190,9 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
               estado={{
                 temCnpj: !!cnpj,
                 enriquecido: !!enrichedAt,
-                temDominio: !!(dominioContato || (c as any).accounts?.website),
+                temDominio: !!(dominioContato || acc.website),
                 temEmail: !!c.email,
+                emailDeBalcao: ehCaixaDeBalcao(c.email),
                 temTelefone: !!c.phone,
                 waStatus: (c as any).wa_status || null,
                 temRede: !!((c as any).instagram || (c as any).linkedin),
@@ -210,7 +210,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
                   <EmailFinder
                     contactId={c.id}
                     contactName={c.name}
-                    companyDomain={(c as any).company_domain || (c as any).accounts?.domain || null}
+                    companyDomain={dominioContato || null}
                     discovery={(c as any).email_discovery || null}
                   />
                   {/* "Testar um e-mail que já tenho": para endereços por função
@@ -220,15 +220,15 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
               )}
 
               <RedesContato
-                contactId={c.id}
-                instagram={(c as any).instagram || null}
-                linkedin={(c as any).linkedin || null}
-                temDominio={!!((c as any).company_domain || (c as any).accounts?.domain || (c as any).accounts?.website)}
-                igOrigem={(c as any).instagram_origem || null}
-                igConferidoEm={(c as any).instagram_conferido_at || null}
-                liOrigem={(c as any).linkedin_origem || null}
-                liConferidoEm={(c as any).linkedin_conferido_at || null}
-              />
+          contactId={c.id}
+          instagram={(c as any).instagram || null}
+          linkedin={(c as any).linkedin || null}
+          temDominio={!!((c as any).company_domain || (c as any).accounts?.domain || (c as any).accounts?.website)}
+          igOrigem={(c as any).instagram_origem || null}
+          igConferidoEm={(c as any).instagram_conferido_at || null}
+          liOrigem={(c as any).linkedin_origem || null}
+          liConferidoEm={(c as any).linkedin_conferido_at || null}
+        />
 
               <RevisarContato
                 contactId={c.id}
@@ -237,7 +237,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
                 phone={c.phone || null}
                 waStatus={(c as any).wa_status || null}
                 waCheckedAt={(c as any).wa_checked_at || null}
-                companyDomain={(c as any).company_domain || (c as any).accounts?.domain || null}
+                companyDomain={dominioContato || null}
                 discovery={(c as any).email_discovery || null}
               />
             </div>

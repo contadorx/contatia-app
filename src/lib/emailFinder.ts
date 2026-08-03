@@ -196,3 +196,33 @@ export function dominioCorporativo(email?: string | null): string | null {
   if (!d) return null;
   return PROVEDOR_PUBLICO.has(d) ? null : d;
 }
+
+// ============================================================
+// ENDEREÇO DE BALCÃO
+//
+// `contato@`, `faleconosco@`, `comercial@` — chega numa caixa compartilhada que alguém
+// triaga. Serve para receber pedido de orçamento; é ruim para falar com quem decide.
+// Ter um destes NÃO é a mesma coisa que ter o e-mail do decisor, e tratar os dois como
+// "já tem e-mail" faz o sistema parar de procurar justamente quando mais valia procurar.
+//
+// É por isto que existe: o botão "Atualizar dados" pulava o passo de e-mail em quem
+// tinha `contato@`, enquanto o controle individual, rodado à mão, achava o endereço
+// pessoal do decisor no mesmo domínio. O botão via "tem e-mail"; o operador via "não
+// tenho como falar com essa pessoa".
+// ============================================================
+const CAIXA_DE_BALCAO = new Set([
+  "contato", "contacto", "faleconosco", "comercial", "vendas",
+  "atendimento", "sac", "suporte", "financeiro", "admin", "administrativo",
+  "contabil", "contabilidade", "rh", "juridico", "info", "contact", "sales",
+  "hello", "hi", "oi", "support", "help", "team", "equipe", "mail", "email",
+  "noreply", "naoresponda",
+]);
+
+export function ehCaixaDeBalcao(email?: string | null): boolean {
+  const usuario = String(email || "").trim().toLowerCase().split("@")[0];
+  if (!usuario) return false;
+  // A raiz antes de qualquer separador também conta: "contato.sp", "vendas-rj" e
+  // "sac2" continuam sendo caixa compartilhada.
+  const raiz = usuario.split(/[.\-_+0-9]/)[0];
+  return CAIXA_DE_BALCAO.has(usuario.replace(/[.\-_]/g, "")) || CAIXA_DE_BALCAO.has(raiz);
+}

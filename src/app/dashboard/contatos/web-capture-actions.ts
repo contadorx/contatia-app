@@ -12,7 +12,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { captureContactsBatch, buildCaptureUpdate } from "@/lib/webPhone";
-import { dominioDe } from "@/lib/emailFinder";
+import { dominioDe, dominioCorporativo } from "@/lib/emailFinder";
 
 const INLINE_LIMIT = 8; // raspagem é mais lenta que a verificação — lote menor na hora
 
@@ -32,14 +32,26 @@ export async function capturarDoSiteLote(contactIds: string[]): Promise<{
 
   const { data: rows } = await supabase
     .from("contacts")
-    .select("id, phone, company_domain, wa_status, accounts(domain)")
+    // `email` entra aqui porque o domínio pode estar escondido nele — ver o comentário
+    // do fallback logo abaixo.
+    .select("id, phone, email, company_domain, wa_status, accounts(domain)")
     .in("id", contactIds)
     .eq("tenant_id", tenant_id);
   const list = ((rows as any[]) || []).map((c) => ({
     id: c.id,
     phone: c.phone as string | null,
     wa_status: c.wa_status as string | null,
-    domain: dominioDe(c.company_domain || c.accounts?.domain || null),
+    // ============================================================
+    // O DOMÍNIO PODE ESTAR NO E-MAIL — e precisa ser visto AQUI
+    //
+    // Um contato com `joao@escritoriosilva.com.br` e `company_domain` vazio tinha,
+    // para esta ação, "nenhum domínio" — e voltava `semDominio`, sem visitar site
+    // nenhum. Eu já tinha posto essa dedução na PÁGINA, o que corrigiu o texto do
+    // botão e não corrigiu nada do comportamento: quem decide se há domínio é esta
+    // linha, no servidor. Consertar a decisão sem consertar a execução é o mesmo que
+    // não consertar.
+    // ============================================================
+    domain: dominioDe(c.company_domain || c.accounts?.domain || dominioCorporativo(c.email) || null),
   }));
 
   const comDominio = list.filter((c) => c.domain);

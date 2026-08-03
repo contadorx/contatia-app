@@ -15,6 +15,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { msgErro } from "@/lib/erros";
 import { capturarRedesLote } from "@/lib/webSocial";
+import { dominioCorporativo } from "@/lib/emailFinder";
 
 const INLINE = 8;   // sites por clique (cada um são até 7 requisições HTTP)
 
@@ -50,7 +51,10 @@ export async function capturarRedesDoSite(contactIds: string[]): Promise<{
     accountId: (c.account_id as string) || null,
     // já tem as duas redes? não gasta requisição de novo.
     jaTem: !!(c.instagram && c.linkedin),
-    domain: dominioDe(c.company_domain || c.accounts?.domain || c.accounts?.website),
+    // idem web-capture-actions: o e-mail corporativo carrega o domínio. Sem este
+    // fallback a captura de redes devolvia "sem domínio" para contato que tinha, sim,
+    // por onde entrar.
+    domain: dominioDe(c.company_domain || c.accounts?.domain || c.accounts?.website || dominioCorporativo(c.email)),
   }));
 
   const comDominio = alvos.filter((a) => a.domain && !a.jaTem);
