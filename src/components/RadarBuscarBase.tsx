@@ -261,8 +261,10 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
     baixarCsv(linhas);
     setMsg(`${linhas.length} empresa(s) exportadas para CSV.`);
   }
-  // Exporta TODAS as empresas da busca (não só as carregadas) — puxa várias páginas
-  // da base no servidor, com teto de 2.000 por exportação.
+  // Exporta TODAS as empresas da busca (não só as carregadas) — puxa várias páginas da
+  // base no servidor. O teto vem do servidor em `r.teto`, e não escrito aqui: a
+  // mensagem anterior dizia "teto de 2.000" muito depois de o teto ter virado outro
+  // número. Texto que repete uma constante de outro arquivo envelhece calado.
   function exportarTodos() {
     setErro(null);
     setMsg(null);
@@ -272,10 +274,21 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       const linhas = (r.rows || []) as any[];
       if (!linhas.length) { setMsg("Nada para exportar com esses filtros."); return; }
       baixarCsv(linhas);
-      const totalTxt = typeof r.total === "number" ? ` de ${r.total.toLocaleString("pt-BR")}` : "";
-      setMsg(r.capped
-        ? `Exportadas ${linhas.length} empresas (teto de 2.000${totalTxt}). Refine os filtros para pegar o restante.`
-        : `${linhas.length} empresa(s)${totalTxt} exportadas para CSV.`);
+      const n = linhas.length.toLocaleString("pt-BR");
+      const teto = typeof r.teto === "number" ? r.teto.toLocaleString("pt-BR") : null;
+      const total = typeof r.total === "number" ? r.total.toLocaleString("pt-BR") : null;
+      if (r.capped) {
+        setMsg(
+          total
+            ? `Exportadas ${n} de ${total} — é o teto de ${teto ?? n} por exportação. Refine os filtros (município, porte) para pegar o restante.`
+            : `Exportadas ${n} — é o teto por exportação. Refine os filtros para pegar o restante.`
+        );
+      } else {
+        // De propósito NÃO digo "a busca inteira": o CSV já vem sem as descartadas e,
+        // se você marcou a opção, sem as que já estão no cadastro. O número exportado
+        // ser menor que o total da busca é normal, e prometer "inteira" seria falso.
+        setMsg(`Exportadas ${n} empresa(s) para CSV.`);
+      }
     });
   }
 

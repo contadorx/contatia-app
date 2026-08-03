@@ -67,6 +67,10 @@ const soNumeros = (s: string | null | undefined) => String(s ?? "").replace(/\D/
 // ============================================================
 const PAGINA = 250;
 const TETO_BASE = 100_000;
+
+// Quantas empresas o "Exportar todos" entrega por vez. Acima disso o CSV vira arquivo
+// de trabalho de outra natureza — e a tela avisa que cortou, dizendo de quanto era.
+const TETO_EXPORT = 5_000;
 const normNome = (s: string | null | undefined) =>
   (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -390,7 +394,7 @@ function avisoApiAntiga(f: FiltroReceita): string {
 // linhas para o cliente montar o CSV. Espelha a tela: exclui descartados e, se o
 // usuário marcou "ocultar já cadastradas", exclui as que já estão na base.
 // ============================================================
-export async function exportarRadar(input: any): Promise<{ rows?: any[]; total?: number | null; capped?: boolean; error?: string }> {
+export async function exportarRadar(input: any): Promise<{ rows?: any[]; total?: number | null; capped?: boolean; teto?: number; error?: string }> {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (!receitaConfigurada()) return { error: "Base da Receita não configurada." };
@@ -411,20 +415,38 @@ export async function exportarRadar(input: any): Promise<{ rows?: any[]; total?:
     total = acc.length;
   } else {
     if (busca.length >= 3) f.termo = semAcento(busca);
-    // Teto da exportação: 20 × 250 = 5.000 empresas. Era 2.000 (20 × 100); subiu
-    // junto com a página porque a busca ficou barata. Acima disso o CSV vira arquivo
-    // de trabalho de outra natureza — e a tela avisa que cortou.
-    const CAP_PAGES = 20;
+    // ============================================================
+    // POR QUE VINHAM 4.999 E NÃO 5.000
+    //
+    // O laço antigo dava um número FIXO de idas à base (20 × 250) e exportava o que
+    // sobrasse. Só que a cada ida os CNPJs repetidos são descartados — e repetição
+    // acontece: a base pagina por `limit/offset` sem `order by`, então o Postgres não
+    // garante a mesma ordem entre uma página e a seguinte. Uma linha repetida na
+    // fronteira de duas páginas e o resultado fecha em 4.999.
+    //
+    // Agora o laço persegue o NÚMERO, não a quantidade de idas: busca até juntar 5.000
+    // distintos ou a base acabar. Sai redondo.
+    //
+    // MAX_IDAS é só freio de segurança — 40 idas dariam 10.000 linhas brutas, o dobro
+    // do teto. Se ele for atingido é porque há repetição demais, e aí o CSV sai com
+    // menos: prefiro entregar menos do que rodar sem fim.
+    // ============================================================
+    const MAX_IDAS = 40;
     let offset = 0;
-    for (let i = 0; i < CAP_PAGES; i++) {
+    for (let i = 0; i < MAX_IDAS && acc.length < TETO_EXPORT; i++) {
       const r = await buscarEmpresas({ ...f, limit: PAGINA, offset, contar: i === 0 });
       if (r.error) return { error: r.error };
       if (i === 0) total = r.total;
-      for (const e of r.rows || []) { const d = soDigitos(e.cnpj); if (d && !vistos.has(d)) { vistos.add(d); acc.push(e); } }
-      offset += (r.rows || []).length;
-      if ((r.rows || []).length < PAGINA) break;        // fim da base
-      if (i === CAP_PAGES - 1) capped = true;           // bateu o teto
+      const pagina = r.rows || [];
+      for (const e of pagina) { const d = soDigitos(e.cnpj); if (d && !vistos.has(d)) { vistos.add(d); acc.push(e); } }
+      offset += pagina.length;
+      if (pagina.length < PAGINA) break;                // fim da base
     }
+    if (acc.length > TETO_EXPORT) acc.length = TETO_EXPORT;
+    // "Cortou" só é verdade se REALMENTE sobrou coisa lá. Uma busca com exatamente
+    // 5.000 empresas enche o teto sem deixar nada para trás — dizer "refine para pegar
+    // o restante" nesse caso seria mandar o operador procurar o que não existe.
+    capped = acc.length >= TETO_EXPORT && (total === null || total > TETO_EXPORT);
   }
 
   // exclui descartados (sempre) e já-cadastradas (se pediu no filtro)
@@ -442,7 +464,9 @@ export async function exportarRadar(input: any): Promise<{ rows?: any[]; total?:
     for (const a of (accs as any[]) || []) if (a.cnpj) remover.add(soDigitos(a.cnpj));
   }
   const rows = acc.filter((e) => !remover.has(soDigitos(e.cnpj)));
-  return { rows, total, capped };
+  // `teto` vai junto para a tela escrever o número certo. Antes ela tinha "2.000"
+  // escrito à mão e continuou dizendo isso quando o teto já era outro.
+  return { rows, total, capped, teto: TETO_EXPORT };
 }
 
 // ============================================================
