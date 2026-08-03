@@ -25,6 +25,31 @@ async function ctx() {
 // importação; com o corte antigo, a comparação "esta empresa já existe?" comparava
 // coisas diferentes e o Radar reofertava quem você já tinha.
 const soDigitos = (s: string | null | undefined) => chaveCnpj(s);
+
+// ============================================================
+// A CAUSA DO "CONTABILIDADE TROUXE CULTIVO DE ARROZ"
+//
+// `soDigitos` acima virou um apelido de `chaveCnpj`, que devolve "" para tudo que
+// não seja um CNPJ completo de 14 caracteres. Correto para CNPJ — é o que ela existe
+// para fazer. Só que o filtro de CNAE usava a MESMA função:
+//
+//     input.cnae.map(soDigitos).filter((c) => /^\d{7}$/.test(c))
+//
+// `soDigitos("6920601")` → "". Todos os códigos viravam string vazia, o filter
+// zerava a lista, e a busca ia para a base SEM filtro de atividade — devolvendo o
+// que houvesse no estado, em ordem de CNAE: arroz, milho, soja.
+//
+// E como o CNAE nunca contava como filtro, a regra "informe ao menos um filtro" só
+// era satisfeita escolhendo um estado. Era o mesmo defeito produzindo as duas
+// queixas: "traz tudo errado" e "exige estado junto com a atividade".
+//
+// A armadilha é o NOME. `soDigitos` parece "tira o que não é dígito" — e era isso
+// mesmo, até ser reescrita para tratar CNPJ alfanumérico. Quem a chamava para CNAE
+// não tinha como perceber: nenhum erro, nenhum aviso, só um resultado mais amplo.
+//
+// CNAE tem função própria agora, e as duas nunca mais se misturam.
+// ============================================================
+const soNumeros = (s: string | null | undefined) => String(s ?? "").replace(/\D/g, "");
 const normNome = (s: string | null | undefined) =>
   (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -69,7 +94,7 @@ function listaValida(v: any, valida: (s: string) => boolean, transforma: (s: str
 function cnaePerdido(input: any): boolean {
   const pedidos = Array.isArray(input?.cnae) ? input.cnae : [];
   if (!pedidos.length) return false;
-  return pedidos.map(soDigitos).filter((c: string) => /^\d{7}$/.test(c)).length === 0;
+  return pedidos.map(soNumeros).filter((c: string) => /^\d{7}$/.test(c)).length === 0;
 }
 
 const ERRO_CNAE_PERDIDO =
@@ -81,7 +106,7 @@ const ERRO_CNAE_PERDIDO =
 // UF e porte aceitam VÁRIOS valores: mandamos a lista (`ufs`/`portes`, v3 da API) e
 // também o primeiro valor no campo antigo (`uf`/`porte`), para a v2 não quebrar.
 function montarFiltro(input: any): FiltroReceita {
-  const cnae = Array.isArray(input?.cnae) ? input.cnae.map(soDigitos).filter((c: string) => /^\d{7}$/.test(c)) : [];
+  const cnae = Array.isArray(input?.cnae) ? input.cnae.map(soNumeros).filter((c: string) => /^\d{7}$/.test(c)) : [];
   const ufs = listaValida(input?.ufs ?? input?.uf, (s) => /^[A-Z]{2}$/.test(s), (s) => s.toUpperCase()).slice(0, 27);
   const portes = listaValida(input?.portes ?? input?.porte, (s) => ["ME", "EPP", "Demais"].includes(s)).slice(0, 3);
   return {
