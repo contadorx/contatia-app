@@ -11,12 +11,12 @@ import { bulkDeleteContacts } from "@/app/dashboard/contatos/actions";
 import { contarPorFiltro, excluirPorFiltro, exportarContatosPorFiltro } from "@/app/dashboard/contatos/filtro-actions";
 import { verificarWhatsAppLote } from "@/app/dashboard/contatos/wa-actions";
 import { capturarDoSiteLote } from "@/app/dashboard/contatos/web-capture-actions";
-import { capturarRedesDoSite } from "@/app/dashboard/contatos/social-actions";
 import { descobrirEmailsLote } from "@/app/dashboard/prospectar/actions";
 import { UltimoToque } from "@/lib/lastTouch";
 import ExportarCsv from "@/components/ExportarCsv";
 import { useExclusaoLote } from "@/components/useExclusaoLote";
-import RevisarCanaisLote from "@/components/RevisarCanaisLote";
+import CompletarCanais from "@/components/CompletarCanais";
+import FilaAssistida from "@/components/FilaAssistida";
 
 type Contact = {
   id: string;
@@ -110,6 +110,8 @@ export default function ContactsTable({
   const [showNewTag, setShowNewTag] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  // fila assistida aberta (instagram | linkedin | nenhuma)
+  const [filaRede, setFilaRede] = useState<"instagram" | "linkedin" | null>(null);
 
   // "todos do filtro": quando o operador quer agir sobre TUDO que bate com o filtro,
   // não só sobre as 200 linhas carregadas. Guarda o total conferido no servidor, que
@@ -293,22 +295,6 @@ export default function ContactsTable({
         clear();
         router.refresh();
       }
-    });
-  }
-  // Redes sociais publicadas no site — o dado que sustenta os canais assistidos
-  // (Instagram/LinkedIn). Sem o @, o clique da tarefa não tem para onde ir.
-  function doRedes() {
-    setMsg(null);
-    start(async () => {
-      const res = (await capturarRedesDoSite([...sel])) as
-        { comIg?: number; comLi?: number; semRede?: number; semDominio?: number; restantes?: number; error?: string };
-      if (res?.error) { setMsg(res.error); return; }
-      const partes = [`✓ ${res.comIg ?? 0} Instagram · ${res.comLi ?? 0} LinkedIn`];
-      if (res.semRede) partes.push(`${res.semRede} sem rede no site`);
-      if (res.semDominio) partes.push(`${res.semDominio} sem domínio`);
-      if (res.restantes) partes.push(`${res.restantes} na fila (clique de novo para continuar)`);
-      setMsg(partes.join(" · "));
-      router.refresh();
     });
   }
   function doCaptureWeb() {
@@ -500,15 +486,6 @@ export default function ContactsTable({
           )}
 
           <button
-            className="rounded-lg border border-fuchsia-300 bg-fuchsia-50 px-3 py-1.5 text-sm font-medium text-fuchsia-700 hover:bg-fuchsia-100"
-            onClick={doRedes}
-            disabled={pending || apagando}
-            title="Procura Instagram e LinkedIn publicados no site da empresa (rodapé, página de contato). 8 sites por clique."
-          >
-            {pending ? "..." : "Buscar redes"}
-          </button>
-
-          <button
             className="rounded-lg border border-brand/40 bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand-dark hover:bg-brand-soft/70"
             onClick={doCaptureWeb}
             disabled={pending || apagando}
@@ -517,16 +494,41 @@ export default function ContactsTable({
             {pending ? "..." : "Capturar do site"}
           </button>
 
-          {/* Revisar canais = WhatsApp + e-mail numa passada só, em lotes, com barra e
-              tempo. É o que resolve "quero rodar as duas em 200 contatos": a descoberta
-              de e-mail processa 6 por chamada, então sem andamento a tela parece travada. */}
-          <RevisarCanaisLote
+          {/* ============================================================
+              UM BOTÃO, OS QUATRO CANAIS
+              Antes eram três botões separados, cada um com seu tempo e seu resultado.
+              Ninguém quer decidir a ordem — quer a base pronta. Ordem interna: do mais
+              barato (WhatsApp, 60 por chamada) ao mais caro (e-mail, 6 por chamada com
+              conversa SMTP), para os canais rápidos já estarem prontos se você parar.
+              ============================================================ */}
+          <CompletarCanais
             alvos={contacts.filter((c) => sel.has(c.id)).map((c) => ({
               id: c.id,
               temEmail: !!c.email,
               temTelefone: !!c.phone,
+              temRede: !!(c.instagram || c.linkedin),
+              temDominio: true,   // o servidor confere o domínio real e devolve "sem domínio"
             }))}
           />
+
+          {/* Fila assistida: o "em lote" possível para IG/LinkedIn — um por vez, sem
+              sair da tela. Envio automático nesses canais não existe (ver FilaAssistida). */}
+          <button
+            className="rounded-lg border border-fuchsia-300 bg-fuchsia-50 px-3 py-1.5 text-sm font-medium text-fuchsia-700 hover:bg-fuchsia-100 disabled:opacity-40"
+            onClick={() => setFilaRede(filaRede === "instagram" ? null : "instagram")}
+            disabled={pending || apagando}
+            title="Percorre os selecionados que têm Instagram, um por vez, com o texto pronto."
+          >
+            ◎ Fila Instagram
+          </button>
+          <button
+            className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-40"
+            onClick={() => setFilaRede(filaRede === "linkedin" ? null : "linkedin")}
+            disabled={pending || apagando}
+            title="Percorre os selecionados que têm LinkedIn, um por vez, com o texto pronto."
+          >
+            in Fila LinkedIn
+          </button>
 
           <button
             className="rounded-lg border border-signal/40 bg-signal/5 px-3 py-1.5 text-sm font-medium text-signal hover:bg-signal/10"
@@ -610,6 +612,22 @@ export default function ContactsTable({
           </div>
         )}
       </div>
+
+      {filaRede && (
+        <FilaAssistida
+          rede={filaRede}
+          onFechar={() => setFilaRede(null)}
+          alvos={contacts.filter((c) => sel.has(c.id)).map((c) => ({
+            id: c.id,
+            name: c.name,
+            company: c.company,
+            instagram: c.instagram || null,
+            linkedin: c.linkedin || null,
+            instagram_conferido_at: c.instagram_conferido_at || null,
+            linkedin_conferido_at: c.linkedin_conferido_at || null,
+          }))}
+        />
+      )}
 
       {/* ============================================================
           A COLUNA "AÇÃO" SAIU
