@@ -50,8 +50,43 @@ const soDigitos = (s: string | null | undefined) => chaveCnpj(s);
 // CNAE tem função própria agora, e as duas nunca mais se misturam.
 // ============================================================
 const soNumeros = (s: string | null | undefined) => String(s ?? "").replace(/\D/g, "");
+
+// ============================================================
+// TAMANHO DA PÁGINA E TETO DA CONTAGEM
+//
+// PAGINA: quantas empresas vêm por clique. Era 100 e ficou pequeno para trabalhar uma
+// lista. A API aceita até 500; 250 é o meio-termo — menos cliques, sem transformar
+// cada busca num pacote gordo (a tela renderiza tudo de uma vez).
+//
+// TETO_BASE: o servidor da base conta com teto, parando nas 100 mil primeiras linhas
+// (é o que faz a contagem custar milissegundos em vez de mais de um minuto). Quando o
+// total volta batendo exatamente nesse número, ele NÃO é o total — é o teto. A tela
+// escreve "mais de 100.000" nesse caso, em vez de cravar um número que é mentira.
+//
+// Se um dia o teto do servidor mudar, este número tem de acompanhar.
+// ============================================================
+const PAGINA = 250;
+const TETO_BASE = 100_000;
 const normNome = (s: string | null | undefined) =>
   (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+
+// ============================================================
+// A BASE DA RECEITA NÃO TEM ACENTO
+//
+// Buscar município "são paulo" devolvia ZERO. O dump da Receita grava tudo sem
+// acento e sem cedilha: "SAO PAULO", "AGUA BRANCA", "EPITACIOLANDIA",
+// "SAMPAIO SERVICOS CONTABEIS". O filtro é `municipio ILIKE '%…%'`, e ILIKE ignora
+// maiúscula/minúscula mas NÃO ignora acento — "são" nunca casa com "SAO".
+//
+// Então tiramos o acento de tudo que vira texto de busca (município e nome). Digitar
+// certo, em português, tem de funcionar; quem tem de se adaptar é o código.
+//
+// NFD separa a letra do acento e o replace joga o acento fora. Vale para ç também:
+// "ç" decomposto é "c" + cedilha, então "serviços" vira "servicos" — que é como a
+// Receita gravou.
+// ============================================================
+const semAcento = (s: string | null | undefined) =>
+  String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "");
 
 // Sócio pessoa jurídica não tem "e-mail do decisor" descoberto por nome: pula a fila
 // SMTP para não gastar conversa à toa (razão social com LTDA/S.A/EIRELI, dígitos, etc.).
@@ -110,11 +145,13 @@ function montarFiltro(input: any): FiltroReceita {
   const ufs = listaValida(input?.ufs ?? input?.uf, (s) => /^[A-Z]{2}$/.test(s), (s) => s.toUpperCase()).slice(0, 27);
   const portes = listaValida(input?.portes ?? input?.porte, (s) => ["ME", "EPP", "Demais"].includes(s)).slice(0, 3);
   return {
+    // atividade é texto casado contra a tabela `cnaes`, que TEM acento — não mexer.
     atividade: typeof input?.atividade === "string" && input.atividade.trim().length >= 3 ? input.atividade.trim() : undefined,
     cnae: cnae.length ? cnae : undefined,
     uf: ufs[0],
     ufs: ufs.length > 1 ? ufs : undefined,
-    municipio: typeof input?.municipio === "string" && input.municipio.trim() ? input.municipio.trim() : undefined,
+    // município e nome são casados contra `estabelecimentos`, que NÃO tem acento.
+    municipio: typeof input?.municipio === "string" && input.municipio.trim() ? semAcento(input.municipio.trim()) : undefined,
     porte: portes[0] as FiltroReceita["porte"],
     portes: portes.length > 1 ? portes : undefined,
     com_email: input?.com_email === true,
@@ -266,7 +303,7 @@ export async function buscarNaBase(input: any, offset = 0) {
     // texto → procura em razão social + nome fantasia. RESPEITA os checkboxes de
     // e-mail marcados na tela (com_email / email_corporativo vêm de montarFiltro):
     // se o usuário pediu "só e-mail empresarial", o termo NÃO deve furar esse filtro.
-    f.termo = busca;
+    f.termo = semAcento(busca);
   }
 
   if (!f.atividade && !f.cnae && !f.uf && !f.termo) {
@@ -278,55 +315,40 @@ export async function buscarNaBase(input: any, offset = 0) {
   const pediuMulti = (f.ufs?.length || 0) > 1 || (f.portes?.length || 0) > 1;
 
   // ============================================================
-  // A CONTAGEM É A PARTE CARA
+  // A CONTAGEM DEIXOU DE SER CARA — e por isso voltou
   //
-  // "Atividade sem estado" nunca foi proibido — o filtro acima aceita atividade
-  // sozinha. O que acontecia é que a busca ESTOURAVA O TEMPO: contar quantas empresas
-  // de um CNAE existem no Brasil inteiro obriga o Postgres a varrer a base toda, e
-  // isso demora mais que a página de 100 resultados. A tela dizia "Base demorou a
-  // responder" (ou morria antes disso), e a impressão foi de que a busca tinha
-  // deixado de aceitar atividade sem UF.
+  // Havia uma regra aqui que PULAVA a contagem em busca ampla, e a tela dizia
+  // "muitos resultados" em vez do número. Fazia sentido quando contar custava 1min13s
+  // e derrubava a busca junto. Não faz mais.
   //
-  // Agora: busca ampla (sem estado, sem CNPJ, sem termo) NÃO pede a contagem. Os
-  // resultados chegam rápido e a tela mostra "muitos resultados" em vez de um total
-  // exato que ninguém usa para decidir. Com estado escolhido, a contagem volta.
+  // Duas coisas mudaram no servidor da base:
+  //   1. a contagem passou a ter TETO (para nas 100 mil primeiras linhas);
+  //   2. o filtro voltou a usar o índice — a comparação convertia a coluna para text
+  //      e desligava o índice sem ninguém perceber (`ANY($1)` → `ANY($1::bpchar[])`).
+  //
+  // Medido na base real depois das duas: contabilidade no Brasil inteiro, com
+  // contagem, em menos de 1s frio e 0,067s quente. O motivo de esconder o total
+  // acabou, então o total volta — sempre.
   // ============================================================
-  // ============================================================
-  // QUANDO NÃO CONTAR — a lição que o diagnóstico do VPS deu
-  //
-  // O `pg_stat_activity` do servidor flagrou a consulta que estava matando a busca:
-  //
-  //     select count(*)::bigint as n from estabelecimentos e where …   → 1min 13s
-  //
-  // Ou seja: a página de 100 resultados volta rápido (o índice novo resolveu isso),
-  // mas a CONTAGEM continua varrendo tudo — e ela roda na mesma requisição. Um estado
-  // inteiro não é recorte pequeno: contabilidade em SP são dezenas de milhares de
-  // linhas, e contar todas leva mais que o tempo limite.
-  //
-  // Regra nova: só conta quando o recorte é de fato pequeno — MUNICÍPIO escolhido, ou
-  // busca por texto/CNPJ. Estado sozinho não conta mais. Quem quiser o número exato
-  // pede pelo botão "contar total", que é uma chamada à parte e pode demorar.
-  // ============================================================
-  const buscaAmpla = !f.municipio && !f.termo;
-
-  // Caminho normal (sem ocultar): uma página de 100 direto da base.
+  // Caminho normal (sem ocultar): uma página direto da base, já com o total.
   if (!ocultar) {
-    const r = await buscarEmpresas({ ...f, limit: 100, offset: off, contar: off === 0 && !buscaAmpla });
+    const r = await buscarEmpresas({ ...f, limit: PAGINA, offset: off, contar: off === 0 });
     if (r.error) return { error: r.error };
     const rows = await marcarJaTem(r.rows);
     return {
       ok: true, total: r.total, atividades: r.atividades, rows, offset: off,
-      nextOffset: off + r.rows.length, temMais: r.rows.length === 100,
-      semContagem: buscaAmpla,
+      nextOffset: off + r.rows.length, temMais: r.rows.length === PAGINA,
+      totalNoTeto: r.total !== null && r.total >= TETO_BASE,
       avisoMulti: pediuMulti && !r.multi ? avisoApiAntiga(f) : undefined,
       aplicado: descreverFiltro(f, busca),
     };
   }
 
   // Ocultar já cadastradas: a base não sabe do seu cadastro, então filtramos aqui.
-  // Como isso "fura" a página (100 podem virar 60), buscamos páginas seguidas até
-  // juntar ~100 NOVAS ou acabar a base (teto de 6 páginas por clique). O offset é
-  // sempre o BRUTO consumido da base (nextOffset), para "carregar mais" não repetir.
+  // Como isso "fura" a página (250 podem virar 160), buscamos páginas seguidas até
+  // juntar uma página cheia de NOVAS ou acabar a base (teto de 6 idas por clique). O
+  // offset é sempre o BRUTO consumido da base (nextOffset), para "carregar mais" não
+  // repetir.
   let cursor = off;
   let total: number | null = null;
   let atividades: any[] = [];
@@ -335,19 +357,20 @@ export async function buscarNaBase(input: any, offset = 0) {
   let multiOk = true;
   for (let i = 0; i < 6; i++) {
     const contar = off === 0 && i === 0;
-    const r = await buscarEmpresas({ ...f, limit: 100, offset: cursor, contar });
+    const r = await buscarEmpresas({ ...f, limit: PAGINA, offset: cursor, contar });
     if (r.error) return { error: r.error };
     if (contar) { total = r.total; atividades = r.atividades || []; }
     if (!r.multi) multiOk = false;
     const marc = await marcarJaTem(r.rows);
     for (const x of marc) if (!x.jaTem) acumulado.push(x);
     cursor += r.rows.length;
-    if (r.rows.length < 100) { temMais = false; break; } // fim da base
+    if (r.rows.length < PAGINA) { temMais = false; break; } // fim da base
     temMais = true;
-    if (acumulado.length >= 100) break; // já juntamos uma página cheia de novas
+    if (acumulado.length >= PAGINA) break; // já juntamos uma página cheia de novas
   }
   return {
     ok: true, total, atividades, rows: acumulado, offset: off, nextOffset: cursor, temMais,
+    totalNoTeto: total !== null && total >= TETO_BASE,
     avisoMulti: pediuMulti && !multiOk ? avisoApiAntiga(f) : undefined,
     aplicado: descreverFiltro(f, busca),
   };
@@ -387,16 +410,19 @@ export async function exportarRadar(input: any): Promise<{ rows?: any[]; total?:
     if (r.empresa) { acc.push(r.empresa); vistos.add(soDigitos(r.empresa.cnpj)); }
     total = acc.length;
   } else {
-    if (busca.length >= 3) f.termo = busca;
-    const CAP_PAGES = 20; // teto: 20 × 100 = 2.000 empresas por exportação
+    if (busca.length >= 3) f.termo = semAcento(busca);
+    // Teto da exportação: 20 × 250 = 5.000 empresas. Era 2.000 (20 × 100); subiu
+    // junto com a página porque a busca ficou barata. Acima disso o CSV vira arquivo
+    // de trabalho de outra natureza — e a tela avisa que cortou.
+    const CAP_PAGES = 20;
     let offset = 0;
     for (let i = 0; i < CAP_PAGES; i++) {
-      const r = await buscarEmpresas({ ...f, limit: 100, offset, contar: i === 0 });
+      const r = await buscarEmpresas({ ...f, limit: PAGINA, offset, contar: i === 0 });
       if (r.error) return { error: r.error };
       if (i === 0) total = r.total;
       for (const e of r.rows || []) { const d = soDigitos(e.cnpj); if (d && !vistos.has(d)) { vistos.add(d); acc.push(e); } }
       offset += (r.rows || []).length;
-      if ((r.rows || []).length < 100) break;          // fim da base
+      if ((r.rows || []).length < PAGINA) break;        // fim da base
       if (i === CAP_PAGES - 1) capped = true;           // bateu o teto
     }
   }

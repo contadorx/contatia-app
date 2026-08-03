@@ -35,9 +35,10 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   // resultados
   const [resultados, setResultados] = useState<Empresa[]>([]);
   const [total, setTotal] = useState<number | null>(null);
-  // busca ampla (sem UF e sem termo): a contagem não é pedida de propósito — contar um
-  // CNAE no Brasil inteiro é o que fazia a busca estourar o tempo.
-  const [semContagem, setSemContagem] = useState(false);
+  // A base conta com teto: para nas 100 mil primeiras linhas. Total batendo exatamente
+  // nesse número é o TETO, não o total — e a tela precisa dizer "mais de", não cravar.
+  const [totalNoTeto, setTotalNoTeto] = useState(false);
+  const TETO_BASE = 100_000;
   const [contando, setContando] = useState(false);
   const [erroContagem, setErroContagem] = useState<string | null>(null);
   const [casadas, setCasadas] = useState<Atividade[]>([]);
@@ -128,7 +129,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       try {
         const r: any = await contarNaBase(montarInput());
         if (r?.error) setErroContagem(r.error);
-        else if (typeof r?.total === "number") { setTotal(r.total); setSemContagem(false); }
+        else if (typeof r?.total === "number") { setTotal(r.total); setTotalNoTeto(r.total >= TETO_BASE); }
       } catch (e: any) {
         setErroContagem("A contagem não voltou a tempo. A lista acima continua válida.");
       } finally {
@@ -150,7 +151,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       if (offset === 0) {
         setResultados(novas);
         setTotal(r.total);
-        setSemContagem(r.semContagem === true);
+        setTotalNoTeto(r.totalNoTeto === true);
         setCasadas(r.atividades || []);
         setAplicado(typeof r.aplicado === "string" ? r.aplicado : null);
         setAssinaturaBusca(JSON.stringify(enviado));
@@ -394,27 +395,26 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
         <>
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <p className="text-sm text-subtle">
+              {/* A base conta com teto de 100 mil. Se o total bater exatamente nesse
+                  número, ele é o TETO, não o total — e dizer "100.000" seria mentira. */}
               {total === null
-                ? semContagem
-                  ? (
-                    <>
-                      Mostrando <b>{resultados.length}</b>.{" "}
-                      <span className="text-xs">
-                        Não contei o total: contar é a parte cara — a lista sai em segundos,
-                        a contagem levaria mais de um minuto.
-                      </span>{" "}
-                      <button
-                        type="button"
-                        className="text-xs font-semibold text-brand-dark underline disabled:opacity-50"
-                        disabled={contando}
-                        onClick={contarTotal}
-                      >
-                        {contando ? "contando… (pode levar 1 min)" : "contar total mesmo assim"}
-                      </button>
-                    </>
-                  )
-                  : <>Muitos resultados — refine UF/município. Mostrando {resultados.length}.</>
-                : <><b>{total.toLocaleString("pt-BR")}</b> empresa(s) encontradas — mostrando {resultados.length}.</>}
+                ? (
+                  <>
+                    Mostrando <b>{resultados.length}</b>.{" "}
+                    <span className="text-xs">A base não devolveu o total desta vez.</span>{" "}
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-brand-dark underline disabled:opacity-50"
+                      disabled={contando}
+                      onClick={contarTotal}
+                    >
+                      {contando ? "contando…" : "tentar contar"}
+                    </button>
+                  </>
+                )
+                : totalNoTeto
+                  ? <>Mais de <b>{TETO_BASE.toLocaleString("pt-BR")}</b> empresas — mostrando {resultados.length}. <span className="text-xs">(paro de contar nas 100 mil; refine para ter o número exato)</span></>
+                  : <><b>{total.toLocaleString("pt-BR")}</b> empresa(s) encontradas — mostrando {resultados.length}.</>}
             </p>
             {casadas.length > 0 && (
               <p className="text-xs text-subtle">· atividades: {casadas.slice(0, 4).map((a) => a.descricao).join(" · ")}{casadas.length > 4 ? ` (+${casadas.length - 4})` : ""}</p>
