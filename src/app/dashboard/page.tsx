@@ -55,7 +55,10 @@ export default async function Today() {
   const [{ data: rawTasks }, contactsCount, { data: boxes }] = await Promise.all([
     supabase
       .from("tasks")
-      .select("id, channel, title, generated_content, due_date, contact_id, enrollment_id, contacts(name, company, phone, email, score)")
+      // O embed de contatos traz `*`: `instagram`/`linkedin` nascem na 0110 e, pedidas
+      // pelo nome, derrubariam a FILA INTEIRA enquanto a migration não estivesse
+      // aplicada — a tela mais importante do app ficaria vazia sem dizer por quê.
+      .select("id, channel, title, generated_content, due_date, contact_id, enrollment_id, contacts(*)")
       .eq("status", "pending")
       .lte("due_date", in3),
     supabase.from("contacts").select("id", { count: "estimated", head: true }),

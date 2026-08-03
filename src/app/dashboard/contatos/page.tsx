@@ -54,7 +54,9 @@ export default async function Contatos({
     { gerente, userId: user?.id },
     {
       select:
-        "id, name, email, phone, company, origin, status, score, assigned_to, created_at, last_activity_at, wa_status, wa_checked_at, web_capture, email_discovery, contact_tags(tag_id, tags(id, name, color))",
+        // `*` porque instagram/linkedin nascem na 0110: nomeadas, derrubariam a LISTA
+        // inteira antes da migration.
+        "*, contact_tags(tag_id, tags(id, name, color))",
       limit: 200,
     }
   );

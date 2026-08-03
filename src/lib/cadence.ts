@@ -1,12 +1,15 @@
 // Helpers do motor de cadência.
 
-export type Channel = "email" | "whatsapp" | "call" | "linkedin";
+// `instagram` entra na 0110. Os dois canais sociais são ASSISTIDOS: o app monta o
+// link e o texto, quem envia é uma pessoa (ver @/lib/redes para o porquê).
+export type Channel = "email" | "whatsapp" | "call" | "linkedin" | "instagram";
 
 export const channelLabel: Record<Channel, string> = {
   email: "E-mail",
   whatsapp: "WhatsApp",
   call: "Ligação",
   linkedin: "LinkedIn",
+  instagram: "Instagram",
 };
 
 type ContactLike = {

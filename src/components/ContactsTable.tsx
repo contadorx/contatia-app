@@ -11,6 +11,7 @@ import { bulkDeleteContacts } from "@/app/dashboard/contatos/actions";
 import { contarPorFiltro, excluirPorFiltro, exportarContatosPorFiltro } from "@/app/dashboard/contatos/filtro-actions";
 import { verificarWhatsAppLote } from "@/app/dashboard/contatos/wa-actions";
 import { capturarDoSiteLote } from "@/app/dashboard/contatos/web-capture-actions";
+import { capturarRedesDoSite } from "@/app/dashboard/contatos/social-actions";
 import { descobrirEmailsLote } from "@/app/dashboard/prospectar/actions";
 import { UltimoToque } from "@/lib/lastTouch";
 import ExportarCsv from "@/components/ExportarCsv";
@@ -31,6 +32,8 @@ type Contact = {
   wa_checked_at?: string | null;
   web_capture?: string | null;
   email_discovery?: string | null;
+  instagram?: string | null;
+  linkedin?: string | null;
   emailPendente?: boolean;
   contact_tags?: { tag_id: string; tags: { id: string; name: string; color: string } | null }[];
 };
@@ -288,6 +291,22 @@ export default function ContactsTable({
       }
     });
   }
+  // Redes sociais publicadas no site — o dado que sustenta os canais assistidos
+  // (Instagram/LinkedIn). Sem o @, o clique da tarefa não tem para onde ir.
+  function doRedes() {
+    setMsg(null);
+    start(async () => {
+      const res = (await capturarRedesDoSite([...sel])) as
+        { comIg?: number; comLi?: number; semRede?: number; semDominio?: number; restantes?: number; error?: string };
+      if (res?.error) { setMsg(res.error); return; }
+      const partes = [`✓ ${res.comIg ?? 0} Instagram · ${res.comLi ?? 0} LinkedIn`];
+      if (res.semRede) partes.push(`${res.semRede} sem rede no site`);
+      if (res.semDominio) partes.push(`${res.semDominio} sem domínio`);
+      if (res.restantes) partes.push(`${res.restantes} na fila (clique de novo para continuar)`);
+      setMsg(partes.join(" · "));
+      router.refresh();
+    });
+  }
   function doCaptureWeb() {
     setMsg(null);
     start(async () => {
@@ -475,6 +494,15 @@ export default function ContactsTable({
               <button className="btn-ghost py-1.5 text-sm" onClick={doTag} disabled={pending || apagando || !tagIds.length}>Aplicar</button>
             </div>
           )}
+
+          <button
+            className="rounded-lg border border-fuchsia-300 bg-fuchsia-50 px-3 py-1.5 text-sm font-medium text-fuchsia-700 hover:bg-fuchsia-100"
+            onClick={doRedes}
+            disabled={pending || apagando}
+            title="Procura Instagram e LinkedIn publicados no site da empresa (rodapé, página de contato). 8 sites por clique."
+          >
+            {pending ? "..." : "Buscar redes"}
+          </button>
 
           <button
             className="rounded-lg border border-brand/40 bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand-dark hover:bg-brand-soft/70"
@@ -706,6 +734,30 @@ export default function ContactsTable({
                             <span className="rounded-full bg-warn/10 px-2 py-0.5 text-[11px] font-semibold text-warn" title="Sem e-mail: só dá para trabalhar por WhatsApp.">
                               sem e-mail
                             </span>
+                          )}
+                          {c.instagram && (
+                            <a
+                              href={`https://www.instagram.com/${String(c.instagram).replace(/^@/, "")}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              title={`Instagram @${String(c.instagram).replace(/^@/, "")}`}
+                              className="rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2 py-0.5 text-[11px] font-semibold text-fuchsia-700 hover:border-fuchsia-400"
+                            >
+                              ◎ IG
+                            </a>
+                          )}
+                          {c.linkedin && (
+                            <a
+                              href={String(c.linkedin)}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              title="Abrir o perfil no LinkedIn"
+                              className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:border-blue-400"
+                            >
+                              in
+                            </a>
                           )}
                           {rev && (
                             <Link

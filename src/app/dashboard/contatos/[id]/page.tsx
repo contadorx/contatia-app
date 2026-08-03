@@ -16,6 +16,7 @@ import DeleteContactButton from "@/components/DeleteContactButton";
 import ContactExtras from "@/components/ContactExtras";
 import ProdutoBadges from "@/components/ProdutoBadges";
 import RevisarContato from "@/components/RevisarContato";
+import RedesContato from "@/components/RedesContato";
 import { EmailVerifyBadge, TestEmailBox } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
 import { produtosDoContato } from "@/lib/produtos";
@@ -63,7 +64,9 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
 
   const { data: contact } = await supabase
     .from("contacts")
-    .select("id, name, email, phone, company, company_domain, email_discovery, wa_status, wa_checked_at, role_title, cnpj, origin, status, score, account_id, custom, accounts(name, domain, website, cnpj, cnae, uf, municipio, porte)")
+    // select("*"): instagram/linkedin nascem na 0110 e derrubariam a ficha inteira
+    // se fossem pedidos pelo nome antes da migration.
+    .select("*, accounts(name, domain, website, cnpj, cnae, uf, municipio, porte)")
     .eq("id", params.id)
     .maybeSingle();
   if (!contact) notFound();
@@ -172,6 +175,13 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
 
         {/* Manutenção do cadastro: reverificar WhatsApp e conferir se há e-mail mais
             atual. Fechado por padrão — é revisão, não é o trabalho do dia. */}
+        <RedesContato
+          contactId={c.id}
+          instagram={(c as any).instagram || null}
+          linkedin={(c as any).linkedin || null}
+          temDominio={!!((c as any).company_domain || (c as any).accounts?.domain || (c as any).accounts?.website)}
+        />
+
         <RevisarContato
           contactId={c.id}
           contactName={c.name}

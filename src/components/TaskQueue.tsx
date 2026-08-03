@@ -4,6 +4,7 @@ import { useTransition, useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask, sendAllEmailTasks, completeTasks, skipTasks, deleteTasks } from "@/app/dashboard/task-actions";
 import { channelLabel, waLink, type Channel } from "@/lib/cadence";
+import { linkInstagramDM, linkLinkedin, handleInstagram } from "@/lib/redes";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import RichTextEditor from "@/components/RichTextEditor";
 
@@ -18,7 +19,10 @@ type Task = {
   tags?: { id: string; name: string; color: string }[];
   is_future?: boolean;
   hot_now?: { type: string; created_at: string } | null;
-  contacts: { name: string; company: string | null; phone: string | null; email: string | null; score: number | null } | null;
+  contacts: {
+    name: string; company: string | null; phone: string | null; email: string | null; score: number | null;
+    instagram?: string | null; linkedin?: string | null;
+  } | null;
 };
 type LastActivity = Record<string, { type: string; created_at: string; text?: string }>;
 type Tag = { id: string; name: string; color: string };
@@ -28,6 +32,7 @@ const chanStyle: Record<Channel, string> = {
   whatsapp: "bg-signal/10 text-signal",
   call: "bg-warn/10 text-warn",
   linkedin: "bg-blue-50 text-blue-700",
+  instagram: "bg-fuchsia-50 text-fuchsia-700",
 };
 
 const EVENT_LABEL: Record<string, string> = {
@@ -69,6 +74,21 @@ export default function TaskQueue({
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   const [focus, setFocus] = useState(0);
   const [editing, setEditing] = useState<Record<string, { subject: string; body: string }>>({});
+  // "copiado ✓" por linha: o prefill do Instagram falha em algumas versões do app, e
+  // sem o texto na área de transferência a pessoa fica na frente de uma caixa vazia.
+  const [copiado, setCopiado] = useState<string | null>(null);
+  function copiar(id: string, texto: string) {
+    const limpo = (texto || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const fim = () => { setCopiado(id); setTimeout(() => setCopiado((v) => (v === id ? null : v)), 2000); };
+    try {
+      navigator.clipboard.writeText(limpo).then(fim, () => {
+        // navegador sem permissão de área de transferência (http, iframe): plano B
+        const ta = document.createElement("textarea");
+        ta.value = limpo; document.body.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); fim(); } finally { document.body.removeChild(ta); }
+      });
+    } catch { /* copiar nunca pode derrubar a tela */ }
+  }
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   // seleção em lote (checkbox por linha) — vazio = nada selecionado
@@ -297,6 +317,7 @@ export default function TaskQueue({
               { value: "whatsapp", label: "WhatsApp" },
               { value: "call", label: "Ligação" },
               { value: "linkedin", label: "LinkedIn" },
+              { value: "instagram", label: "Instagram" },
             ]}
           />
         </div>
@@ -488,8 +509,79 @@ export default function TaskQueue({
                   <a className="text-xs text-subtle hover:text-ink" href={`mailto:${c.email}?subject=${encodeURIComponent(t.title || "")}&body=${encodeURIComponent(content)}`} title="Abrir no seu cliente de e-mail" onClick={(e) => e.stopPropagation()}>✎</a>
                 </>
               )}
+              {/* ============================================================
+                  INSTAGRAM — toque assistido
+                  A API do Instagram não deixa mandar a primeira mensagem (só responder
+                  dentro de 24h de uma interação que o prospect iniciou). Então o app
+                  prepara o link com o texto e QUEM ENVIA É VOCÊ. Risco de bloqueio: zero.
+                  ============================================================ */}
+              {t.channel === "instagram" && (
+                <>
+                  <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={(e) => { e.stopPropagation(); setEditing((s) => s[t.id] ? (() => { const n = { ...s }; delete n[t.id]; return n; })() : { ...s, [t.id]: { subject: "", body: content } }); }}>
+                    {editing[t.id] ? "Fechar" : "Editar"}
+                  </button>
+                  {linkInstagramDM(c?.instagram, editing[t.id]?.body ?? content) ? (
+                    <>
+                      {/* copiar antes de abrir: o ?text= do Instagram funciona na maioria
+                          das versões do app, mas não em todas — sem o texto na área de
+                          transferência, a pessoa cairia numa caixa vazia. */}
+                      <button
+                        className="btn-ghost py-1.5 text-xs"
+                        title="Copiar a mensagem (o texto pronto nem sempre aparece no app do Instagram)"
+                        onClick={(e) => { e.stopPropagation(); copiar(t.id, editing[t.id]?.body ?? content); }}
+                      >
+                        {copiado === t.id ? "copiado ✓" : "Copiar texto"}
+                      </button>
+                      <a
+                        className="btn-brand py-1.5 text-xs"
+                        href={linkInstagramDM(c?.instagram, editing[t.id]?.body ?? content) as string}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={`Abrir a conversa com @${handleInstagram(c?.instagram)}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Abrir DM
+                      </a>
+                    </>
+                  ) : (
+                    <span className="text-xs text-subtle" title="Contato sem @ do Instagram">sem @</span>
+                  )}
+                  <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={() => act(() => completeTask(t.id, t.contact_id ?? undefined))}>Feito</button>
+                </>
+              )}
+
+              {/* LINKEDIN — abre o perfil. Não existe URL pública que abra conversa nova
+                  já endereçada, e inventar uma faria a pessoa cair no lugar errado. */}
               {t.channel === "linkedin" && (
-                <button className="btn-ghost py-1.5 text-xs" onClick={() => act(() => completeTask(t.id, t.contact_id ?? undefined))}>Feito</button>
+                <>
+                  <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={(e) => { e.stopPropagation(); setEditing((s) => s[t.id] ? (() => { const n = { ...s }; delete n[t.id]; return n; })() : { ...s, [t.id]: { subject: "", body: content } }); }}>
+                    {editing[t.id] ? "Fechar" : "Editar"}
+                  </button>
+                  {linkLinkedin(c?.linkedin) ? (
+                    <>
+                      <button
+                        className="btn-ghost py-1.5 text-xs"
+                        title="Copiar a mensagem para colar no LinkedIn"
+                        onClick={(e) => { e.stopPropagation(); copiar(t.id, editing[t.id]?.body ?? content); }}
+                      >
+                        {copiado === t.id ? "copiado ✓" : "Copiar texto"}
+                      </button>
+                      <a
+                        className="btn-brand py-1.5 text-xs"
+                        href={linkLinkedin(c?.linkedin) as string}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Abrir o perfil no LinkedIn"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Abrir perfil
+                      </a>
+                    </>
+                  ) : (
+                    <span className="text-xs text-subtle" title="Contato sem perfil do LinkedIn">sem perfil</span>
+                  )}
+                  <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={() => act(() => completeTask(t.id, t.contact_id ?? undefined))}>Feito</button>
+                </>
               )}
               {t.channel === "call" && (
                 <>

@@ -14,6 +14,7 @@ const CHANNELS: { v: Channel; l: string }[] = [
   { v: "whatsapp", l: "WhatsApp" },
   { v: "call", l: "Ligação" },
   { v: "linkedin", l: "LinkedIn" },
+  { v: "instagram", l: "Instagram" },
 ];
 
 const emptyStep = (): StepInput => ({ channel: "email", delay_days: 0, subject: "", body: "" });
@@ -258,7 +259,7 @@ export default function SequenceBuilder({
                 <input type="number" min={3} max={8} className="input w-16 py-1" value={brief.steps} onChange={(e) => bf("steps", Number(e.target.value))} />
               </label>
               <div className="flex flex-wrap gap-3 text-xs">
-                {["email", "whatsapp", "linkedin", "call"].map((ch) => (
+                {["email", "whatsapp", "instagram", "linkedin", "call"].map((ch) => (
                   <label key={ch} className="flex items-center gap-1.5">
                     <input type="checkbox" checked={brief.channels.includes(ch)} onChange={() => toggleChannel(ch)} />
                     {ch === "call" ? "ligação" : ch}

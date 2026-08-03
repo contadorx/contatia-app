@@ -97,7 +97,9 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string) {
     for (let i = 0; i < ids.length; i += FATIA_CONSULTA) {
       const { data, error } = await supabase
         .from("contacts")
-        .select("id, name, email, company, phone, role_title, cnpj, custom, assigned_to, opted_out")
+        // select("*"): `instagram`/`linkedin` nascem na 0110. Pedidas pelo nome, elas
+        // derrubariam a INSCRIÇÃO inteira enquanto a migration não estivesse aplicada.
+        .select("*")
         .eq("tenant_id", tenant_id)
         .in("id", ids.slice(i, i + FATIA_CONSULTA));
       if (error) return { error: msgErro(error) };
@@ -122,16 +124,37 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string) {
     const elegiveis: any[] = [];
     let semDado = 0, jaInscrito = 0, suprimidos = 0;
 
-    const podeCanal = (ch: string, temEmail: boolean, temFone: boolean) =>
-      ch === "email" ? temEmail : ch === "whatsapp" || ch === "call" ? temFone : true;
+    // ============================================================
+    // GATE DE DADO POR CANAL
+    //
+    // Um passo só vira tarefa se o contato TEM o dado daquele canal. Sem isso, a fila
+    // encheria de tarefas impossíveis — e a pessoa gastaria o dia clicando em "pular".
+    //
+    // `instagram` e `linkedin` entram aqui pelo mesmo motivo dos outros: sem o perfil
+    // não existe link para abrir, e o toque assistido não tem para onde ir.
+    // ============================================================
+    const podeCanal = (
+      ch: string,
+      temEmail: boolean,
+      temFone: boolean,
+      temIg = false,
+      temLi = false
+    ) =>
+      ch === "email" ? temEmail
+      : ch === "whatsapp" || ch === "call" ? temFone
+      : ch === "instagram" ? temIg
+      : ch === "linkedin" ? temLi
+      : true;
 
     for (const c of contatos) {
       if (c.opted_out) { suprimidos++; continue; }
       if (jaTem.has(c.id)) { jaInscrito++; continue; }
       const temEmail = !!String(c.email || "").trim();
       const temFone = !!String(c.phone || "").trim();
-      if (!steps.some((s: any) => podeCanal(s.channel, temEmail, temFone))) { semDado++; continue; }
-      elegiveis.push({ ...c, temEmail, temFone });
+      const temIg = !!String((c as any).instagram || "").trim();
+      const temLi = !!String((c as any).linkedin || "").trim();
+      if (!steps.some((s: any) => podeCanal(s.channel, temEmail, temFone, temIg, temLi))) { semDado++; continue; }
+      elegiveis.push({ ...c, temEmail, temFone, temIg, temLi });
     }
     // contato que sumiu entre a seleção e agora
     const sumidos = ids.length - contatos.length;
@@ -181,7 +204,7 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string) {
       for (const s of steps as any[]) {
         // o cronograma acumula sobre TODOS os passos; só vira tarefa o passo elegível
         offset += Number(s.delay_days) || 0;
-        if (!podeCanal(s.channel, c.temEmail, c.temFone)) continue;
+        if (!podeCanal(s.channel, c.temEmail, c.temFone, c.temIg, c.temLi)) continue;
         const temB = s.channel === "email" && s.subject_b && String(s.subject_b).trim();
         const variante = temB ? (Math.random() < 0.5 ? "a" : "b") : null;
         const assunto = variante === "b" ? s.subject_b : s.subject;
