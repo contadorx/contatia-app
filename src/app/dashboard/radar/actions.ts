@@ -98,6 +98,35 @@ function montarFiltro(input: any): FiltroReceita {
   };
 }
 
+// ============================================================
+// MOSTRAR O FILTRO QUE DE FATO VALEU
+//
+// Uma busca por "contabilidade" devolveu cultivo de arroz e eu passei horas
+// alternando entre duas hipóteses — o app mandou errado, ou a base entendeu errado —
+// sem conseguir provar nenhuma. O motivo é que a tela mostrava o formulário (o que
+// você QUERIA) e a lista (o que VEIO), e nada entre os dois.
+//
+// Esta frase é o que faltava: ela é montada no servidor, a partir do filtro que
+// realmente foi para a base, e aparece junto do total. Se um dia um filtro sumir de
+// novo, a tela diz na hora — em vez de parecer que a base enlouqueceu.
+// ============================================================
+function descreverFiltro(f: FiltroReceita, busca?: string): string {
+  const p: string[] = [];
+  if (f.cnae?.length) p.push(`CNAE ${f.cnae.join(", ")}`);
+  else if (f.atividade) p.push(`atividade "${f.atividade}"`);
+  const nome = (busca || "").trim() || f.termo;
+  if (nome) p.push(`nome contém "${nome}"`);
+  if (f.ufs?.length) p.push(f.ufs.join("+"));
+  else if (f.uf) p.push(f.uf);
+  if (f.municipio) p.push(f.municipio);
+  if (f.portes?.length) p.push(`porte ${f.portes.join("+")}`);
+  else if (f.porte) p.push(`porte ${f.porte}`);
+  if (f.email_corporativo) p.push("e-mail empresarial");
+  else if (f.com_email) p.push("com e-mail");
+  if (f.com_telefone) p.push("com telefone");
+  return p.length ? p.join(" · ") : "sem filtro nenhum";
+}
+
 // marca cada resultado com jaTem=true se o CNPJ já estiver em Empresas (evita repuxar)
 // e REMOVE os CNPJs descartados (radar_dismissed) — some das buscas de vez.
 async function marcarJaTem(rows: any[]): Promise<any[]> {
@@ -206,7 +235,7 @@ export async function buscarNaBase(input: any, offset = 0) {
     if (r.error) return { error: r.error };
     let rows = await marcarJaTem(r.empresa ? [r.empresa] : []);
     if (ocultar) rows = rows.filter((x) => !x.jaTem);
-    return { ok: true, total: rows.length, atividades: [], rows, offset: 0, nextOffset: 0, temMais: false };
+    return { ok: true, total: rows.length, atividades: [], rows, offset: 0, nextOffset: 0, temMais: false, aplicado: `CNPJ ${digitos}` };
   }
   if (busca.length >= 3) {
     // texto → procura em razão social + nome fantasia. RESPEITA os checkboxes de
@@ -265,6 +294,7 @@ export async function buscarNaBase(input: any, offset = 0) {
       nextOffset: off + r.rows.length, temMais: r.rows.length === 100,
       semContagem: buscaAmpla,
       avisoMulti: pediuMulti && !r.multi ? avisoApiAntiga(f) : undefined,
+      aplicado: descreverFiltro(f, busca),
     };
   }
 
@@ -294,6 +324,7 @@ export async function buscarNaBase(input: any, offset = 0) {
   return {
     ok: true, total, atividades, rows: acumulado, offset: off, nextOffset: cursor, temMais,
     avisoMulti: pediuMulti && !multiOk ? avisoApiAntiga(f) : undefined,
+    aplicado: descreverFiltro(f, busca),
   };
 }
 

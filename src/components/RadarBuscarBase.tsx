@@ -41,6 +41,11 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   const [contando, setContando] = useState(false);
   const [erroContagem, setErroContagem] = useState<string | null>(null);
   const [casadas, setCasadas] = useState<Atividade[]>([]);
+  // O filtro que o SERVIDOR diz ter aplicado (não o que o formulário mostra), e a
+  // "impressão digital" do formulário no momento da busca. Se o formulário mudar
+  // depois, a lista na tela é de outra pergunta — e isso precisa estar escrito.
+  const [aplicado, setAplicado] = useState<string | null>(null);
+  const [assinaturaBusca, setAssinaturaBusca] = useState<string | null>(null);
   const [temMais, setTemMais] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
   const [buscou, setBuscou] = useState(false);
@@ -106,6 +111,11 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       ocultarJaTem,
     };
   }
+  // Os filtros mudaram depois que a lista foi carregada? Então a lista responde a
+  // outra pergunta. Melhor dizer isso do que deixar o operador concluir que a base
+  // devolveu lixo — foi exatamente essa confusão que custou uma tarde.
+  const filtrosMudaram = assinaturaBusca !== null && JSON.stringify(montarInput()) !== assinaturaBusca;
+
   const buscaDigitos = busca.replace(/\D/g, "");
   const temBusca = busca.trim().length >= 3 || buscaDigitos.length === 14;
   const temFiltro = temBusca || escolhidas.length > 0 || cnaeManual.replace(/\D/g, "").length >= 7 || termo.trim().length >= 3 || ufs.length > 0;
@@ -131,8 +141,9 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
     setErro(null);
     setMsg(null);
     setAviso(null);
+    const enviado = montarInput();
     startBusca(async () => {
-      const r: any = await buscarNaBase(montarInput(), offset);
+      const r: any = await buscarNaBase(enviado, offset);
       if (r.error) { setErro(r.error); return; }
       setAviso(r.avisoMulti || null);
       const novas: Empresa[] = r.rows || [];
@@ -141,6 +152,8 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
         setTotal(r.total);
         setSemContagem(r.semContagem === true);
         setCasadas(r.atividades || []);
+        setAplicado(typeof r.aplicado === "string" ? r.aplicado : null);
+        setAssinaturaBusca(JSON.stringify(enviado));
         setSel(new Set());
       } else {
         setResultados((prev) => [...prev, ...novas]);
@@ -369,6 +382,11 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       {erro && <p className="mt-3 text-sm text-red-600">{erro}</p>}
       {erroContagem && <p className="mt-2 text-xs text-warn">{erroContagem}</p>}
       {aviso && <p className="mt-3 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-sm text-warn">{aviso}</p>}
+      {filtrosMudaram && resultados.length > 0 && (
+        <p className="mt-3 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-sm text-warn">
+          Os filtros mudaram depois desta busca — a lista abaixo ainda é da anterior. Clique em Buscar.
+        </p>
+      )}
       {msg && <p className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{msg}</p>}
 
       {/* ---------- RESULTADOS ---------- */}
@@ -400,6 +418,11 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
             </p>
             {casadas.length > 0 && (
               <p className="text-xs text-subtle">· atividades: {casadas.slice(0, 4).map((a) => a.descricao).join(" · ")}{casadas.length > 4 ? ` (+${casadas.length - 4})` : ""}</p>
+            )}
+            {aplicado && (
+              <p className="text-xs text-subtle" title="O filtro que a base recebeu de fato — não o que está no formulário.">
+                · filtro aplicado: <b>{aplicado}</b>
+              </p>
             )}
             {resultados.length > 0 && (
               <div className="ml-auto flex items-center gap-2">
