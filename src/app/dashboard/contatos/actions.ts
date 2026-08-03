@@ -299,7 +299,9 @@ export async function enrichContact(id: string) {
 
   const { data: c } = await supabase
     .from("contacts")
-    .select("id, cnpj, email, phone, account_id, custom, accounts(cnpj)")
+    // company_domain PRECISA vir aqui: sem ele, o `if (!c.company_domain)` abaixo
+    // enxergaria undefined em todo contato e sobrescreveria um domínio já bom.
+    .select("id, cnpj, email, phone, company_domain, account_id, custom, accounts(cnpj)")
     .eq("id", id)
     .maybeSingle();
   if (!c) return { error: "Contato não encontrado." };
@@ -329,21 +331,40 @@ export async function enrichContact(id: string) {
   if (!(c as any).phone && d.telefone) patch.phone = d.telefone;
   if (!(c as any).cnpj) patch.cnpj = cnpj;
 
+  // ============================================================
+  // O E-MAIL DA RECEITA ENTREGA O DOMÍNIO CORPORATIVO
+  //
+  // A Receita guarda o e-mail de contato da empresa. Quando ele é corporativo (não é
+  // gmail/hotmail), o domínio dele é o domínio da empresa — que é exatamente o que os
+  // passos seguintes precisam para existir: raspar o site e descobrir o e-mail do
+  // decisor por SMTP. Sem isto, enriquecer pelo CNPJ não destravava nada: virava um
+  // passo isolado num contato que continuava sem domínio.
+  // ============================================================
+  const { dominioCorporativo } = await import("@/lib/emailFinder");
+  const dominioNovo = dominioCorporativo(d.email || (c as any).email);
+  if (!(c as any).company_domain && dominioNovo) patch.company_domain = dominioNovo;
+
   const { error } = await supabase.from("contacts").update(patch as any).eq("id", id);
   if (error) return { error: msgErro(error) };
 
   // propaga para a empresa também
   const accId = (c as any).account_id;
   if (accId) {
-    await supabase
-      .from("accounts")
-      .update({ cnpj, cnae: d.cnae, uf: d.uf, municipio: d.municipio, porte: d.porte } as any)
-      .eq("id", accId)
-      .eq("tenant_id", tenant_id);
+    const patchConta: Record<string, unknown> = { cnpj, cnae: d.cnae, uf: d.uf, municipio: d.municipio, porte: d.porte };
+    if (dominioNovo) patchConta.domain = dominioNovo;
+    await supabase.from("accounts").update(patchConta as any).eq("id", accId).eq("tenant_id", tenant_id);
   }
 
   revalidatePath(`/dashboard/contatos/${id}`);
-  return { ok: true };
+  // Devolve o que descobriu: quem chama em cadeia (o botão "Atualizar dados") precisa
+  // saber que agora existe domínio/telefone. Sem isso os passos seguintes rodariam com
+  // a foto que a página carregou ANTES, e pulariam justamente o contato que mais
+  // precisava deles.
+  return {
+    ok: true,
+    dominio: dominioNovo || (c as any).company_domain || null,
+    telefone: (patch.phone as string | undefined) || (c as any).phone || null,
+  };
 }
 
 // Cria um novo contato a partir do nome de um SÓCIO (da Receita), vinculado à

@@ -16,10 +16,12 @@ import DeleteContactButton from "@/components/DeleteContactButton";
 import ContactExtras from "@/components/ContactExtras";
 import ProdutoBadges from "@/components/ProdutoBadges";
 import RevisarContato from "@/components/RevisarContato";
+import AtualizarDadosContato from "@/components/AtualizarDadosContato";
 import RedesContato from "@/components/RedesContato";
 import { EmailVerifyBadge, TestEmailBox } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
 import { produtosDoContato } from "@/lib/produtos";
+import { dominioCorporativo } from "@/lib/emailFinder";
 
 export const dynamic = "force-dynamic";
 // A busca/verificação de e-mail conversa com o servidor SMTP do destino, que pode
@@ -103,6 +105,17 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
   const linkedin = custom.linkedin || null;
   const rapport = custom.rapport || {};
   const hasReceita = !!(receita.cnae || receita.cnae_descricao || receita.situacao || receita.porte || socios.length);
+
+  // ============================================================
+  // O DOMÍNIO PODE ESTAR ESCONDIDO NO E-MAIL
+  //
+  // Um contato importado com "joao@escritoriosilva.com.br" e nada mais tinha, para o
+  // app, "nenhum domínio" — e portanto nenhum caminho para o site nem para as redes.
+  // Mas o domínio está ali, na frente. `dominioCorporativo` devolve null para gmail e
+  // afins, então isso não transforma um e-mail pessoal em site de empresa.
+  // ============================================================
+  const dominioContato =
+    c.company_domain || acc.domain || dominioCorporativo(c.email) || "";
   const enr = (enrollments as any[]) || [];
   const activeEnr = enr.find((e) => e.status === "active");
   const pendingTasks = (tasks as any[]) || [];
@@ -157,45 +170,79 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
           <span className="ml-auto"><DeleteContactButton contactId={c.id} name={c.name} /></span>
         </div>
 
-        {!c.email && (
-          <>
-            <EmailFinder
+        {/* ============================================================
+            DADOS DE CONTATO — um lugar só
+            Antes eram seis controles em quatro alturas diferentes da página, e o de
+            WhatsApp estava dentro de um painel recolhido. Descobrir dado de contato é
+            UMA decisão, então virou um botão. Os controles finos continuam aqui
+            embaixo, recolhidos, para quando você quiser mexer num canal só.
+            ============================================================ */}
+        <section className="mt-4 rounded-xl border border-line p-4">
+          <h2 className="font-display text-sm font-semibold">Dados de contato</h2>
+          <p className="mt-0.5 text-xs text-subtle">
+            E-mail, WhatsApp, redes e cadastro da Receita — descobertos na ordem em que um
+            alimenta o outro.
+          </p>
+
+          <div className="mt-3">
+            <AtualizarDadosContato
               contactId={c.id}
-              contactName={c.name}
-              companyDomain={(c as any).company_domain || (c as any).accounts?.domain || null}
-              discovery={(c as any).email_discovery || null}
+              dominio={dominioContato}
+              estado={{
+                temCnpj: !!cnpj,
+                enriquecido: !!enrichedAt,
+                temDominio: !!(dominioContato || (c as any).accounts?.website),
+                temEmail: !!c.email,
+                temTelefone: !!c.phone,
+                waStatus: (c as any).wa_status || null,
+                temRede: !!((c as any).instagram || (c as any).linkedin),
+              }}
             />
-            {/* "Testar um e-mail que já tenho" logo abaixo do buscador: para e-mails
-                por função (contato@, contabil@) que não seguem o nome da pessoa. */}
-            <div className="mt-2">
-              <TestEmailBox contactId={c.id} />
+          </div>
+
+          <details className="mt-3">
+            <summary className="cursor-pointer text-xs font-medium text-subtle hover:text-ink">
+              Ajustar um canal específico
+            </summary>
+            <div className="mt-2 space-y-2 border-l-2 border-line pl-3">
+              {!c.email && (
+                <>
+                  <EmailFinder
+                    contactId={c.id}
+                    contactName={c.name}
+                    companyDomain={(c as any).company_domain || (c as any).accounts?.domain || null}
+                    discovery={(c as any).email_discovery || null}
+                  />
+                  {/* "Testar um e-mail que já tenho": para endereços por função
+                      (contato@, contabil@) que não seguem o nome da pessoa. */}
+                  <TestEmailBox contactId={c.id} />
+                </>
+              )}
+
+              <RedesContato
+                contactId={c.id}
+                instagram={(c as any).instagram || null}
+                linkedin={(c as any).linkedin || null}
+                temDominio={!!((c as any).company_domain || (c as any).accounts?.domain || (c as any).accounts?.website)}
+                igOrigem={(c as any).instagram_origem || null}
+                igConferidoEm={(c as any).instagram_conferido_at || null}
+                liOrigem={(c as any).linkedin_origem || null}
+                liConferidoEm={(c as any).linkedin_conferido_at || null}
+              />
+
+              <RevisarContato
+                contactId={c.id}
+                contactName={c.name}
+                email={c.email || null}
+                phone={c.phone || null}
+                waStatus={(c as any).wa_status || null}
+                waCheckedAt={(c as any).wa_checked_at || null}
+                companyDomain={(c as any).company_domain || (c as any).accounts?.domain || null}
+                discovery={(c as any).email_discovery || null}
+              />
             </div>
-          </>
-        )}
-
-        {/* Manutenção do cadastro: reverificar WhatsApp e conferir se há e-mail mais
-            atual. Fechado por padrão — é revisão, não é o trabalho do dia. */}
-        <RedesContato
-          contactId={c.id}
-          instagram={(c as any).instagram || null}
-          linkedin={(c as any).linkedin || null}
-          temDominio={!!((c as any).company_domain || (c as any).accounts?.domain || (c as any).accounts?.website)}
-          igOrigem={(c as any).instagram_origem || null}
-          igConferidoEm={(c as any).instagram_conferido_at || null}
-          liOrigem={(c as any).linkedin_origem || null}
-          liConferidoEm={(c as any).linkedin_conferido_at || null}
-        />
-
-        <RevisarContato
-          contactId={c.id}
-          contactName={c.name}
-          email={c.email || null}
-          phone={c.phone || null}
-          waStatus={(c as any).wa_status || null}
-          waCheckedAt={(c as any).wa_checked_at || null}
-          companyDomain={(c as any).company_domain || (c as any).accounts?.domain || null}
-          discovery={(c as any).email_discovery || null}
-        />
+          </details>
+        </section>
 
         {/* Dados do contato/empresa (o que já está no banco e antes ficava escondido) */}
         <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 border-t border-line pt-4 text-sm sm:grid-cols-3">
