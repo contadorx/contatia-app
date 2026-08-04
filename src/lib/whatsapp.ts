@@ -48,13 +48,38 @@ function base(url: string) {
 // Evolution responder 400 {"exists":false} — o bug que dava "Evolution 400".
 // Geramos as duas formas e descobrimos qual existe ANTES de enviar.
 // ============================================================
+// ============================================================
+// O 9 SÓ ENTRA EM NÚMERO QUE PODE SER CELULAR
+//
+// Caso real: `1124511469` (fixo de São Paulo) era verificado como "tem WhatsApp".
+// A regra antiga punha o 9 em QUALQUER local de 8 dígitos, então `2451-1469` virava
+// `9 2451-1469` — um celular VÁLIDO, de outra pessoa, que de fato tem WhatsApp. O
+// Evolution respondia "existe" com toda a razão: o número existe, só não é o do
+// contato.
+//
+// Isso é pior do que não achar: dá confiança falsa e, no envio, a mensagem vai para
+// um estranho. Nunca apareceu erro nenhum — mais um da série "nada falha e o
+// resultado está errado".
+//
+// No Brasil, celular tem local de 9 dígitos começando em 9 (as faixas 6/7/8 antigas
+// já migraram). Fixo começa em 2, 3, 4 ou 5 e NUNCA ganha o nono dígito.
+// ============================================================
+const INICIO_CELULAR = /^[6-9]/;
+
 export function brVariants(number: string): string[] {
   const set = new Set<string>([number]);
   const m = number.match(/^55(\d{2})(\d+)$/);
   if (m) {
     const ddd = m[1], sub = m[2];
-    if (sub.length === 9 && sub.startsWith("9")) set.add(`55${ddd}${sub.slice(1)}`); // tira o 9
-    else if (sub.length === 8) set.add(`55${ddd}9${sub}`);                            // põe o 9
+    if (sub.length === 9 && sub.startsWith("9")) {
+      // 9 dígitos começando em 9: pode estar registrado sem o nono. Tirar é seguro.
+      set.add(`55${ddd}${sub.slice(1)}`);
+    } else if (sub.length === 8 && INICIO_CELULAR.test(sub)) {
+      // 8 dígitos começando em 6-9: celular antigo, ganha o 9.
+      set.add(`55${ddd}9${sub}`);
+    }
+    // 8 dígitos começando em 2-5: FIXO. Fica como está — e como fixo não tem
+    // WhatsApp, a verificação vai responder "não tem", que é a verdade.
   }
   return Array.from(set);
 }

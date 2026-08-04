@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.04-7";
+export const VERSAO_APP = "2026.08.04-8";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "captura o WhatsApp de widget flutuante (data-attr e script inline) · e-mail de outro dominio conta como faltando";
+export const VERSAO_NOTAS = "CORRECAO: fixo nao recebe mais o 9o digito (falso positivo de WhatsApp) · captura de widget flutuante";
