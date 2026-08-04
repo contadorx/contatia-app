@@ -88,13 +88,13 @@ async function fetchText(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
       redirect: "follow",
-      signal: AbortSignal.timeout(6000),
-      headers: { "user-agent": "Mozilla/5.0 (compatible; ContatiaBot/1.0)" },
+      signal: AbortSignal.timeout(15_000),
+      headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" },
     });
     if (!res.ok) return null;
     const ct = res.headers.get("content-type") || "";
     if (!ct.includes("text/html") && !ct.includes("application/xhtml")) return null;
-    return (await res.text()).slice(0, 500_000);
+    return (await res.text()).slice(0, 3_000_000);
   } catch {
     return null;
   }
