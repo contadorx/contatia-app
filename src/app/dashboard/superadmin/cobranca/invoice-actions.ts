@@ -112,9 +112,43 @@ Assim que o pagamento for confirmado, sua assinatura é atualizada automaticamen
 export async function setInvoiceStatus(invoiceId: string, status: string) {
   const { supabase, ok } = await guard();
   if (!ok) return { error: "Apenas o dono da plataforma." };
-  const patch: any = { status };
-  if (status === "paid") patch.paid_at = new Date().toISOString();
-  const { error } = await supabase.from("platform_invoices").update(patch).eq("id", invoiceId);
+
+  // ============================================================
+  // MARCAR PAGA TEM DE DEVOLVER O ACESSO
+  //
+  // Este botão escrevia só `status` e `paid_at`. O webhook, além disso, reativava a
+  // assinatura. No incidente de hoje o webhook falhou, a fatura foi marcada por aqui,
+  // e o cliente ficou com a fatura PAGA e a conta ainda SUSPENSA. Pior: sem fatura em
+  // aberto, a tela de conta pausada não tem nem o que oferecer para pagar. Ele pagou
+  // e continuou trancado até alguém lembrar de editar o tenant noutra tela.
+  //
+  // Os dois caminhos agora chamam a mesma função.
+  // ============================================================
+  if (status === "paid") {
+    const { data: inv } = await supabase
+      .from("platform_invoices")
+      .select("id, tenant_id, amount, due_date, asaas_subscription_id")
+      .eq("id", invoiceId)
+      .maybeSingle();
+    const { marcarFaturaPaga } = await import("@/lib/pagamento");
+    const r = await marcarFaturaPaga(supabase, {
+      invoiceId,
+      tenantId: (inv as any)?.tenant_id,
+      dueDate: (inv as any)?.due_date,
+      valor: Number((inv as any)?.amount) || 0,
+      daAssinatura: !!(inv as any)?.asaas_subscription_id,
+    });
+    if (!r.ok) return { error: r.erro || "Não consegui marcar como paga." };
+    revalidatePath("/dashboard/superadmin/cobranca");
+    return {
+      ok: true,
+      aviso: r.reativou
+        ? undefined
+        : "Fatura marcada como paga. A assinatura NÃO foi reativada: este workspace não tem assinatura vinculada no Asaas.",
+    };
+  }
+
+  const { error } = await supabase.from("platform_invoices").update({ status }).eq("id", invoiceId);
   if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/superadmin/cobranca");
   return { ok: true };

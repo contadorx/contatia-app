@@ -44,6 +44,23 @@ export function InvoiceForm({ tenants }: { tenants: Tenant[] }) {
           <input className="input mt-1" value={f.payment_link} onChange={(e) => up("payment_link", e.target.value)} placeholder="deixe em branco para gerar automático" />
           <p className="mt-1 text-xs text-subtle">Em branco, a Contatia <b>gera a cobrança no Asaas automaticamente</b> (via API) e traz o link + o id que casa o webhook. Preencha só se quiser usar um link já existente.</p>
         </div>
+        {/* ============================================================
+            O CAMPO QUE FALTAVA — E QUE CUSTOU UMA FATURA PAGA SEM BAIXA
+            O estado já tinha `asaas_payment_id` e a server action já o aceitava, mas
+            nunca existiu um campo na tela. Toda fatura criada com link colado nascia
+            sem esse id — e é POR ELE que o webhook encontra a fatura quando o cliente
+            paga. Ficava invisível para sempre: pagava e continuava "Pendente".
+            ============================================================ */}
+        {f.payment_link.trim() !== "" && (
+          <div className="sm:col-span-2">
+            <label className="label">Id da cobrança no Asaas <span className="text-warn">(necessário com link colado)</span></label>
+            <input className="input mt-1" value={f.asaas_payment_id} onChange={(e) => up("asaas_payment_id", e.target.value)} placeholder="pay_000000000000" />
+            <p className="mt-1 text-xs text-subtle">
+              No Asaas, abra a cobrança: o id aparece na URL e começa com <b>pay_</b>. Sem ele o
+              webhook não consegue casar o pagamento com esta fatura, e a baixa terá de ser na mão.
+            </p>
+          </div>
+        )}
       </div>
       {msg && <p className="mt-2 text-sm text-danger">{msg}</p>}
       <div className="mt-4 flex gap-2">

@@ -173,3 +173,54 @@ export async function cancelAsaasSubscription(subscriptionId: string): Promise<{
   }
   return { ok: true };
 }
+
+// ============================================================
+// PERGUNTAR AO ASAAS SE JÁ PAGARAM
+//
+// Todo o fluxo de "virou paga" dependia do webhook chegar. Basta uma janela ruim —
+// deploy, token trocado, ou a fila do Asaas pausada porque uma entrega voltou não-2xx —
+// para o pagamento nunca ser capturado: a fatura fica aberta, a régua cobra quem já
+// pagou e, no D+10, suspende a conta de um cliente adimplente.
+//
+// Webhook é notificação, não fonte da verdade. Isto aqui pergunta.
+// ============================================================
+export type PagamentoAsaas = {
+  id: string;
+  status: string;            // RECEIVED | CONFIRMED | PENDING | OVERDUE | REFUNDED | ...
+  value?: number;
+  dueDate?: string;
+  paymentDate?: string;
+  subscription?: string | null;
+};
+
+export async function consultarPagamento(paymentId: string): Promise<{ pgto?: PagamentoAsaas; error?: string }> {
+  const h = headers();
+  if (!h) return { error: "ASAAS_API_KEY não configurada." };
+  try {
+    const res = await fetch(`${base()}/payments/${encodeURIComponent(paymentId)}`, { headers: h });
+    if (res.status === 404) return { error: "cobrança não existe mais no Asaas" };
+    if (!res.ok) {
+      let d = `${res.status}`;
+      try { const j = await res.json(); d = j?.errors?.[0]?.description || d; } catch { /* corpo ilegível: o status basta */ }
+      return { error: `Asaas: ${d}` };
+    }
+    const j: any = await res.json();
+    return {
+      pgto: {
+        id: j?.id,
+        status: String(j?.status || ""),
+        value: Number(j?.value) || 0,
+        dueDate: j?.dueDate || undefined,
+        paymentDate: j?.paymentDate || j?.clientPaymentDate || undefined,
+        subscription: j?.subscription || null,
+      },
+    };
+  } catch (e: any) {
+    return { error: `Asaas: falha de rede (${e?.message || "sem detalhe"})` };
+  }
+}
+
+/** No Asaas, estes dois status significam dinheiro recebido. */
+export function pagamentoQuitado(status: string): boolean {
+  return ["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"].includes(String(status || "").toUpperCase());
+}

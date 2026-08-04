@@ -443,7 +443,11 @@ export default function AccountsCockpit({
           </thead>
           <tbody>
             {rows.map((a) => {
-              const totalOpp = a.opps.reduce((s, o) => s + (Number(o.value_mrr) || 0), 0);
+              // Só as ABERTAS. Somando todas, uma conta com dois negócios perdidos de
+              // R$ 500 e um aberto de R$ 200 exibia "3 · R$ 1.200" — lido como
+              // potencial em aberto, fazia priorizar a empresa errada.
+              const abertas = a.opps.filter((o: any) => (o.status || "open") === "open");
+              const totalOpp = abertas.reduce((s: number, o: any) => s + (Number(o.value_mrr) || 0), 0);
               const ab = aberto[a.id] || null;
               const checked = sel.has(a.id);
               return (
@@ -485,7 +489,7 @@ export default function AccountsCockpit({
                         onClick={() => toggleAba(a.id, "oportunidades")}
                         title="Ver oportunidades"
                       >
-                        {a.opps.length}{totalOpp ? ` · ${brl(totalOpp)}` : ""} {a.opps.length ? "▾" : ""}
+                        {a.opps.length}{totalOpp ? ` · ${brl(totalOpp)} em aberto` : ""} {a.opps.length ? "▾" : ""}
                       </button>
                     </td>
                   </tr>

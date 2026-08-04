@@ -68,6 +68,7 @@ export default async function Planos() {
 
   const statusLabel: Record<string, { t: string; c: string }> = {
     active: { t: "Assinatura ativa", c: "bg-signal/10 text-signal" },
+    trial: { t: "Período de teste", c: "bg-warn/10 text-warn" },
     trialing: { t: "Período de teste", c: "bg-warn/10 text-warn" },
     pending: { t: "Aguardando pagamento", c: "bg-warn/10 text-warn" },
     past_due: { t: "Pagamento em atraso", c: "bg-danger/10 text-danger" },

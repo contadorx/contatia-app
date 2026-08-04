@@ -49,6 +49,7 @@ export default function PipelineBoard({
   allTags?: { id: string; name: string; color: string }[];
   openOppId?: string;
 }) {
+  const router = useRouter();
   const [opps, setOpps] = useState<Opp[]>(opportunities);
   const [dragId, setDragId] = useState<string | null>(null);
 
@@ -81,13 +82,32 @@ export default function PipelineBoard({
   const [accountId, setAccountId] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
+  // ============================================================
+  // O BOARD VIVIA DE UMA CÓPIA QUE NUNCA ERA ATUALIZADA
+  //
+  // `useState(opportunities)` guarda a lista na PRIMEIRA renderização e ignora as
+  // props seguintes. Como as actions chamam `revalidatePath`, o servidor mandava
+  // dados novos que este componente descartava — só um F5 corrigia. Somado ao fato de
+  // o arrasto gravar `stage_id` sem mexer no `status`, arrastar três negócios para
+  // "Perdido" mantinha os R$ 1.500 no cabeçalho "em potencial".
+  // ============================================================
+  useEffect(() => { setOpps(opportunities); }, [opportunities]);
+
   function onDrop(stageId: string) {
     if (!dragId) return;
     const id = dragId;
     setDragId(null);
-    setOpps((list) => list.map((o) => (o.id === id ? { ...o, stage_id: stageId } : o)));
+    // o estágio decide o status: soltar em Ganho/Perdido tem de tirar o negócio da
+    // conta de "em aberto" na hora, e não só no próximo carregamento
+    const st = stages.find((x) => x.id === stageId) as any;
+    const novoStatus = st?.is_won ? "won" : st?.is_lost ? "lost" : "open";
+    setOpps((list) => list.map((o) => (o.id === id ? { ...o, stage_id: stageId, status: novoStatus } : o)));
     start(async () => {
-      await moveOpportunity(id, stageId);
+      const r: any = await moveOpportunity(id, stageId);
+      // servidor recusou (RLS, negócio de outro dono): desfaz o movimento na tela em
+      // vez de deixar o cartão num lugar onde ele não está
+      if (r?.error) { setMsg(r.error); setOpps(opportunities); return; }
+      router.refresh();
     });
   }
 
@@ -108,18 +128,19 @@ export default function PipelineBoard({
         setContactId("");
         setAccountId("");
         setShowForm(false);
-        // recarrega via revalidate (server) — otimista simples: adiciona local
-        setOpps((l) => [
-          {
-            id: Math.random().toString(36),
-            title,
-            value_mrr: Number(value) || 0,
-            stage_id: stages[0]?.id ?? null,
-            status: "open",
-            contact_name: contacts.find((c) => c.id === contactId)?.name ?? null,
-          },
-          ...l,
-        ]);
+        // ============================================================
+        // NADA DE CARTÃO COM ID INVENTADO
+        //
+        // O cartão otimista nascia com `id: Math.random()`. Editar esse cartão chamava
+        // `updateOpportunity("0.k3x9…")`, que casa com ZERO linhas — e o Supabase não
+        // devolve erro para update que não achou nada. A tela mostrava o valor novo e
+        // o banco não tinha mudado. Excluir tinha o inverso: o cartão sumia da tela e
+        // o negócio continuava lá.
+        //
+        // `router.refresh()` traz o negócio recém-criado com o id de verdade. É uma
+        // ida ao servidor a mais, e é o preço de a tela não mentir.
+        // ============================================================
+        router.refresh();
       }
     });
   }
@@ -343,13 +364,23 @@ export default function PipelineBoard({
                       </div>
                       <div className="mt-2 flex items-center gap-2">
                         <button className="btn-brand py-1 text-[11px]" disabled={pending} onClick={() => start(async () => {
-                          await updateOpportunity(o.id, { title: editOpp.title, value_mrr: Number(editOpp.value_mrr), primary_contact_id: editOpp.contact_id || null, account_id: editOpp.account_id || null, product_id: editOpp.product_id || null, probability: editOpp.probability === "" ? 0 : Number(editOpp.probability), expected_close: editOpp.expected_close || null });
+                          const r: any = await updateOpportunity(o.id, { title: editOpp.title, value_mrr: Number(editOpp.value_mrr), primary_contact_id: editOpp.contact_id || null, account_id: editOpp.account_id || null, product_id: editOpp.product_id || null, probability: editOpp.probability === "" ? 0 : Number(editOpp.probability), expected_close: editOpp.expected_close || null });
+                          // sem isto, "título vazio" era recusado pelo servidor e a
+                          // tela seguia como se tivesse salvado
+                          if (r?.error) { setMsg(r.error); return; }
+                          router.refresh();
                           setOpps((prev) => prev.map((x) => x.id === o.id ? { ...x, title: editOpp.title, value_mrr: Number(editOpp.value_mrr) || 0, contact_id: editOpp.contact_id || null, product_id: editOpp.product_id || null, probability: editOpp.probability === "" ? 0 : Number(editOpp.probability), expected_close: editOpp.expected_close || null } as any : x));
                           setEditOpp(null);
                         })}>Salvar</button>
                         <button className="text-[11px] text-subtle hover:text-ink" onClick={() => setEditOpp(null)}>cancelar</button>
                         <button className="ml-auto text-[11px] text-subtle hover:text-danger" onClick={() => start(async () => {
-                          if (confirm("Excluir este negócio?")) { await deleteOpportunity(o.id); setOpps((prev) => prev.filter((x) => x.id !== o.id)); setEditOpp(null); }
+                          if (confirm("Excluir este negócio?")) {
+                            const r: any = await deleteOpportunity(o.id);
+                            if (r?.error) { setMsg(r.error); return; }
+                            setOpps((prev) => prev.filter((x) => x.id !== o.id));
+                            setEditOpp(null);
+                            router.refresh();
+                          }
                         })}>excluir</button>
                       </div>
                     </div>

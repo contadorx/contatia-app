@@ -351,6 +351,27 @@ export async function GET(req: Request) {
     if (e?.message !== "__pular__") errors.push(`crm: ${e?.message || "erro"}`);
   }
 
+  // ============================================================
+  // RECONCILIAÇÃO DE PAGAMENTOS — a rede de segurança da cobrança
+  //
+  // O webhook do Asaas pode não chegar (deploy, token trocado, fila pausada porque
+  // uma entrega voltou não-2xx). Quando isso acontece o pagamento se perde: a fatura
+  // fica aberta, a régua cobra quem já pagou e, no D+10, suspende um cliente
+  // adimplente. Foi o que aconteceu.
+  //
+  // Uma vez por dia, isto pergunta ao Asaas quais faturas abertas já foram pagas.
+  // ============================================================
+  let pagamentos = { conferidas: 0, fechadas: 0 };
+  try {
+    if (!faseDiaria) throw new Error("__pular__");
+    const { reconciliarPagamentos } = await import("@/lib/reconciliarPagamentos");
+    const rp = await reconciliarPagamentos(admin);
+    pagamentos = { conferidas: rp.conferidas, fechadas: rp.fechadas };
+    if (rp.erros.length) errors.push(...rp.erros);
+  } catch (e: any) {
+    if (e?.message !== "__pular__") errors.push(`reconciliacao: ${e?.message || "erro"}`);
+  }
+
   // descoberta de e-mail dos leads sem endereço (chama o worker no VPS)
   let discovery = { found: 0, notFound: 0, errors: 0 };
   try {
@@ -363,5 +384,5 @@ export async function GET(req: Request) {
 
   // As fases entram na resposta: "por que nao rodou?" precisa ser respondivel olhando
   // a saida do cron, nao lendo o codigo.
-  return NextResponse.json({ ok: true, fases: { imap: true, horaria: faseHoraria, diaria: faseDiaria }, accounts: (accounts as any[])?.length || 0, marked, suggestions, bounced, autoRan, purged, reminders, seatsSynced, lifecycle, dunning, retention, crm, discovery, errors });
+  return NextResponse.json({ ok: true, fases: { imap: true, horaria: faseHoraria, diaria: faseDiaria }, accounts: (accounts as any[])?.length || 0, marked, suggestions, bounced, autoRan, purged, reminders, seatsSynced, lifecycle, dunning, retention, crm, pagamentos, discovery, errors });
 }

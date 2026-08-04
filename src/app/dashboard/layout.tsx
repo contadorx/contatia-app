@@ -83,7 +83,18 @@ export default async function DashboardLayout({
     const { data: t } = await supabase.from("tenants").select("subscription_status").eq("id", profile.tenant_id).maybeSingle();
     subStatus = (t as any)?.subscription_status;
   }
-  const showSubBanner = !isSuperadmin && (!subStatus || ["trialing", "pending", "past_due", "canceled"].includes(subStatus));
+  // ============================================================
+  // DOIS NOMES PARA A MESMA COISA
+  //
+  // A coluna nasce com o padrão 'trial' (migration 0022), mas esta lista só conhecia
+  // 'trialing'. Efeito: TODO workspace novo ficava fora do convite para assinar — o
+  // banner nunca aparecia, o teste vencia e ninguém era chamado a pagar. Um bug de
+  // receita que não dá erro nenhum.
+  //
+  // Aqui aceito os dois nomes em vez de migrar os dados: renomear status de assinatura
+  // em produção é mexer em cobrança por uma questão de vocabulário.
+  // ============================================================
+  const showSubBanner = !isSuperadmin && (!subStatus || ["trial", "trialing", "pending", "past_due", "canceled"].includes(subStatus));
 
   // CONTA SUSPENSA (D+10 da régua de cobrança): no lugar do app, uma tela de REATIVAÇÃO
   // com caminho de volta (pagar e reativar, já paguei, falar com a gente). Recupera churn.

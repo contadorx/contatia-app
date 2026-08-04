@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.04-25";
+export const VERSAO_APP = "2026.08.04-26";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "o painel nao fecha mais sozinho ao terminar a busca (era isso que sumia com o resultado)";
+export const VERSAO_NOTAS = "cobranca: webhook casa e registra tudo, reconciliacao diaria com o Asaas, marcar paga reativa a conta · pipeline reconciliado · valor 1.500 nao vira 1,50";

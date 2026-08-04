@@ -9,7 +9,7 @@ import SmartSelect from "@/components/SmartSelect";
 import LogFilterBar from "@/components/LogFilterBar";
 import { comoLista } from "@/lib/filtros";
 import { ACAO_LABEL, ACOES_DESTRUTIVAS, labelAcao } from "@/lib/actionLog";
-import { dataHora } from "@/lib/datas";
+import { dataHora, diaISO } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
@@ -66,9 +66,17 @@ export default async function Relatorios({
   const frioISO = new Date(Date.now() - frio * 86400000).toISOString();
 
   // mês corrente — para a meta (GoalPanel) da Visão geral
-  const now = new Date();
-  const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  // ============================================================
+  // O MÊS É O DE BRASÍLIA, NÃO O DO SERVIDOR
+  //
+  // Saía de `new Date().getMonth()`, que na Vercel é UTC. Dia 31/08 às 21h30 daqui já
+  // é 01/09 lá: o painel procurava a meta de SETEMBRO (que não existe) e contava a
+  // receita a partir de 1º de setembro. Exatamente na noite em que se confere se a
+  // meta do mês foi batida, a tela mostrava "R$ 0 · sem meta definida".
+  // ============================================================
+  const hojeBR = diaISO();                       // AAAA-MM-DD no fuso de Brasília
+  const period = hojeBR.slice(0, 7);
+  const monthStart = new Date(`${period}-01T03:00:00.000Z`).toISOString();  // 03:00Z = meia-noite em Brasília
 
   // ---- coleta ----
   const membersP = gestor

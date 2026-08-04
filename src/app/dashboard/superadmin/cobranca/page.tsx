@@ -9,10 +9,18 @@ export const dynamic = "force-dynamic";
 
 const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
+// Faltavam pending/suspended/archived/trialing: como o fallback do mapa era `trial`,
+// um workspace SUSPENSO pela régua aparecia com o selo "Trial" — e o contador "Em
+// trial" no topo não o somava. A mesma tela se contradizia, e não havia como enxergar
+// quem estava suspenso.
 const STATUS: Record<string, { l: string; c: string }> = {
   trial: { l: "Trial", c: "bg-brand-soft text-brand-dark" },
+  trialing: { l: "Trial", c: "bg-brand-soft text-brand-dark" },
+  pending: { l: "Aguardando pgto", c: "bg-warn/10 text-warn" },
   active: { l: "Ativo", c: "bg-signal/10 text-signal" },
   past_due: { l: "Vencido", c: "bg-danger/10 text-danger" },
+  suspended: { l: "Suspenso", c: "bg-danger/15 text-danger" },
+  archived: { l: "Arquivado", c: "bg-muted text-subtle" },
   canceled: { l: "Cancelado", c: "bg-muted text-subtle" },
 };
 
@@ -52,7 +60,7 @@ export default async function Cobranca() {
 
   const activeMrr = rows.filter((r) => r.subscription_status === "active").reduce((s, r) => s + Number(r.mrr || 0), 0);
   const overdueList = rows.filter((r) => r.overdue);
-  const trialCount = rows.filter((r) => r.subscription_status === "trial").length;
+  const trialCount = rows.filter((r) => ["trial", "trialing"].includes(r.subscription_status)).length;
 
   return (
     <div>

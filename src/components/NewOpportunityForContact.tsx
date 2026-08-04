@@ -22,10 +22,30 @@ export default function NewOpportunityForContact({
   const [erro, setErro] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
+  // ============================================================
+  // 1.500 NÃO É MIL E QUINHENTOS PARA O JAVASCRIPT
+  //
+  // Era `Number(valor.replace(",", "."))`. Quem digita à brasileira escreve 1.500 e o
+  // JS lê 1,5 — o negócio nascia com R$ 1,50 e o pipeline mostrava "R$ 2/mês". Com
+  // 1.234,56 o resultado era NaN, que o `|| 0` transformava em negócio de R$ 0,
+  // criado com sucesso e sem aviso nenhum. O forecast herdava tudo isso.
+  //
+  // Agora o ponto de milhar sai antes, a vírgula vira ponto, e valor inválido é
+  // RECUSADO em vez de virar zero — zero silencioso é pior que erro na tela.
+  // ============================================================
+  function valorEmReais(t: string): number | null {
+    const limpo = String(t || "").trim().replace(/\s|R\$/g, "");
+    if (!limpo) return 0;
+    const n = Number(limpo.replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }
+
   function salvar() {
     setErro(null);
+    const v = valorEmReais(valor);
+    if (v === null) { setErro("Valor inválido. Use 1.500 ou 1500,00."); return; }
     start(async () => {
-      const r: any = await createOpportunityForContact(contactId, { title, value_mrr: Number(valor.replace(",", ".")) || 0 });
+      const r: any = await createOpportunityForContact(contactId, { title, value_mrr: v });
       if (r?.error) { setErro(r.error); return; }
       setValor("");
       setOpen(false);
