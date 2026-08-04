@@ -185,10 +185,36 @@ export async function GET(req: Request) {
   //
   // Com o cron a cada 5 minutos, as duas últimas ganham uma trava de uma vez por
   // hora. `?forcar=1` ignora a trava, para rodar tudo na mão.
-  // ============================================================
-  const agoraMin = new Date().getUTCMinutes();
+  //
+  // ------------------------------------------------------------
+  // CORREÇÃO DE 04/08, DEPOIS DE MANDAR 5 E-MAILS IGUAIS EM 20 MINUTOS
+  //
+  // A trava acima cobria só as automações e a descoberta de e-mail. Tudo o que vem
+  // depois — expurgo, lembrete de fatura, assentos, RÉGUA DE CICLO DE VIDA, cobrança,
+  // retenção, CRM — continuou rodando a cada 5 minutos. Como a régua de ciclo de vida
+  // mandava o e-mail antes de registrar que mandou (e não conferia o registro), o
+  // assinante recebeu a mesma mensagem de 5 em 5 minutos.
+  //
+  // Eram DOIS erros somados, e cada um sozinho já bastava. Por isso os dois foram
+  // corrigidos: as réguas agora reservam antes de enviar (ver lib/lifecycle,
+  // lib/dunning, lib/retention) e a rota passa a ter três velocidades explícitas:
+  //
+  //   SEMPRE (5 em 5 min) → só ler as caixas por IMAP. Era só isso que o Leandro pediu.
+  //   1x POR HORA         → automações por tempo, descoberta de e-mail, CRM, assentos.
+  //   1x POR DIA (11h BRT)→ tudo que MANDA E-MAIL PARA O ASSINANTE e as faxinas:
+  //                         expurgo, lembrete de fatura, ciclo de vida, cobrança,
+  //                         retenção. É a mesma hora do cron diário antigo.
+  //
+  // Nada aqui manda e-mail para o assinante fora da fase diária. Se um dia isso mudar,
+  // muda com esta lista na frente.
+  // ------------------------------------------------------------
+  const agora = new Date();
+  const agoraMin = agora.getUTCMinutes();
+  const agoraH = agora.getUTCHours();
   const forcar = new URL(req.url).searchParams.get("forcar") === "1";
   const faseHoraria = forcar || agoraMin < 5;   // 1x por hora (o cron cai em :00, :05, :10…)
+  const HORA_DIARIA_UTC = 14;                   // 11h de Brasília
+  const faseDiaria = forcar || (agoraH === HORA_DIARIA_UTC && agoraMin < 5);
 
   let autoRan = 0;
   try {
@@ -203,6 +229,7 @@ export async function GET(req: Request) {
   // ---- Expurgo de arquivos por retenção (LGPD + custo de storage) ----
   let purged = 0;
   try {
+    if (!faseDiaria) throw new Error("__pular__");
     const { data: tnts } = await admin.from("tenants").select("id, file_retention_months");
     for (const t of (tnts as any[]) || []) {
       const months = Number(t.file_retention_months) || 0;
@@ -229,6 +256,7 @@ export async function GET(req: Request) {
   // ---- Régua de cobrança: marca vencidas + reenvia lembrete (via API Brevo) ----
   let reminders = 0;
   try {
+    if (!faseDiaria) throw new Error("__pular__");
     const todayStr = diaISO();
     await admin.from("platform_invoices").update({ status: "overdue" }).eq("status", "pending").lt("due_date", todayStr);
 
@@ -269,53 +297,58 @@ export async function GET(req: Request) {
   // reconcilia o valor das assinaturas com o nº de assentos (per-seat) + reversão de cupom
   let seatsSynced = 0;
   try {
+    if (!faseHoraria) throw new Error("__pular__");
     const { reconcileAllSeats } = await import("@/lib/billing");
     const rr = await reconcileAllSeats();
     seatsSynced = rr.synced;
   } catch (e: any) {
-    errors.push(`seats: ${e?.message || "erro"}`);
+    if (e?.message !== "__pular__") errors.push(`seats: ${e?.message || "erro"}`);
   }
 
   // régua de ciclo de vida do assinante (boas-vindas, onboarding, reengajamento)
   let lifecycle = 0;
   try {
+    if (!faseDiaria) throw new Error("__pular__");
     const { runLifecycle } = await import("@/lib/lifecycle");
     const lc = await runLifecycle(admin);
     lifecycle = lc.sent;
     if (lc.errors.length) errors.push(...lc.errors);
   } catch (e: any) {
-    errors.push(`lifecycle: ${e?.message || "erro"}`);
+    if (e?.message !== "__pular__") errors.push(`lifecycle: ${e?.message || "erro"}`);
   }
 
   // régua de cobrança pró-ativa (fatura criada, preventivos D-3/D-1, dunning D+1/D+5/D+10)
   let dunning = { sent: 0, suspended: 0 };
   try {
+    if (!faseDiaria) throw new Error("__pular__");
     const { runBilling } = await import("@/lib/dunning");
     const dn = await runBilling(admin);
     dunning = { sent: dn.sent, suspended: dn.suspended };
     if (dn.errors.length) errors.push(...dn.errors);
   } catch (e: any) {
-    errors.push(`cobranca: ${e?.message || "erro"}`);
+    if (e?.message !== "__pular__") errors.push(`cobranca: ${e?.message || "erro"}`);
   }
 
   // régua de retenção (30d última chance; 60d arquiva + apaga dados dos leads)
   let retention = { warned: 0, archived: 0 };
   try {
+    if (!faseDiaria) throw new Error("__pular__");
     const { runRetention } = await import("@/lib/retention");
     const rt = await runRetention(admin);
     retention = { warned: rt.warned, archived: rt.archived };
     if (rt.errors.length) errors.push(...rt.errors);
   } catch (e: any) {
-    errors.push(`retencao: ${e?.message || "erro"}`);
+    if (e?.message !== "__pular__") errors.push(`retencao: ${e?.message || "erro"}`);
   }
 
   // sincronia com CRMs (push de leads quentes; pull de ganhos/perdas)
   let crm = { pushed: 0, failed: 0, pulled: 0 };
   try {
+    if (!faseHoraria) throw new Error("__pular__");
     const { processCrmQueue } = await import("@/lib/crmSync");
     crm = await processCrmQueue(admin);
   } catch (e: any) {
-    errors.push(`crm: ${e?.message || "erro"}`);
+    if (e?.message !== "__pular__") errors.push(`crm: ${e?.message || "erro"}`);
   }
 
   // descoberta de e-mail dos leads sem endereço (chama o worker no VPS)
@@ -328,5 +361,7 @@ export async function GET(req: Request) {
     if (e?.message !== "__pular__") errors.push(`discovery: ${e?.message || "erro"}`);
   }
 
-  return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, bounced, autoRan, purged, reminders, seatsSynced, lifecycle, dunning, retention, crm, discovery, errors });
+  // As fases entram na resposta: "por que nao rodou?" precisa ser respondivel olhando
+  // a saida do cron, nao lendo o codigo.
+  return NextResponse.json({ ok: true, fases: { imap: true, horaria: faseHoraria, diaria: faseDiaria }, accounts: (accounts as any[])?.length || 0, marked, suggestions, bounced, autoRan, purged, reminders, seatsSynced, lifecycle, dunning, retention, crm, discovery, errors });
 }

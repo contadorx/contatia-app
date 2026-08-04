@@ -6,7 +6,7 @@ import "server-only";
 //                      MANTENDO a conta, os usuários e as faturas (reativável).
 // Contagem a partir de tenants.suspended_at. Textos editáveis (track 'retencao').
 
-import { renderTemplate, logEmail } from "@/lib/regua";
+import { renderTemplate, logEmail, jaEnviado } from "@/lib/regua";
 
 // Tabelas de "dados do lead" (PII de prospecção) — apagadas no arquivamento.
 // Ordem: dependentes primeiro, contatos/empresas por último. Best-effort por tabela.
@@ -102,19 +102,30 @@ export async function runRetention(admin: any): Promise<{ warned: number; archiv
 
       // 30 dias → última chance (uma vez)
       if (days >= warnDays && lastChance && lastChance.enabled !== false) {
-        const { data: done } = await admin.from("business_message_sends").select("key").eq("tenant_id", t.id).eq("key", "ret_last_chance").maybeSingle();
-        if (done) continue;
         const to = await destinatario(t);
         if (!to) continue;
         const subject = renderTemplate(lastChance.subject, { name: t.name });
         const text = renderTemplate(lastChance.body, { name: t.name });
+
+        // RESERVA ANTES DO ENVIO. O `select ... maybeSingle()` de antes só olhava; o
+        // insert vinha depois do envio e sem conferência de erro. Se o insert falhava,
+        // o "uma vez" virava "toda rodada". A PK (tenant_id, key) faz a reserva.
+        const { error: eReserva } = await admin.from("business_message_sends").insert({ tenant_id: t.id, key: "ret_last_chance" });
+        if (eReserva) {
+          if ((eReserva as any).code !== "23505") {
+            errors.push(`${t.id}/ret_last_chance: nao consegui reservar (${(eReserva as any).message || "erro"}) — nao enviei`);
+          }
+          continue;
+        }
+        if (await jaEnviado(admin, { to, subject })) continue;
+
         const r = await sendBrevoEmail({ to, toName: t.name || undefined, subject, text });
         if (r?.error) {
           errors.push(`${t.id}/ret_last_chance: ${r.error}`);
           await logEmail(admin, { tenant_id: t.id, to, subject, kind: "retencao", status: "error", error: r.error });
+          await admin.from("business_message_sends").delete().eq("tenant_id", t.id).eq("key", "ret_last_chance");
           continue;
         }
-        await admin.from("business_message_sends").insert({ tenant_id: t.id, key: "ret_last_chance" });
         await logEmail(admin, { tenant_id: t.id, to, subject, kind: "retencao", status: "sent" });
         warned++;
       }

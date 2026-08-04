@@ -10,7 +10,7 @@ import "server-only";
 // Na etapa de maior atraso (suspensão), a conta é marcada 'suspended'.
 // Dedup por (invoice_id, key) em invoice_notice_sends.
 
-import { renderTemplate, logEmail } from "@/lib/regua";
+import { renderTemplate, logEmail, jaEnviado } from "@/lib/regua";
 
 const CREATED_KEY = "bill_created";
 
@@ -63,13 +63,22 @@ async function deliver(admin: any, inv: any, step: any): Promise<boolean> {
   const subject = renderTemplate(step.subject, ctx);
   const text = renderTemplate(step.body, ctx);
 
+  // RESERVA ANTES DO ENVIO (mesma correção da régua de ciclo de vida): a ordem
+  // "envia → grava" reenvia para sempre se a gravação falhar em silêncio. A PK
+  // (invoice_id, key) garante que só uma rodada reserva cada etapa.
+  const { error: eReserva } = await admin.from("invoice_notice_sends").insert({ invoice_id: inv.id, key: step.key });
+  if (eReserva) return false;   // 23505 = já reservado; qualquer outro erro: não envio
+
+  // segunda trava, independente da primeira
+  if (await jaEnviado(admin, { to, subject })) return false;
+
   const { sendBrevoEmail } = await import("@/lib/brevo");
   const r = await sendBrevoEmail({ to, toName: (t as any)?.name || undefined, subject, text });
   if (r?.error) {
     await logEmail(admin, { tenant_id: inv.tenant_id, to, subject, kind: "cobranca", status: "error", error: r.error });
+    await admin.from("invoice_notice_sends").delete().eq("invoice_id", inv.id).eq("key", step.key);
     return false;
   }
-  await admin.from("invoice_notice_sends").insert({ invoice_id: inv.id, key: step.key });
   await logEmail(admin, { tenant_id: inv.tenant_id, to, subject, kind: "cobranca", status: "sent" });
   return true;
 }

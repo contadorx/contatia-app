@@ -4,7 +4,7 @@ import "server-only";
 // de business_messages (track 'comunicacao'), editáveis no painel — a LÓGICA de
 // quando disparar cada estágio continua aqui. Cada estágio é enviado uma vez.
 
-import { renderTemplate, logEmail } from "@/lib/regua";
+import { renderTemplate, logEmail, jaEnviado } from "@/lib/regua";
 
 type Stage = "welcome" | "onboard_email" | "onboard_cadence" | "reengage";
 const KEY: Record<Stage, string> = {
@@ -63,14 +63,44 @@ export async function runLifecycle(admin: any): Promise<{ sent: number; errors: 
 
       const subject = renderTemplate(tpl.subject, { name: t.name });
       const text = renderTemplate(tpl.body, { name: t.name });
+
+      // ============================================================
+      // RESERVAR ANTES DE ENVIAR — E CONFERIR A RESERVA
+      //
+      // A ordem antiga era: envia → grava que enviou. E a gravação não era conferida.
+      // Enquanto ela dava certo, funcionava. No dia em que falhou (e falhou), o
+      // estágio nunca ficava marcado e o e-mail saía OUTRA VEZ a cada rodada do cron —
+      // 288 vezes por dia depois que o cron passou a rodar de 5 em 5 minutos.
+      //
+      // Agora a reserva vem primeiro. Se ela não entra, NÃO envio: o único jeito de
+      // garantir "uma vez só" é decidir isso ANTES, no banco, que é quem sabe dizer
+      // se já aconteceu. A tabela tem unique (tenant_id, stage) — duas rodadas
+      // simultâneas não conseguem reservar o mesmo estágio.
+      // ============================================================
+      const { error: eReserva } = await admin.from("lifecycle_sends").insert({ tenant_id: t.id, stage });
+      if (eReserva) {
+        // 23505 = já reservado por outra rodada: normal, é o disjuntor funcionando.
+        if ((eReserva as any).code !== "23505") {
+          errors.push(`${t.id}/${stage}: nao consegui reservar (${(eReserva as any).message || "erro"}) — nao enviei`);
+        }
+        continue;
+      }
+
+      // Segunda trava, independente da primeira: mesmo assunto, mesmo destinatário,
+      // nas últimas 20h, não repete — não importa qual controle tenha falhado.
+      if (await jaEnviado(admin, { to, subject })) continue;
+
       const r = await sendBrevoEmail({ to, toName: t.name || undefined, subject, text });
       if (r?.error) {
         errors.push(`${t.id}/${stage}: ${r.error}`);
         await logEmail(admin, { tenant_id: t.id, to, subject, kind: "comunicacao", status: "error", error: r.error });
+        // devolve a reserva: o envio não aconteceu, então amanhã pode tentar de novo.
+        // Como a régua agora roda 1x por dia, isso é uma nova tentativa por dia — não
+        // uma a cada 5 minutos.
+        await admin.from("lifecycle_sends").delete().eq("tenant_id", t.id).eq("stage", stage);
         continue;
       }
 
-      await admin.from("lifecycle_sends").insert({ tenant_id: t.id, stage });
       await logEmail(admin, { tenant_id: t.id, to, subject, kind: "comunicacao", status: "sent" });
       sent++;
     } catch (e: any) {
