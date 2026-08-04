@@ -160,25 +160,34 @@ export default function EngajouAgora({
 
   return (
     <div id="engajou" className="mt-6 scroll-mt-24 rounded-xl border border-warn/40 bg-warn/5 p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="font-display font-bold text-ink">
-          🔥 Engajou nas últimas 48h{" "}
-          <span className="rounded-full bg-warn px-2 py-0.5 text-xs font-bold text-white">{linhas.length}</span>
-        </p>
-        <div className="flex items-center gap-3">
-          <p className="text-xs text-subtle">
+      {/* ============================================================
+          O BOTÃO PRECISA SER ACHÁVEL, NÃO SÓ EXISTIR
+
+          Na primeira tentativa ele dividia a linha com a frase explicativa
+          ("respondeu, abriu o e-mail…"). Num container estreito a frase come o
+          espaço e o botão vira um detalhe cinza no fim de um texto cinza — existe
+          e ninguém acha. Agora ele fica sozinho na ponta direita do título, com
+          borda e o ✕ na frente; a frase desceu uma linha, onde não disputa nada.
+          ============================================================ */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-display font-bold text-ink">
+            🔥 Engajou nas últimas 48h{" "}
+            <span className="rounded-full bg-warn px-2 py-0.5 text-xs font-bold text-white">{linhas.length}</span>
+          </p>
+          <p className="mt-0.5 text-xs text-subtle">
             respondeu, abriu o e-mail, abriu a proposta ou clicou num link
             {truncado ? " · mostrando os mais recentes" : ""}
           </p>
-          <button
-            type="button"
-            onClick={alternar}
-            className="rounded-lg border border-line bg-white px-2 py-1 text-xs font-medium hover:bg-muted"
-            title={oculto ? "Mostrar a lista de quem engajou" : "Ocultar a lista — o número no cartão continua contando"}
-          >
-            {oculto ? `▾ Mostrar (${linhas.length})` : "▴ Ocultar"}
-          </button>
         </div>
+        <button
+          type="button"
+          onClick={alternar}
+          className="shrink-0 whitespace-nowrap rounded-lg border border-warn/50 bg-white px-2.5 py-1.5 text-xs font-semibold text-ink shadow-sm hover:bg-muted"
+          title={oculto ? "Mostrar a lista de quem engajou" : "Ocultar a lista — o número no cartão continua contando"}
+        >
+          {oculto ? `▾ Mostrar (${linhas.length})` : "✕ Ocultar"}
+        </button>
       </div>
 
       {oculto ? (
