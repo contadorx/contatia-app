@@ -186,10 +186,11 @@ export default function AtualizarDadosContato({
         ? null
         : estado.emailForaDoDominio ? "domínio diferente do da empresa"
         : estado.emailDeBalcao ? "caixa compartilhada"
+        : estado.emailDeOutraPessoa ? "não parece ser desta pessoa"
         : estado.emailConferido ? `SMTP validado${dia(estado.emailConferidoEm) ? ` · ${dia(estado.emailConferidoEm)}` : ""}`
         : "não conferido",
-      ok: !!estado.email && !estado.emailDeBalcao && !estado.emailForaDoDominio && !!estado.emailConferido,
-      alerta: !!estado.email && (estado.emailDeBalcao || estado.emailForaDoDominio),
+      ok: !!estado.email && !estado.emailDeBalcao && !estado.emailForaDoDominio && !estado.emailDeOutraPessoa && !!estado.emailConferido,
+      alerta: !!estado.email && !!(estado.emailDeBalcao || estado.emailForaDoDominio || estado.emailDeOutraPessoa),
     },
     {
       rotulo: "WhatsApp",
@@ -314,6 +315,13 @@ export default function AtualizarDadosContato({
           O e-mail atual é de um domínio diferente do da empresa — herança de cadastro
           antigo. Vou procurar o do decisor no domínio certo; só troco se o servidor
           confirmar.
+        </p>
+      )}
+      {estado.emailDeOutraPessoa && !estado.emailForaDoDominio && !estado.emailDeBalcao && !rodando && (
+        <p className="mt-2 text-xs text-warn">
+          O e-mail atual está no domínio certo, mas o começo dele não tem nada do nome
+          deste contato — provavelmente é de outra pessoa da empresa. Vou procurar o
+          desta; só troco se o servidor confirmar.
         </p>
       )}
       {estado.emailDeBalcao && !estado.emailForaDoDominio && !rodando && (
