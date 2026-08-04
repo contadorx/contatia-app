@@ -15,6 +15,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import MeetingOutcome from "@/components/MeetingOutcome";
 import NewOpportunityForContact from "@/components/NewOpportunityForContact";
+import { dataHora } from "@/lib/datas";
 
 export type ReuniaoPassada = {
   id: string;
@@ -139,7 +140,7 @@ export default function ReunioesPassadas({
                     )}
                     {m.empresa && <span className="text-subtle">· {m.empresa}</span>}
                     <span className="text-subtle">
-                      · {new Date(m.datetime).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                      · {dataHora(m.datetime)}
                     </span>
                     {m.assigned_to && nomeDono[m.assigned_to] && (
                       <span className="text-subtle">· {nomeDono[m.assigned_to]}</span>

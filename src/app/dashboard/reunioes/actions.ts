@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { scoreEvent } from "@/lib/scoring";
 import { renderTemplate, addDaysISO } from "@/lib/cadence";
 import { logAction } from "@/lib/actionLog";
+import { dataHora, diaISO } from "@/lib/datas";
 
 async function ctx() {
   const supabase = createClient();
@@ -124,8 +125,8 @@ export async function scheduleMeeting(input: {
   // LEMBRETES: uma tarefa por contato cadastrado (o avulso não tem ficha para virar tarefa)
   const dayBefore = new Date(when);
   dayBefore.setDate(dayBefore.getDate() - 1);
-  const todayISO = new Date().toISOString().slice(0, 10);
-  const dt = when.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  const todayISO = diaISO();
+  const dt = dataHora(when);
   const tasks: any[] = [];
   for (const c of contatos) {
     const body = renderTemplate(
@@ -134,13 +135,13 @@ export async function scheduleMeeting(input: {
     );
     for (const canal of input.channels) {
       if (input.remind_24h) {
-        const due = dayBefore.toISOString().slice(0, 10);
+        const due = diaISO(dayBefore);
         tasks.push({ tenant_id, contact_id: c.id, assigned_to: assigned, channel: canal,
           title: `Lembrete 24h — ${titulo}`, generated_content: body, due_date: due < todayISO ? todayISO : due, status: "pending" });
       }
       if (input.remind_1h) {
         tasks.push({ tenant_id, contact_id: c.id, assigned_to: assigned, channel: canal,
-          title: `Lembrete 1h — ${titulo}`, generated_content: body, due_date: when.toISOString().slice(0, 10), status: "pending" });
+          title: `Lembrete 1h — ${titulo}`, generated_content: body, due_date: diaISO(when), status: "pending" });
       }
     }
   }

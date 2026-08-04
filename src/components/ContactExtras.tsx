@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveContactExtra, enrichContact, addSocioContact } from "@/app/dashboard/contatos/actions";
+import { dataCurta } from "@/lib/datas";
 
 type Receita = {
   cnae: string | null;
@@ -129,7 +130,7 @@ export default function ContactExtras({
           </div>
         )}
         {enrichedAt && (
-          <p className="mt-3 text-[11px] text-subtle">Dados da Receita atualizados em {new Date(enrichedAt).toLocaleDateString("pt-BR")}.</p>
+          <p className="mt-3 text-[11px] text-subtle">Dados da Receita atualizados em {dataCurta(enrichedAt)}.</p>
         )}
       </div>
 

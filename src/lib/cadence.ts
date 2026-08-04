@@ -1,3 +1,5 @@
+import { diaISO } from "@/lib/datas";
+
 // Helpers do motor de cadência.
 
 // `instagram` entra na 0110. Os dois canais sociais são ASSISTIDOS: o app monta o
@@ -89,5 +91,5 @@ export function waLink(phone: string | null | undefined, text: string): string {
 export function addDaysISO(base: Date, days: number): string {
   const d = new Date(base);
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return diaISO(d);
 }

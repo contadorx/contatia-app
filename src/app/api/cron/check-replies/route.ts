@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
 import { fetchRecentEmails } from "@/lib/imap";
 import { POINTS } from "@/lib/scoring";
+import { dataDoDia, diaISO } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -228,7 +229,7 @@ export async function GET(req: Request) {
   // ---- Régua de cobrança: marca vencidas + reenvia lembrete (via API Brevo) ----
   let reminders = 0;
   try {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = diaISO();
     await admin.from("platform_invoices").update({ status: "overdue" }).eq("status", "pending").lt("due_date", todayStr);
 
     if (process.env.BREVO_API_KEY) {
@@ -248,7 +249,7 @@ export async function GET(req: Request) {
         if (!to) continue;
         const nome = inv.tenants?.name || inv.tenants?.legal_name || "cliente";
         const valor = (Number(inv.amount) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-        const venc = inv.due_date ? new Date(inv.due_date).toLocaleDateString("pt-BR") : "—";
+        const venc = dataDoDia(inv.due_date);
         const r = await sendBrevoEmail({
           to,
           toName: nome,

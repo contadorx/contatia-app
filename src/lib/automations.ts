@@ -1,5 +1,6 @@
 import "server-only";
 import { POINTS } from "@/lib/scoring";
+import { diaISO } from "@/lib/datas";
 
 type DB = any; // client supabase (normal ou admin) — usamos consultas não-tipadas
 
@@ -383,7 +384,7 @@ async function candidatosEstadoDias(admin: DB, rule: any, cutoff: string): Promi
 
 // GATILHO date_reached: contatos cuja data de retomada (retomar_em) já chegou.
 async function candidatosDataRetomada(admin: DB, rule: any): Promise<string[]> {
-  const hoje = new Date().toISOString().slice(0, 10);
+  const hoje = diaISO();
   const { data } = await admin
     .from("contacts")
     .select("id")
@@ -594,7 +595,7 @@ async function enrollViaEngine(
       channel: s.channel,
       title: s.subject || null,
       generated_content: body,
-      due_date: due.toISOString().slice(0, 10),
+      due_date: diaISO(due),
       status: "pending",
       email_account_id: s.channel === "email" ? resolvedBox : null,
     };

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
 import { PartnerForm, PartnerToggle, ReferralForm, ReferralStatus } from "@/components/PartnerTools";
+import { dataCurta } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
@@ -125,7 +126,7 @@ export default async function Parceiros() {
                       <td className="px-4 py-3 text-subtle">{partner?.name || "—"}</td>
                       <td className="px-4 py-3">{brl(Number(r.mrr))}</td>
                       <td className="px-4 py-3"><ReferralStatus id={r.id} status={r.status} /></td>
-                      <td className="px-4 py-3 text-xs text-subtle">{new Date(r.created_at).toLocaleDateString("pt-BR")}</td>
+                      <td className="px-4 py-3 text-xs text-subtle">{dataCurta(r.created_at)}</td>
                     </tr>
                   );
                 })}

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import MeetingStatusButtons from "@/components/MeetingStatusButtons";
 import MeetingOutcome from "@/components/MeetingOutcome";
 import MeetingReschedule from "@/components/MeetingReschedule";
+import { dataCurta, dataExtensa } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ const OUTCOME: Record<string, string> = {
 };
 
 function fmt(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "full", timeStyle: "short" });
+  return dataExtensa(iso);
 }
 
 export default async function ReuniaoDetalhe({ params }: { params: { id: string } }) {
@@ -130,7 +131,7 @@ export default async function ReuniaoDetalhe({ params }: { params: { id: string 
           <div className="card divide-y divide-line">
             {((evs as any[]) || []).map((e, i) => (
               <div key={i} className="p-3 text-sm">
-                <span className="text-subtle">{new Date(e.created_at).toLocaleDateString("pt-BR")} · </span>
+                <span className="text-subtle">{dataCurta(e.created_at)} · </span>
                 {e.meta?.text || "Reunião"}
               </div>
             ))}

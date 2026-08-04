@@ -10,6 +10,7 @@
 // ============================================================
 
 import { useState, useTransition } from "react";
+import { diaISO } from "@/lib/datas";
 
 export default function ExportarCsv({
   nomeBase,
@@ -30,7 +31,7 @@ export default function ExportarCsv({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${nomeBase}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `${nomeBase}-${diaISO()}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();

@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import TaskQueue from "@/components/TaskQueue";
-import EngajouSemPasso from "@/components/EngajouSemPasso";
+import EngajouAgora from "@/components/EngajouAgora";
 import EnviosHoje from "@/components/EnviosHoje";
 import { enviosDeHoje } from "@/lib/enviosHoje";
 import { isManager } from "@/lib/permissions";
@@ -8,13 +8,16 @@ import OnboardingChecklist from "@/components/OnboardingChecklist";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import { effectiveDailyCap } from "@/lib/warmup";
 import { Termo } from "@/components/Termo";
+import { diaISO, diaISOmais } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
 export default async function Today() {
   const supabase = createClient();
-  const today = new Date().toISOString().slice(0, 10);
-  const in3 = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+  // em UTC, das 21h à meia-noite "hoje" já era amanhã: a fila mostrava tarefa do dia
+  // seguinte como se fosse de hoje. diaISO responde pelo calendário brasileiro.
+  const today = diaISO();
+  const in3 = diaISOmais(3);
 
   const { data: tenantRow } = await supabase.from("tenants").select("id, whatsapp_mode").maybeSingle();
   const waMode = ((tenantRow as any)?.whatsapp_mode as string) || "assistido";
@@ -128,16 +131,23 @@ export default async function Today() {
   }
 
   // ============================================================
-  // ENGAJOU E NÃO TEM PRÓXIMO PASSO
+  // QUEM ENGAJOU NAS ÚLTIMAS 48H — COM NOME
   //
-  // O "Engajou agora" era derivado das TAREFAS PENDENTES: a página buscava as tarefas,
-  // tirava os contact_id delas e só então olhava os eventos. Quem respondeu mas terminou
-  // (ou nunca teve) cadência não tem tarefa — e por isso ficava INVISÍVEL. É o pior caso
-  // possível: o lead mais quente do dia, escondido justamente por não ter mais nada
-  // agendado.
+  // Duas correções na mesma consulta.
   //
-  // Agora os eventos são consultados por conta própria, no workspace inteiro, e este
-  // bloco mostra a diferença: quem engajou e NÃO tem tarefa pendente.
+  // A primeira (antiga): o "Engajou agora" era derivado das TAREFAS PENDENTES — a
+  // página buscava as tarefas, tirava os contact_id delas e só então olhava os eventos.
+  // Quem respondeu mas terminou (ou nunca teve) cadência não tem tarefa, e ficava
+  // INVISÍVEL. Por isso os eventos passaram a ser consultados por conta própria.
+  //
+  // A segunda (esta): o cartão "Engajou agora" contava quem engajou E TEM tarefa,
+  // enquanto o bloco listava quem engajou e NÃO tem. Os dois conjuntos são disjuntos —
+  // ou seja, ninguém que o cartão contava aparecia nomeado em lugar nenhum. Um número
+  // sem resposta para "quem foi?". Agora a lista é UMA só, cobre os dois casos, e o
+  // cartão mostra o tamanho dela — número e lista sempre batem.
+  //
+  // O teto de eventos é alto (1000) e a lista é cortada em 60 pessoas; quando corta, a
+  // tela avisa em vez de fingir que é tudo.
   // ============================================================
   const desde48 = new Date(now48).toISOString();
   const { data: evsLivres } = await supabase
@@ -146,28 +156,37 @@ export default async function Today() {
     .in("type", ["replied", "doc_opened", "email_opened", "link_clicked"])
     .gte("created_at", desde48)
     .order("created_at", { ascending: false })
-    .limit(300);
+    .limit(1000);
 
   const comTarefa = new Set(contactIds as string[]);
-  const semPasso: Record<string, { type: string; created_at: string }> = {};
+  const engajou48: Record<string, { type: string; created_at: string }> = {};
   for (const e of (evsLivres as any[]) || []) {
-    if (!e.contact_id || comTarefa.has(e.contact_id) || semPasso[e.contact_id]) continue;
-    semPasso[e.contact_id] = { type: e.type, created_at: e.created_at };
+    if (!e.contact_id || engajou48[e.contact_id]) continue;
+    engajou48[e.contact_id] = { type: e.type, created_at: e.created_at };
   }
-  const idsSemPasso = Object.keys(semPasso).slice(0, 30);
-  const { data: ctsSemPasso } = idsSemPasso.length
-    ? await supabase.from("contacts").select("id, name, company, score").in("id", idsSemPasso)
+  const TETO_ENGAJOU = 60;
+  const todosIds = Object.keys(engajou48);
+  const idsEngajou = todosIds.slice(0, TETO_ENGAJOU);
+  const engajouTruncado = todosIds.length > TETO_ENGAJOU;
+  const { data: ctsEngajou } = idsEngajou.length
+    ? await supabase.from("contacts").select("id, name, company, score").in("id", idsEngajou)
     : { data: [] as any[] };
-  const engajouSemPasso = ((ctsSemPasso as any[]) || [])
+  const engajaram = ((ctsEngajou as any[]) || [])
     .map((c) => ({
       id: c.id as string,
-      name: c.name as string,
+      name: (c.name as string) || "(sem nome)",
       company: (c.company as string) || null,
       score: (c.score as number) ?? 0,
-      tipo: semPasso[c.id].type as string,
-      quando: semPasso[c.id].created_at as string,
+      tipo: engajou48[c.id].type as string,
+      quando: engajou48[c.id].created_at as string,
+      // quem já tem tarefa está encaminhado; quem não tem é decisão pendente. A lista
+      // mostra os dois, mas nessa ordem.
+      temTarefa: comTarefa.has(c.id),
     }))
-    .sort((a, b) => (b.quando || "").localeCompare(a.quando || ""));
+    .sort((a, b) => {
+      if (a.temTarefa !== b.temTarefa) return a.temTarefa ? 1 : -1;
+      return (b.quando || "").localeCompare(a.quando || "");
+    });
 
   // anexa cadência + tags a cada task; separa "hoje/atrasados" de "próximos"
   const tasks = sorted.map((t) => ({
@@ -191,16 +210,17 @@ export default async function Today() {
   // cadências ativas: o bloco "engajou e está sem próximo passo" precisa oferecer
   // a matrícula ali mesmo — mandar a pessoa até a ficha para isso seria um passo a mais
   // justamente no momento em que a pressa importa.
-  const { data: seqsHome } = engajouSemPasso.length
+  const { data: seqsHome } = engajaram.length
     ? await supabase.from("sequences").select("id, name").eq("is_active", true).order("created_at", { ascending: false })
     : { data: [] as any[] };
   const seqsAtivas = ((seqsHome as any[]) || []).map((s) => ({ id: s.id as string, name: s.name as string }));
   const todayCount = tasks.filter((t) => !t.is_future).length;
-  const hotNowCount = new Set(tasks.filter((t) => t.hot_now).map((t) => t.contact_id)).size;
 
-  const cards = [
+  const cards: { label: string; value: number; live?: boolean; fire?: boolean; ancora?: string }[] = [
     { label: "Toques de hoje", value: todayCount, live: true },
-    { label: "Engajou agora", value: hotNowCount, fire: true },
+    // era `hotNowCount` (só quem tem tarefa). Agora é o tamanho da lista logo abaixo —
+    // clicar no cartão leva até ela.
+    { label: "Engajou agora", value: engajaram.length, fire: true, ancora: "engajou" },
     { label: "Contatos", value: contactsCount.count ?? 0 },
   ];
 
@@ -236,16 +256,27 @@ export default async function Today() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        {cards.map((c) => (
-          <div key={c.label} className="card p-5">
-            <div className="flex items-center gap-2">
-              {c.live && <span className="h-2 w-2 rounded-full bg-signal" />}
-              {c.fire && <span className="text-xs">🔥</span>}
-              <span className="label">{c.label}</span>
-            </div>
-            <p className={`mt-2 font-display text-3xl font-bold ${c.fire ? "text-warn" : ""}`}>{c.value}</p>
-          </div>
-        ))}
+        {cards.map((c) => {
+          const miolo = (
+            <>
+              <div className="flex items-center gap-2">
+                {c.live && <span className="h-2 w-2 rounded-full bg-signal" />}
+                {c.fire && <span className="text-xs">🔥</span>}
+                <span className="label">{c.label}</span>
+              </div>
+              <p className={`mt-2 font-display text-3xl font-bold ${c.fire ? "text-warn" : ""}`}>{c.value}</p>
+              {/* um número que não leva a lugar nenhum não responde "quem foi?" */}
+              {c.ancora && c.value > 0 && <p className="mt-1 text-xs font-medium text-brand-dark">ver quem →</p>}
+            </>
+          );
+          return c.ancora && c.value > 0 ? (
+            <a key={c.label} href={`#${c.ancora}`} className="card p-5 transition hover:border-warn/50">
+              {miolo}
+            </a>
+          ) : (
+            <div key={c.label} className="card p-5">{miolo}</div>
+          );
+        })}
       </div>
 
       {/* Quanto EU já mandei hoje e a que horas — a pergunta que faltava responder.
@@ -254,7 +285,7 @@ export default async function Today() {
         <EnviosHoje dados={envios} gestor={souGestor} />
       </div>
 
-      <EngajouSemPasso linhas={engajouSemPasso} sequences={seqsAtivas} />
+      <EngajouAgora linhas={engajaram} sequences={seqsAtivas} truncado={engajouTruncado} />
 
       <h2 className="mb-3 mt-8 font-display text-lg font-bold">Fila de hoje</h2>
       <TaskQueue tasks={tasks} hotThreshold={HOT_THRESHOLD} lastActivity={lastActivity} allTags={(allTags as any[]) || []} waMode={waMode} />

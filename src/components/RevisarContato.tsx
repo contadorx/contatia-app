@@ -20,6 +20,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { EmailFinder } from "@/components/EmailFinder";
 import { verificarWhatsAppLote, atualizarWhatsAppDoSite } from "@/app/dashboard/contatos/wa-actions";
+import { dataCurta } from "@/lib/datas";
 
 const SELO_WA: Record<string, { txt: string; cls: string }> = {
   valid: { txt: "tem WhatsApp", cls: "bg-signal/10 text-signal" },
@@ -76,7 +77,7 @@ export default function RevisarContato({
     })();
   }
   const quando = waCheckedAt
-    ? new Date(waCheckedAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })
+    ? dataCurta(waCheckedAt)
     : null;
 
   function reverificarWa() {

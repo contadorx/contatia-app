@@ -14,6 +14,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { dataHora } from "@/lib/datas";
 
 export default function DashboardError({
   error,
@@ -33,7 +34,7 @@ export default function DashboardError({
     `Mensagem: ${error?.message || "(sem mensagem)"}`,
     error?.digest ? `Digest: ${error.digest}` : null,
     `Página: ${typeof window !== "undefined" ? window.location.pathname + window.location.search : ""}`,
-    `Quando: ${new Date().toLocaleString("pt-BR")}`,
+    `Quando: ${dataHora(new Date())}`,
   ].filter(Boolean).join("\n");
 
   return (

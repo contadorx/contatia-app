@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { addSuppression, removeSuppression } from "@/app/dashboard/config/supressao/actions";
+import { dataCurta } from "@/lib/datas";
 
 type Row = { id: string; email: string; reason: string; created_at: string };
 
@@ -41,7 +42,7 @@ export function SuppressionTools({ rows, reasonMap }: { rows: Row[]; reasonMap: 
                 <tr key={r.id} className="border-b border-line last:border-0">
                   <td className="px-4 py-3">{r.email}</td>
                   <td className="px-4 py-3"><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${rc.c}`}>{rc.l}</span></td>
-                  <td className="px-4 py-3 text-xs text-subtle">{new Date(r.created_at).toLocaleDateString("pt-BR")}</td>
+                  <td className="px-4 py-3 text-xs text-subtle">{dataCurta(r.created_at)}</td>
                   <td className="px-4 py-3 text-right">
                     <RemoveBtn id={r.id} />
                   </td>

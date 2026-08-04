@@ -9,6 +9,7 @@ import SmartSelect from "@/components/SmartSelect";
 import LogFilterBar from "@/components/LogFilterBar";
 import { comoLista } from "@/lib/filtros";
 import { ACAO_LABEL, ACOES_DESTRUTIVAS, labelAcao } from "@/lib/actionLog";
+import { dataHora } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
@@ -831,7 +832,7 @@ export default async function Relatorios({
                     <span className="font-medium">{l.contacts?.name || "—"}</span>
                   ),
                   <a href={l.url} target="_blank" rel="noreferrer" className="block max-w-[220px] truncate text-brand-dark hover:underline" title={l.url}>{l.url}</a>,
-                  <span className="text-subtle">{l.first_click_at ? new Date(l.first_click_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—"}</span>,
+                  <span className="text-subtle">{dataHora(l.first_click_at)}</span>,
                 ],
               }))}
             />
@@ -886,7 +887,7 @@ export default async function Relatorios({
               key: String(l.id),
               cells: [
                 <span className="whitespace-nowrap text-subtle">
-                  {new Date(l.created_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                  {dataHora(l.created_at)}
                 </span>,
                 <span className="font-medium">{l.user_name || memberName(l.user_id)}</span>,
                 <span className={ACOES_DESTRUTIVAS.includes(l.action) ? "font-semibold text-danger" : "font-medium"}>

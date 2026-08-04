@@ -1,4 +1,5 @@
 import "server-only";
+import { diaISO } from "@/lib/datas";
 
 // Integração com a API do Asaas. Usa ASAAS_API_KEY.
 // Ambiente: produção por padrão; defina ASAAS_ENV=sandbox para testes.
@@ -96,7 +97,7 @@ export async function createAsaasSubscription(input: {
 
   const next = new Date();
   next.setDate(next.getDate() + 3); // primeira cobrança em 3 dias
-  const dueDate = next.toISOString().slice(0, 10);
+  const dueDate = diaISO(next);
 
   const res = await fetch(`${base()}/subscriptions`, {
     method: "POST",

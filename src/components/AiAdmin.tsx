@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveAssistant, loadConversation, setConversation } from "@/app/dashboard/superadmin/ia/actions";
+import { dataHoraCompacta } from "@/lib/datas";
 
 type Assistant = {
   kind: "support" | "sales";
@@ -27,7 +28,7 @@ type Conv = {
   last_at: string;
 };
 
-const fmt = (s: string) => new Date(s).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+const fmt = (s: string) => dataHoraCompacta(s);
 
 export default function AiAdmin({ assistants, conversations }: { assistants: Assistant[]; conversations: Conv[] }) {
   const pend = conversations.filter((c) => c.status === "escalated" && !c.handled);

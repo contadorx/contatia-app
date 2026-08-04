@@ -24,6 +24,7 @@ import RichTextEditor from "@/components/RichTextEditor";
 import TriageDecisionBar from "@/components/TriageDecisionBar";
 import NewOpportunityForContact from "@/components/NewOpportunityForContact";
 import type { ReplyIntent } from "@/lib/replyIntent";
+import { dataHora } from "@/lib/datas";
 
 export type TriageItem = { id: string; intent: ReplyIntent };
 export type Seq = { id: string; name: string };
@@ -42,7 +43,7 @@ export type Thread = {
 };
 
 function fmt(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  return dataHora(iso);
 }
 function snippet(t: Thread) {
   const last = t.messages[t.messages.length - 1];

@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabaseAdmin";
 import { headers } from "next/headers";
 import { APP_URL } from "@/lib/regua";
 import { assuntoConvite, htmlConvite, textoConvite } from "@/lib/emailConvite";
+import { dataDoDia } from "@/lib/datas";
 
 async function ctx() {
   const supabase = createClient();
@@ -145,7 +146,7 @@ async function enviarEmailDeConvite(input: {
     ]);
 
     const validade = input.expires_at
-      ? new Date(input.expires_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })
+      ? dataDoDia(input.expires_at)
       : null;
     const convidadoPor = ((quem as any)?.full_name || (quem as any)?.email || "").trim() || null;
     const workspace = ((tenant as any)?.name || "").trim() || null;

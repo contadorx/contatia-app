@@ -7,6 +7,7 @@ import { scoreEvent } from "@/lib/scoring";
 import { logAction, recortarItens } from "@/lib/actionLog";
 import { renderTemplate } from "@/lib/cadence";
 import { buildEmailHtml } from "@/lib/richtext";
+import { diaISO } from "@/lib/datas";
 
 async function ctx() {
   const supabase = createClient();
@@ -47,7 +48,7 @@ export async function snoozeTask(id: string, days: number) {
   d.setDate(d.getDate() + (days || 1));
   const { error } = await supabase
     .from("tasks")
-    .update({ due_date: d.toISOString().slice(0, 10) })
+    .update({ due_date: diaISO(d) })
     .eq("id", id);
   if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard");
@@ -464,7 +465,7 @@ const TETO_POR_CLIQUE = 200;
 export async function sendAllEmailTasks() {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
-  const today = new Date().toISOString().slice(0, 10);
+  const today = diaISO();
   const { data: tasks } = await supabase
     .from("tasks")
     .select("id")

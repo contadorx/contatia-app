@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createCoupon, toggleCoupon } from "@/app/dashboard/superadmin/cupons/actions";
+import { dataDoDia } from "@/lib/datas";
 
 type Coupon = {
   id: string;
@@ -91,7 +92,7 @@ export default function CouponManager({ coupons }: { coupons: Coupon[] }) {
                 <td className="px-4 py-2">{c.percent_off}%</td>
                 <td className="px-4 py-2">{c.duration_months ? `${c.duration_months} meses` : "permanente"}</td>
                 <td className="px-4 py-2">{c.redeemed_count}{c.max_redemptions ? ` / ${c.max_redemptions}` : ""}</td>
-                <td className="px-4 py-2">{c.expires_at ? new Date(c.expires_at).toLocaleDateString("pt-BR") : "—"}</td>
+                <td className="px-4 py-2">{dataDoDia(c.expires_at)}</td>
                 <td className="px-4 py-2">
                   <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${c.is_active ? "bg-signal/10 text-signal" : "bg-muted text-subtle"}`}>
                     {c.is_active ? "Ativo" : "Inativo"}

@@ -1,10 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { OpenTicketForm, ReplyBox, StatusBadge } from "@/components/SupportTools";
+import { dataHora } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
 function fmt(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  return dataHora(iso);
 }
 
 export default async function Suporte() {

@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import AutomationsPanel from "@/components/AutomationsPanel";
+import { dataHora } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +52,7 @@ export default async function Automacoes() {
             {logList.map((l, i) => (
               <div key={i} className="flex items-center justify-between p-3 text-sm">
                 <span>{l.contacts?.name || "Contato"} · <span className="text-subtle">{l.detail}</span></span>
-                <span className="text-xs text-subtle">{new Date(l.created_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</span>
+                <span className="text-xs text-subtle">{dataHora(l.created_at)}</span>
               </div>
             ))}
           </div>

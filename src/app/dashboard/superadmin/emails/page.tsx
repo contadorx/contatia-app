@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import SmartSelect from "@/components/SmartSelect";
 import { comoLista } from "@/lib/filtros";
+import { dataHoraCompacta } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
@@ -74,7 +75,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: { kin
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{r.subject || "(sem assunto)"}</p>
                 <p className="text-xs text-subtle">
-                  {r.to_email} · {r.tenants?.name || "—"} · {new Date(r.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  {r.to_email} · {r.tenants?.name || "—"} · {dataHoraCompacta(r.created_at)}
                 </p>
                 {r.status === "error" && <p className="text-xs text-danger">falhou: {r.error}</p>}
               </div>

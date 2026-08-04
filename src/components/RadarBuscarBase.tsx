@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import SmartSelect from "@/components/SmartSelect";
 import { atividadesReceita, buscarNaBase, contarNaBase, enviarParaCadastro, descartarCnpjs, reincluirCnpjs, exportarRadar } from "@/app/dashboard/radar/actions";
+import { diaISO } from "@/lib/datas";
 
 const UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
 
@@ -254,7 +255,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    const hoje = new Date().toISOString().slice(0, 10);
+    const hoje = diaISO();
     a.href = url;
     a.download = `radar-contatia-${hoje}.csv`;
     document.body.appendChild(a);

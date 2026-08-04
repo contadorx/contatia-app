@@ -2,11 +2,12 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
 import { ReplyBox, StatusBadge, StatusControl } from "@/components/SupportTools";
+import { dataHora } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
 function fmt(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  return dataHora(iso);
 }
 
 export default async function SuporteAdmin({ searchParams }: { searchParams: { status?: string } }) {

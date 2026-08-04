@@ -2,11 +2,12 @@ import { createClient } from "@/lib/supabase/server";
 import ProposalForm from "@/components/ProposalForm";
 import ShareControl from "@/components/ShareControl";
 import ViewDocButton from "@/components/ViewDocButton";
+import { dataCurta, dataHora } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
 function fmt(iso: string | null) {
-  return iso ? new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
+  return dataHora(iso);
 }
 
 export default async function Propostas({
@@ -64,7 +65,7 @@ export default async function Propostas({
     const exp = new Date(createdAt);
     exp.setMonth(exp.getMonth() + retMonths);
     const days = Math.ceil((exp.getTime() - Date.now()) / 86400000);
-    return { days, date: exp.toLocaleDateString("pt-BR") };
+    return { days, date: dataCurta(exp) };
   }
 
   return (

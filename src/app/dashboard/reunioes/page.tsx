@@ -5,6 +5,7 @@ import MeetingStatusButtons from "@/components/MeetingStatusButtons";
 import MeetingOutcome from "@/components/MeetingOutcome";
 import ReunioesPassadas from "@/components/ReunioesPassadas";
 import MeetingsTabs from "@/components/MeetingsTabs";
+import { diaISO, diaISOmais, diaSemanaCurto, hora } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
@@ -17,15 +18,16 @@ const STATUS_LABEL: Record<string, { l: string; c: string }> = {
 };
 
 function timeFmt(iso: string) {
-  return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return hora(iso);
 }
 function dayLabel(iso: string) {
-  const d = new Date(iso);
-  const today = new Date();
-  const tomorrow = new Date(Date.now() + 86400000);
-  if (d.toDateString() === today.toDateString()) return "Hoje";
-  if (d.toDateString() === tomorrow.toDateString()) return "Amanhã";
-  return d.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "short" });
+  // toDateString() compara o dia do RELÓGIO DO SERVIDOR (UTC): uma reunião das 22h
+  // caía no dia seguinte e era rotulada "Amanhã". A comparação agora é pelo dia
+  // brasileiro, do mesmo jeito que a etiqueta que o usuário lê.
+  const dia = diaISO(iso);
+  if (dia === diaISO()) return "Hoje";
+  if (dia === diaISOmais(1)) return "Amanhã";
+  return diaSemanaCurto(iso);
 }
 
 export default async function Reunioes() {

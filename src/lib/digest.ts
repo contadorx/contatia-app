@@ -1,5 +1,6 @@
 import "server-only";
 import { HOT_THRESHOLD } from "@/lib/scoring";
+import { diaISO } from "@/lib/datas";
 
 // ============================================================
 // RESUMO DIÁRIO — retenção. Puxa o usuário de volta em vez de esperar que ele
@@ -11,7 +12,7 @@ import { HOT_THRESHOLD } from "@/lib/scoring";
 export async function runDailyDigest(admin: any): Promise<{ sent: number; errors: string[] }> {
   const errors: string[] = [];
   let sent = 0;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = diaISO();
   const stage = `digest_${today}`;
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "")).replace(/\/$/, "");
 

@@ -1,3 +1,5 @@
+import { dataCurta } from "@/lib/datas";
+
 // ============================================================
 // LINKS DE 1 CLIQUE — Instagram e LinkedIn
 //
@@ -104,7 +106,7 @@ export function nivelRede(opts: {
   const nome = opts.rede === "instagram" ? "Instagram" : "LinkedIn";
 
   if (opts.conferidoEm) {
-    const quando = new Date(opts.conferidoEm).toLocaleDateString("pt-BR");
+    const quando = dataCurta(opts.conferidoEm);
     return {
       nivel: "conferido",
       selo: "conferido ✓",

@@ -22,6 +22,7 @@ import { EmailVerifyBadge, TestEmailBox } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
 import { produtosDoContato } from "@/lib/produtos";
 import { dominioCorporativo, ehCaixaDeBalcao } from "@/lib/emailFinder";
+import { dataHora } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 // A busca/verificação de e-mail conversa com o servidor SMTP do destino, que pode
@@ -58,7 +59,7 @@ const EVENT_COLOR: Record<string, string> = {
 };
 
 function fmt(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  return dataHora(iso);
 }
 
 // ============================================================

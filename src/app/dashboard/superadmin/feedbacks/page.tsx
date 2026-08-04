@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { dataCurta } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +56,7 @@ export default async function FeedbacksPage() {
             <div className="min-w-0 flex-1">
               {r.comment ? <p className="text-sm text-ink">{r.comment}</p> : <p className="text-sm italic text-subtle">(sem comentário)</p>}
               <p className="mt-0.5 text-xs text-subtle">
-                {r.tenants?.name || "workspace"} · {new Date(r.created_at).toLocaleDateString("pt-BR")}
+                {r.tenants?.name || "workspace"} · {dataCurta(r.created_at)}
               </p>
             </div>
           </div>

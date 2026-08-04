@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabaseAdmin";
 import BillingRow from "@/components/BillingRow";
 import { InvoiceForm, InvoiceRow } from "@/components/InvoiceTools";
+import { diaISO } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ export default async function Cobranca() {
   const tList = (tenants as any[]) || [];
   const pList = (plans as any[]) || [];
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = diaISO();
   const rows = tList.map((t) => {
     const overdue = t.subscription_status === "past_due" || (t.current_period_end && t.current_period_end < today && t.subscription_status === "active");
     let daysOverdue = 0;

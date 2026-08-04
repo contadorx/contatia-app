@@ -6,6 +6,7 @@ import Link from "next/link";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { INTENT_LABEL, type ReplyIntent } from "@/lib/replyIntent";
 import { triageSuppress, triageEnroll, triageRetomada, triageDismiss } from "@/app/dashboard/triagem/actions";
+import { dataHora } from "@/lib/datas";
 
 type Item = { id: string; contactId: string; channel: string; text: string; intent: ReplyIntent; createdAt: string; name: string };
 type Seq = { id: string; name: string };
@@ -18,7 +19,7 @@ const INTENT_STYLE: Record<string, string> = {
 };
 
 function fmt(iso: string) {
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  return dataHora(iso);
 }
 
 export default function TriageInbox({ items, sequences }: { items: Item[]; sequences: Seq[] }) {

@@ -12,6 +12,7 @@
 // ============================================================
 
 import { useState } from "react";
+import { dataHora } from "@/lib/datas";
 
 type Props = {
   id: string | null;
@@ -38,7 +39,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 function dataBr(iso: string | null) {
   if (!iso) return null;
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  return dataHora(iso);
 }
 
 export default function WorkspaceInfo(p: Props) {

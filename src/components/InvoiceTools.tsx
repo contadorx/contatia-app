@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import { createInvoice, sendInvoiceEmail, setInvoiceStatus } from "@/app/dashboard/superadmin/cobranca/invoice-actions";
+import { dataCurta, dataDoDia } from "@/lib/datas";
 
 const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
@@ -66,9 +67,9 @@ export function InvoiceRow({ inv }: { inv: Invoice }) {
     <tr className="border-b border-line align-top last:border-0">
       <td className="px-4 py-3 font-medium">{inv.tenants?.name || "—"}<span className="block text-xs text-subtle">{inv.description}</span></td>
       <td className="px-4 py-3">{brl(Number(inv.amount))}</td>
-      <td className="px-4 py-3 text-xs text-subtle">{inv.due_date ? new Date(inv.due_date).toLocaleDateString("pt-BR") : "—"}</td>
+      <td className="px-4 py-3 text-xs text-subtle">{dataDoDia(inv.due_date)}</td>
       <td className="px-4 py-3"><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${st.c}`}>{st.l}</span></td>
-      <td className="px-4 py-3 text-xs text-subtle">{inv.sent_at ? `enviada ${new Date(inv.sent_at).toLocaleDateString("pt-BR")}` : "não enviada"}</td>
+      <td className="px-4 py-3 text-xs text-subtle">{inv.sent_at ? `enviada ${dataCurta(inv.sent_at)}` : "não enviada"}</td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-2 text-xs">
           {inv.status !== "paid" && inv.status !== "canceled" && (

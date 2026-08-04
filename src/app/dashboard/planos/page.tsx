@@ -4,6 +4,7 @@ import { getUsage } from "@/lib/plan";
 import { createClient } from "@/lib/supabase/server";
 import { PlanPicker } from "@/components/PlanPicker";
 import CancelSubscription from "@/components/CancelSubscription";
+import { dataDoDia } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
 
@@ -151,7 +152,7 @@ export default async function Planos() {
                     canceled: { t: "Cancelada", c: "bg-muted text-subtle" },
                   };
                   const s = st[inv.status] || st.pending;
-                  const due = inv.due_date ? new Date(inv.due_date + "T12:00:00").toLocaleDateString("pt-BR") : "—";
+                  const due = dataDoDia(inv.due_date);
                   const val = Number(inv.amount || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
                   const openable = inv.payment_link && (inv.status === "pending" || inv.status === "overdue");
                   return (

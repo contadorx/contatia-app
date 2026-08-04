@@ -3,6 +3,7 @@
 import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { dataDoDia } from "@/lib/datas";
 
 async function guard() {
   const supabase = createClient();
@@ -79,7 +80,7 @@ export async function sendInvoiceEmail(invoiceId: string, kind: "fatura" | "lemb
   if (!(inv as any).payment_link) return { error: "Sem link de pagamento. Gere no Asaas ou cole um link." };
 
   const nome = (inv as any).tenants?.name || (inv as any).tenants?.legal_name || "cliente";
-  const venc = (inv as any).due_date ? new Date((inv as any).due_date).toLocaleDateString("pt-BR") : "—";
+  const venc = dataDoDia((inv as any).due_date);
   const valor = brl(Number((inv as any).amount));
   const link = (inv as any).payment_link;
   const desc = (inv as any).description || "Assinatura Contatia";
