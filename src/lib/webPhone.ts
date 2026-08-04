@@ -38,13 +38,44 @@ function normBr(raw: string): string | null {
   return null;
 }
 
+// ============================================================
+// O BOTÃO FLUTUANTE DE WHATSAPP QUASE NUNCA É UM LINK wa.me
+//
+// Caso real: contabilribeiro.com.br tem a bolinha verde no canto, e a captura não achava
+// nada. O padrão antigo só reconhecia o número colado logo depois de `wa.me/` ou
+// `api.whatsapp.com/send?phone=`. Widget flutuante costuma guardar o número de outro
+// jeito — num atributo `data-phone`, `data-number`, ou na configuração de um script
+// inline (`"phone":"5511..."`, `whatsapp: '5511...'`).
+//
+// Agora procuramos as três formas. LIMITE HONESTO: se o widget for injetado por
+// JavaScript e o número vier de uma requisição posterior, ele NÃO está no HTML que
+// baixamos e não há como capturar sem rodar um navegador — o que sai caro e é frágil.
+// Nesse caso o número simplesmente não aparece, e isso não é conserto de regex.
+// ============================================================
 function extractWhatsApp(html: string): string[] {
   const out = new Set<string>();
-  const re = /(?:wa\.me\/|api\.whatsapp\.com\/send\?phone=|whatsapp:\/\/send\?phone=|whatsapp\.com\/send\?phone=)(\+?[\d]{8,15})/gi;
-  for (const m of html.matchAll(re)) {
-    const n = normBr(m[1]);
+
+  const guarda = (bruto: string) => {
+    const n = normBr(bruto);
+    // 8 a 15 dígitos já vem do padrão; normBr resolve DDI e o 9º dígito.
     if (n) out.add(n);
-  }
+  };
+
+  // 1) link direto — o caso fácil, e o mais confiável
+  for (const m of html.matchAll(
+    /(?:wa\.me\/|api\.whatsapp\.com\/send\?phone=|web\.whatsapp\.com\/send\?phone=|whatsapp:\/\/send\?phone=|whatsapp\.com\/send\?phone=)(\+?[\d]{8,15})/gi
+  )) guarda(m[1]);
+
+  // 2) atributo de dado: data-phone, data-number, data-whatsapp, data-telefone…
+  for (const m of html.matchAll(
+    /data-(?:phone|number|whatsapp|whats|telefone|celular|zap)\s*=\s*["']\s*(\+?[\d\s().-]{8,20})\s*["']/gi
+  )) guarda(m[1]);
+
+  // 3) configuração em script inline: "phone":"5511...", whatsapp: '5511...'
+  for (const m of html.matchAll(
+    /["']?(?:phone|number|whatsapp|whatsappNumber|telefone|celular)["']?\s*[:=]\s*["'](\+?[\d\s().-]{10,20})["']/gi
+  )) guarda(m[1]);
+
   return Array.from(out);
 }
 
