@@ -18,6 +18,7 @@ import ProdutoBadges from "@/components/ProdutoBadges";
 import RevisarContato from "@/components/RevisarContato";
 import AtualizarDadosContato from "@/components/AtualizarDadosContato";
 import RedesContato from "@/components/RedesContato";
+import PainelRecolhivel from "@/components/PainelRecolhivel";
 import { EmailVerifyBadge, TestEmailBox } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
 import { produtosDoContato } from "@/lib/produtos";
@@ -275,12 +276,12 @@ export default async function ContatoDetalhe({
               que ainda existe. Fechar por padrão só faz sentido quando não há mais
               nada a fazer — e é exatamente isso que a condição diz.
               ============================================================ */}
-          <details className="mt-3" open={faltaAlgumCanal}>
-            <summary className="cursor-pointer text-xs font-medium text-subtle hover:text-ink">
-              Ajustar um canal específico
-              {faltaAlgumCanal && <span className="ml-1 text-warn">· ainda falta algo</span>}
-            </summary>
-            <div className="mt-2 space-y-2 border-l-2 border-line pl-3">
+          <PainelRecolhivel
+            titulo="Ajustar um canal específico"
+            aviso={faltaAlgumCanal ? "ainda falta algo" : null}
+            abrirInicial={faltaAlgumCanal}
+          >
+            <>
               {!c.email && (
                 <>
                   <EmailFinder
@@ -324,8 +325,8 @@ export default async function ContatoDetalhe({
                   liConferidoEm={(c as any).linkedin_conferido_at || null}
                 />
               </div>
-            </div>
-          </details>
+            </>
+          </PainelRecolhivel>
         </section>
 
         {/* Dados do contato/empresa (o que já está no banco e antes ficava escondido) */}
