@@ -232,11 +232,10 @@ export default async function ContatoDetalhe({
           <div className="mt-3">
             <AtualizarDadosContato
               contactId={c.id}
-              dominio={dominioContato}
-              estado={{
+              estadoInicial={{
                 temCnpj: !!cnpj,
                 enriquecido: !!enrichedAt,
-                temDominio: !!(dominioContato || acc.website),
+                dominio: dominioContato,
                 temEmail: !!c.email,
                 emailDeBalcao: ehCaixaDeBalcao(c.email),
                 temTelefone: !!c.phone,

@@ -351,7 +351,21 @@ export async function enrichContact(id: string) {
   const accId = (c as any).account_id;
   if (accId) {
     const patchConta: Record<string, unknown> = { cnpj, cnae: d.cnae, uf: d.uf, municipio: d.municipio, porte: d.porte };
-    if (dominioNovo) patchConta.domain = dominioNovo;
+    // ============================================================
+    // DOMÍNIO DIGITADO À MÃO GANHA DE DOMÍNIO DEDUZIDO — SEMPRE
+    //
+    // Caso real: a Receita guardava `asseconassessoria.com.br` para a Ribeiro
+    // Contabilidade, domínio que não existe mais. O operador corrigiu para
+    // `contabilribeiro.com.br`, e o enriquecimento pelo CNPJ escrevia o antigo por
+    // cima — então o passo seguinte visitava um site morto e não achava rede, e-mail
+    // nem telefone. O trabalho manual era desfeito por um palpite automático.
+    //
+    // Regra: só preenche a conta quando ela está VAZIA. Correção humana é dado; e-mail
+    // da Receita é indício.
+    // ============================================================
+    const { data: contaAtual } = await supabase
+      .from("accounts").select("domain").eq("id", accId).maybeSingle();
+    if (dominioNovo && !(contaAtual as any)?.domain) patchConta.domain = dominioNovo;
     await supabase.from("accounts").update(patchConta as any).eq("id", accId).eq("tenant_id", tenant_id);
   }
 

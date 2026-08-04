@@ -13,6 +13,7 @@ function pct(n: number, d: number) {
 export function CadenceReport({ sequenceId }: { sequenceId: string }) {
   const [open, setOpen] = useState(false);
   const [report, setReport] = useState<StepReport[] | null>(null);
+  const [resumo, setResumo] = useState<{ bounced: number; comEmail: number; rastreioIndisponivel: string | null } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -22,7 +23,9 @@ export function CadenceReport({ sequenceId }: { sequenceId: string }) {
     if (!report) {
       start(async () => {
         const r = (await getCadenceReport(sequenceId)) as any;
-        if (r?.error) setErr(r.error); else setReport(r.report);
+        if (r?.error) { setErr(r.error); return; }
+        setReport(r.report);
+        setResumo(r.resumo || null);
       });
     }
   }
@@ -37,6 +40,37 @@ export function CadenceReport({ sequenceId }: { sequenceId: string }) {
           {pending && <p className="text-xs text-subtle">Calculando...</p>}
           {err && <p className="text-xs text-danger">{err}</p>}
           {report && !report.length && <p className="text-xs text-subtle">Sem dados ainda.</p>}
+          {/* Resumo da cadência: hard bounce e o motivo de o rastreio estar zerado.
+              Os dois respondem perguntas que a tabela por passo não responde. */}
+          {resumo && (
+            <div className="mb-3 space-y-1 border-b border-line pb-2">
+              <p className="text-xs">
+                <span className="text-subtle">Hard bounce: </span>
+                <b className={resumo.bounced > 0 ? "text-danger" : "text-ink"}>{resumo.bounced}</b>
+                {resumo.comEmail > 0 && (
+                  <span className="text-subtle">
+                    {" "}de {resumo.comEmail} com e-mail ({pct(resumo.bounced, resumo.comEmail)})
+                  </span>
+                )}
+                <span className="ml-2 text-subtle" title="Não guardamos em qual passo o e-mail bateu na parede, então o número é da cadência inteira.">
+                  · da cadência inteira, não por passo
+                </span>
+              </p>
+              {resumo.bounced > 0 && (
+                <p className="text-xs text-warn">
+                  Bounce alto é o que derruba reputação de domínio — é o primeiro número a
+                  olhar quando a entrega piora. Esses endereços já foram suprimidos.
+                </p>
+              )}
+              {resumo.rastreioIndisponivel && (
+                <p className="text-xs text-danger">
+                  Aberturas e cliques estão zerados porque a base não respondeu:{" "}
+                  <span className="font-mono">{resumo.rastreioIndisponivel}</span>. Se a
+                  mensagem fala de tabela inexistente, falta aplicar a migration 0108.
+                </p>
+              )}
+            </div>
+          )}
           {report && report.length > 0 && (
             <div className="space-y-2">
               {report.map((s) => (
@@ -51,8 +85,14 @@ export function CadenceReport({ sequenceId }: { sequenceId: string }) {
                   {/* Aberturas e cliques. O denominador é o RASTREADO, não o enviado:
                       e-mail em texto puro não leva pixel e e-mail sem link não tem o
                       que clicar — contar esses derrubaria a taxa sem motivo. */}
-                  {(s.rastreados > 0 || s.comLink > 0) && (
+                  {/* Antes esta linha só aparecia com número > 0 — então "sem dado" e
+                      "não medimos" ficavam idênticos: nada na tela. Agora só some
+                      quando o passo não é de e-mail, onde a métrica não existe mesmo. */}
+                  {s.channel === "email" && (
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-subtle">
+                      {s.rastreados === 0 && s.comLink === 0 && (
+                        <span className="text-subtle">👁 sem rastreio neste passo ainda</span>
+                      )}
                       {s.rastreados > 0 && (
                         <span title={`${s.abertos} de ${s.rastreados} e-mails rastreados foram abertos ao menos uma vez.`}>
                           👁 <b className="text-ink">{pct(s.abertos, s.rastreados)}</b> abertura

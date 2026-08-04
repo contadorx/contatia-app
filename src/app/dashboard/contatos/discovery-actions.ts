@@ -167,9 +167,31 @@ export async function buscarEmailAgora(contactId: string, siteOuDominio: string,
 
     if (r.status === "valid" && r.email) {
       const igual = emailAtual && emailAtual.toLowerCase() === r.email.toLowerCase();
+      // ============================================================
+      // ENDEREÇO DESCOBERTO JÁ NASCE COM O SELO
+      //
+      // Este caminho só é alcançado quando o servidor do domínio CONFIRMOU a caixa numa
+      // conversa SMTP — é a mesma prova que o botão "verificar" produz, e é mais forte:
+      // o botão testa sintaxe e MX, este aqui perguntou ao servidor se a caixa existe.
+      //
+      // Só que o selo `custom.email_check` não era gravado aqui, então o e-mail recém
+      // confirmado aparecia como "não verificado" e alguém ia clicar em verificar para
+      // ouvir o que o sistema acabara de descobrir. Trabalho repetido por falta de um
+      // campo.
+      // ============================================================
+      const { data: atual } = await supabase.from("contacts").select("custom").eq("id", contactId).maybeSingle();
+      const customNovo = {
+        ...(((atual as any)?.custom) || {}),
+        email_check: {
+          valid: true,
+          reason: "confirmado pelo servidor do domínio (SMTP)",
+          checked_at: new Date().toISOString(),
+          origem: "descoberta",
+        },
+      };
       await supabase
         .from("contacts")
-        .update({ email: r.email, email_status: "ok", email_discovery: "valid", email_discovered_at: new Date().toISOString() } as any)
+        .update({ email: r.email, email_status: "ok", email_discovery: "valid", email_discovered_at: new Date().toISOString(), custom: customNovo } as any)
         .eq("id", contactId);
       await supabase.from("events").insert({
         tenant_id, contact_id: contactId, type: "note",

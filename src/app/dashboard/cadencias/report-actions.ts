@@ -53,7 +53,8 @@ export async function getCadenceReport(sequenceId: string) {
   // enrollments dessa sequência (para saber quem respondeu e em que ponto parou)
   const { data: enrs } = await supabase
     .from("enrollments")
-    .select("id, status, current_step")
+    // contact_id entra para o cálculo de hard bounce mais abaixo
+    .select("id, status, current_step, contact_id")
     .eq("sequence_id", sequenceId);
   const enrollmentIds = ((enrs as any[]) || []).map((e) => e.id);
 
@@ -93,24 +94,66 @@ export async function getCadenceReport(sequenceId: string) {
   // ============================================================
   const abrePorPasso: Record<number, { total: number; abertos: number }> = {};
   const cliquePorPasso: Record<number, { total: number; clicados: number }> = {};
-  try {
-    const { data: opens } = await supabase.from("email_opens").select("*").eq("sequence_id", sequenceId);
-    for (const o of ((opens as any[]) || [])) {
-      const pos = o.step_position ?? 0;
-      const a = (abrePorPasso[pos] ||= { total: 0, abertos: 0 });
-      a.total++;
-      if ((o.opens || 0) > 0) a.abertos++;
-    }
-  } catch { /* sem 0108: fica zerado, e a tela diz por quê */ }
-  try {
-    const { data: cliques } = await supabase.from("link_clicks").select("*").eq("sequence_id", sequenceId);
-    for (const c of ((cliques as any[]) || [])) {
-      const pos = c.step_position ?? 0;
-      const a = (cliquePorPasso[pos] ||= { total: 0, clicados: 0 });
-      a.total++;
-      if ((c.clicks || 0) > 0) a.clicados++;
-    }
-  } catch { /* idem */ }
+  // ============================================================
+  // O try/catch AQUI NUNCA DISPAROU
+  //
+  // O cliente do Supabase NÃO lança quando a tabela não existe: devolve `{ data: null,
+  // error }`. Como só `data` era lido, o erro ia para o lixo, tudo zerava, e a tela —
+  // que só desenha o bloco quando o número é maior que zero — não mostrava nada.
+  // Resultado: "o relatório não tem essa informação", sem nenhuma pista de que faltava
+  // aplicar uma migration.
+  //
+  // Agora o erro é capturado e VIAJA até a tela. Zero por falta de dado e zero por
+  // tabela inexistente são coisas diferentes e passam a ser ditas de forma diferente.
+  // ============================================================
+  let rastreioIndisponivel: string | null = null;
+
+  const { data: opens, error: errOpens } = await supabase
+    .from("email_opens").select("*").eq("sequence_id", sequenceId);
+  if (errOpens) rastreioIndisponivel = errOpens.message;
+  for (const o of ((opens as any[]) || [])) {
+    const pos = o.step_position ?? 0;
+    const a = (abrePorPasso[pos] ||= { total: 0, abertos: 0 });
+    a.total++;
+    if ((o.opens || 0) > 0) a.abertos++;
+  }
+
+  const { data: cliques, error: errCliques } = await supabase
+    .from("link_clicks").select("*").eq("sequence_id", sequenceId);
+  if (errCliques && !rastreioIndisponivel) rastreioIndisponivel = errCliques.message;
+  for (const c of ((cliques as any[]) || [])) {
+    const pos = c.step_position ?? 0;
+    const a = (cliquePorPasso[pos] ||= { total: 0, clicados: 0 });
+    a.total++;
+    if ((c.clicks || 0) > 0) a.clicados++;
+  }
+
+  // ============================================================
+  // HARD BOUNCE — por cadência, não por passo
+  //
+  // O cron de respostas marca `contacts.email_status = 'hard_bounce'` e suprime o
+  // endereço. Não guardamos QUAL passo bateu na parede, então prometer bounce por passo
+  // seria inventar precisão: o número é da cadência inteira, e está escrito assim.
+  //
+  // Importa mais do que parece: bounce alto é o que derruba reputação de domínio, e é
+  // o primeiro número a olhar quando a entrega piora.
+  // ============================================================
+  const idsContatos = Array.from(
+    new Set(((enrs as any[]) || []).map((e) => e.contact_id).filter(Boolean))
+  );
+  let bounced = 0;
+  let comEmail = 0;
+  for (let i = 0; i < idsContatos.length; i += 500) {
+    const fatia = idsContatos.slice(i, i + 500);
+    const [{ count: nBounce }, { count: nEmail }] = await Promise.all([
+      supabase.from("contacts").select("id", { count: "exact", head: true })
+        .in("id", fatia).eq("email_status", "hard_bounce"),
+      supabase.from("contacts").select("id", { count: "exact", head: true })
+        .in("id", fatia).not("email", "is", null),
+    ]);
+    bounced += nBounce || 0;
+    comEmail += nEmail || 0;
+  }
 
   const report: StepReport[] = (steps as any[]).map((s) => {
     const pos = s.position;
@@ -147,5 +190,11 @@ export async function getCadenceReport(sequenceId: string) {
     };
   });
 
-  return { ok: true, report };
+  return {
+    ok: true,
+    report,
+    // O resumo da cadência: bounce é por cadência (não sabemos o passo) e o aviso de
+    // rastreio explica um zero que antes não se explicava.
+    resumo: { bounced, comEmail, rastreioIndisponivel },
+  };
 }

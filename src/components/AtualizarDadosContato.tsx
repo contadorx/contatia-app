@@ -1,206 +1,113 @@
 "use client";
 
 // ============================================================
-// UM BOTÃO PARA ATUALIZAR OS DADOS DO CONTATO
+// O BLOCO, AGORA SEM MEMÓRIA PRÓPRIA
 //
-// A ficha tinha SEIS lugares que atualizavam dado de contato: o selo do e-mail no
-// cabeçalho, o bloco "procurar e-mail" (que só aparecia sem e-mail), a caixa de testar
-// um e-mail avulso, o painel de redes, o painel "Revisar dados" (recolhido, e era lá
-// que morava o WhatsApp) e o bloco de enriquecer pelo CNPJ.
+// A versão anterior guardava aqui o que sabia do contato e decidia os passos com base
+// nisso. Como cada passo MUDA o contato (o CNPJ traz o domínio, o site traz o telefone),
+// as decisões seguintes saíam de uma foto velha: o WhatsApp nem entrava no plano e a
+// busca de e-mail se comportava diferente do controle individual — que sempre leu o
+// estado real do banco.
 //
-// Na cabeça de quem usa, porém, isso é UMA decisão: "descubra o que der sobre esta
-// pessoa". Seis controles para uma decisão é o operador tendo que conhecer a
-// arquitetura do sistema para trabalhar.
-//
-// A ORDEM NÃO É ARBITRÁRIA — cada passo alimenta o seguinte:
-//
-//   1. CNPJ .......... nossa base no VPS, grátis e instantânea. Pode PREENCHER o
-//                      domínio e o telefone, que os passos seguintes precisam.
-//   2. site .......... com o domínio em mãos, raspa telefone, e-mail publicado,
-//                      Instagram e LinkedIn numa passada só.
-//   3. e-mail ........ conversa SMTP no worker; precisa de nome + domínio.
-//   4. WhatsApp ...... Evolution; precisa do telefone, que o passo 1 ou 2 pode ter
-//                      acabado de trazer.
-//
-// Rodar fora dessa ordem desperdiça: verificar WhatsApp antes de descobrir o telefone
-// é uma chamada garantidamente inútil.
-//
-// O QUE ELE NÃO FAZ: substituir os controles finos. Reverificar só o WhatsApp, testar
-// um endereço específico, corrigir o Instagram na mão — tudo continua existindo,
-// recolhido embaixo. O botão é o caminho comum; os controles são o caminho preciso.
+// Agora este componente não decide nada. Ele percorre os passos, e o SERVIDOR relê o
+// contato antes de cada um e devolve o estado novo. A tela só desenha. Não há mais nada
+// aqui que possa envelhecer.
 // ============================================================
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { enrichContact } from "@/app/dashboard/contatos/actions";
-import { capturarDoSiteLote } from "@/app/dashboard/contatos/web-capture-actions";
-import { capturarRedesDoSite } from "@/app/dashboard/contatos/social-actions";
-import { buscarEmailAgora } from "@/app/dashboard/contatos/discovery-actions";
-import { verificarWhatsAppLote } from "@/app/dashboard/contatos/wa-actions";
+import { rodarPasso } from "@/app/dashboard/contatos/atualizar-actions";
+import {
+  passosPendentes,
+  ORDEM_PASSOS,
+  ROTULO_PASSO as ROTULO,
+  type EstadoContato,
+  type PassoId,
+  type ResultadoPasso,
+} from "@/lib/passosContato";
 
-type Estado = {
-  temCnpj: boolean;
-  enriquecido: boolean;
-  temDominio: boolean;
-  temEmail: boolean;
-  // `contato@`, `comercial@`… tecnicamente é um e-mail, mas não é o e-mail DO DECISOR.
-  // Vale procurar o pessoal mesmo já tendo este.
-  emailDeBalcao: boolean;
-  temTelefone: boolean;
-  waStatus: string | null;
-  temRede: boolean;
+const EM_ANDAMENTO: Record<PassoId, string> = {
+  cnpj: "Consultando o CNPJ na base da Receita…",
+  site: "Lendo o site da empresa…",
+  email: "Procurando o e-mail (conversa com o servidor do domínio, pode demorar)…",
+  whatsapp: "Verificando o WhatsApp…",
 };
 
-type Linha = { passo: string; texto: string; tom: "ok" | "nada" | "erro" | "pulado" };
 
 export default function AtualizarDadosContato({
   contactId,
-  dominio,
-  estado,
+  estadoInicial,
 }: {
   contactId: string;
-  dominio: string;                 // domínio corporativo conhecido (pode vir vazio)
-  estado: Estado;
+  estadoInicial: EstadoContato;
 }) {
   const router = useRouter();
-  const [rodando, setRodando] = useState<string | null>(null);
-  const [linhas, setLinhas] = useState<Linha[]>([]);
+  const [estado, setEstado] = useState<EstadoContato>(estadoInicial);
+  const [rodando, setRodando] = useState<PassoId | null>(null);
+  const [linhas, setLinhas] = useState<ResultadoPasso[]>([]);
   const [pronto, setPronto] = useState(false);
 
-  // ============================================================
-  // O QUE HÁ PARA FAZER — e o que NÃO há
-  //
-  // O botão só promete trabalho que existe. Quatro regras, cada uma achada testando:
-  //
-  // · o CNPJ ainda não enriquecido pode CRIAR o domínio, então site e e-mail entram no
-  //   plano mesmo sem domínio hoje — passam a ser possíveis depois do passo 1;
-  // · o site só entra se ainda falta algo que ele saiba dar (e-mail, telefone ou rede).
-  //   Num contato completo, visitar o site é gastar tempo para reescrever o que já
-  //   está lá;
-  // · ter `contato@` NÃO é ter o e-mail do decisor. Tratar os dois como "já tem e-mail"
-  //   fazia o botão parar de procurar justamente quando mais valia procurar;
-  // · WhatsApp `invalid` é resposta, não ausência de resposta. Já sabemos que o número
-  //   não tem WhatsApp. Reverificar continua possível no controle fino, para quando o
-  //   telefone mudou.
-  // ============================================================
-  const podeTerDominio = estado.temDominio || (estado.temCnpj && !estado.enriquecido);
-  const faltaAlgoDoSite = !estado.temEmail || !estado.temTelefone || !estado.temRede;
-  const waRespondido = estado.waStatus === "valid" || estado.waStatus === "invalid";
-  const valeProcurarEmail = !estado.temEmail || estado.emailDeBalcao;
-
-  const passos = [
-    estado.temCnpj && !estado.enriquecido && "CNPJ",
-    podeTerDominio && faltaAlgoDoSite && "site",
-    valeProcurarEmail && podeTerDominio && "e-mail",
-    estado.temTelefone && !waRespondido && "WhatsApp",
-  ].filter(Boolean) as string[];
-
-  const nadaAFazer = passos.length === 0;
-
-  function add(l: Linha) { setLinhas((prev) => [...prev, l]); }
+  const pendentes = passosPendentes(estado);
+  const nadaAFazer = pendentes.length === 0;
 
   async function rodar() {
     setLinhas([]);
     setPronto(false);
-    // `dominioAtual` acompanha o que o passo 1 descobrir: sem isso, os passos 2 e 3
-    // usariam o domínio que a página carregou ANTES do enriquecimento — e o contato que
-    // mais precisa deles é justamente o que ainda não tinha domínio nenhum.
-    let dominioAtual = dominio;
-    let temTelefone = estado.temTelefone;
-
-    try {
-      // 1) CNPJ — nossa base, grátis
-      if (estado.temCnpj && !estado.enriquecido) {
-        setRodando("Consultando o CNPJ na base da Receita…");
-        const r: any = await enrichContact(contactId);
-        if (r?.error) add({ passo: "CNPJ", texto: r.error, tom: "erro" });
-        else {
-          add({ passo: "CNPJ", texto: "dados cadastrais atualizados", tom: "ok" });
-          if (r?.dominio) dominioAtual = r.dominio;
-          if (r?.telefone) temTelefone = true;
-        }
-      } else if (estado.temCnpj) {
-        add({ passo: "CNPJ", texto: "já enriquecido — não repeti", tom: "pulado" });
-      }
-
-      // 2) site — telefone, e-mail publicado, Instagram e LinkedIn
-      if ((dominioAtual || estado.temCnpj) && faltaAlgoDoSite) {
-        setRodando("Lendo o site da empresa…");
-        const [web, redes]: any[] = await Promise.all([
-          capturarDoSiteLote([contactId]),
-          capturarRedesDoSite([contactId]),
-        ]);
-        const achou: string[] = [];
-        if (web?.achou) achou.push("e-mail ou telefone");
-        if (web?.whats) achou.push("WhatsApp confirmado pelo wa.me");
-        if (redes?.comIg) achou.push("Instagram");
-        if (redes?.comLi) achou.push("LinkedIn");
-        if (web?.error || redes?.error) {
-          add({ passo: "site", texto: web?.error || redes?.error, tom: "erro" });
-        } else if (achou.length) {
-          add({ passo: "site", texto: achou.join(" · "), tom: "ok" });
-          if (web?.achou) temTelefone = true;
-        } else if (web?.semDominio || redes?.semDominio) {
-          add({ passo: "site", texto: "sem domínio corporativo para visitar", tom: "pulado" });
-        } else {
-          add({ passo: "site", texto: "o site não publica esses dados", tom: "nada" });
-        }
-      }
-
-      // 3) e-mail — conversa SMTP no worker
-      if (valeProcurarEmail && (dominioAtual || estado.temCnpj)) {
-        setRodando(
-          estado.emailDeBalcao
-            ? "Procurando o e-mail do decisor (o atual é caixa compartilhada)…"
-            : "Procurando o e-mail (isso conversa com o servidor do domínio)…"
-        );
-        // forcar = true quando já existe um endereço: é o modo revisão, que só
-        // substitui se o servidor do domínio confirmar um endereço diferente.
-        const r: any = await buscarEmailAgora(contactId, dominioAtual || "", estado.temEmail);
-        if (r?.ok && r?.email) add({ passo: "e-mail", texto: `achei ${r.email}`, tom: "ok" });
-        else if (r?.error) add({ passo: "e-mail", texto: r.error, tom: "erro" });
-        else add({ passo: "e-mail", texto: r?.detalhe || r?.titulo || "nenhum endereço confirmado", tom: "nada" });
-      } else if (estado.temEmail) {
-        add({ passo: "e-mail", texto: "já tem o e-mail do decisor — não procurei outro", tom: "pulado" });
-      }
-
-      // 4) WhatsApp — precisa do telefone que os passos acima podem ter trazido
-      if (temTelefone && !waRespondido) {
-        setRodando("Verificando o WhatsApp…");
-        const r: any = await verificarWhatsAppLote([contactId]);
-        if (r?.error) add({ passo: "WhatsApp", texto: r.error, tom: "erro" });
-        else if (r?.comWa) add({ passo: "WhatsApp", texto: "número tem WhatsApp", tom: "ok" });
-        else if (r?.semWa) add({ passo: "WhatsApp", texto: "número não tem WhatsApp", tom: "nada" });
-        else if (r?.enfileirados) add({ passo: "WhatsApp", texto: "entrou na fila — o robô confere em até 1h", tom: "pulado" });
-        else add({ passo: "WhatsApp", texto: "sem resposta da verificação", tom: "nada" });
-      } else if (!temTelefone) {
-        add({ passo: "WhatsApp", texto: "sem telefone para verificar", tom: "pulado" });
-      } else {
-        add({
-          passo: "WhatsApp",
-          texto: estado.waStatus === "valid"
-            ? "já confirmado — não repeti"
-            : "já verificado: este número não tem WhatsApp",
-          tom: "pulado",
-        });
-      }
-    } catch (e: any) {
-      add({ passo: "erro", texto: e?.message || "algo falhou no meio do caminho", tom: "erro" });
-    } finally {
-      setRodando(null);
-      setPronto(true);
-      router.refresh();
+    for (const passo of ORDEM_PASSOS) {
+      setRodando(passo);
+      const r = await rodarPasso(contactId, passo);
+      setLinhas((prev) => [...prev, r]);
+      // O estado devolvido é o do banco DEPOIS do passo — é ele que decide o próximo.
+      if (r.estado) setEstado(r.estado);
     }
+    setRodando(null);
+    setPronto(true);
+    router.refresh();
   }
 
-  const cor = (t: Linha["tom"]) =>
+  const cor = (t: ResultadoPasso["tom"]) =>
     t === "ok" ? "text-brand-dark" : t === "erro" ? "text-danger" : "text-subtle";
-  const icone = (t: Linha["tom"]) =>
+  const icone = (t: ResultadoPasso["tom"]) =>
     t === "ok" ? "✓" : t === "erro" ? "✕" : t === "nada" ? "—" : "·";
+
+  // Um quadro do que o contato TEM, sempre visível. Antes só existiam mensagens do que
+  // aconteceu; faltava a resposta para "afinal, o que este contato tem hoje?".
+  const canais: { rotulo: string; valor: string; ok: boolean }[] = [
+    {
+      rotulo: "E-mail",
+      valor: estado.temEmail ? (estado.emailDeBalcao ? "caixa compartilhada" : "do decisor") : "não tem",
+      ok: estado.temEmail && !estado.emailDeBalcao,
+    },
+    {
+      rotulo: "WhatsApp",
+      valor:
+        estado.waStatus === "valid" ? "confirmado"
+        : estado.waStatus === "invalid" ? "número não tem"
+        : estado.temTelefone ? "não verificado"
+        : "sem telefone",
+      ok: estado.waStatus === "valid",
+    },
+    { rotulo: "Redes", valor: estado.temRede ? "Instagram ou LinkedIn" : "não tem", ok: estado.temRede },
+    {
+      rotulo: "Receita",
+      valor: estado.enriquecido ? "enriquecido" : estado.temCnpj ? "não enriquecido" : "sem CNPJ",
+      ok: estado.enriquecido,
+    },
+  ];
 
   return (
     <div className="rounded-lg border border-line bg-muted/30 p-3">
-      <div className="flex flex-wrap items-center gap-2">
+      {/* o quadro de canais: o que existe hoje, num relance */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-4">
+        {canais.map((c) => (
+          <div key={c.rotulo} className="text-xs">
+            <span className="text-subtle">{c.rotulo}: </span>
+            <span className={c.ok ? "font-medium text-brand-dark" : "text-subtle"}>{c.valor}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
         <button
           type="button"
           className="btn-brand py-1.5 text-sm disabled:opacity-50"
@@ -208,22 +115,22 @@ export default function AtualizarDadosContato({
           disabled={!!rodando || nadaAFazer}
           title={
             nadaAFazer
-              ? "Não há por onde: ou já está tudo preenchido, ou falta CNPJ e domínio — sem um dos dois não há o que consultar."
-              : `Roda em ordem: ${passos.join(" → ")}. Cada passo alimenta o seguinte.`
+              ? "Não há por onde: ou já está tudo preenchido, ou falta CNPJ e domínio."
+              : `Roda em ordem: ${pendentes.map((p) => ROTULO[p]).join(" → ")}. Cada passo alimenta o seguinte.`
           }
         >
-          {rodando ? "Atualizando…" : nadaAFazer ? "✓ Nada a descobrir" : `⟳ Atualizar dados (${passos.length})`}
+          {rodando ? "Atualizando…" : nadaAFazer ? "✓ Nada a descobrir" : `⟳ Atualizar dados (${pendentes.length})`}
         </button>
         {!rodando && !nadaAFazer && (
-          <span className="text-xs text-subtle">{passos.join(" → ")}</span>
+          <span className="text-xs text-subtle">{pendentes.map((p) => ROTULO[p]).join(" → ")}</span>
         )}
-        {rodando && <span className="text-xs text-subtle">{rodando}</span>}
+        {rodando && <span className="text-xs text-subtle">{EM_ANDAMENTO[rodando]}</span>}
       </div>
 
       {estado.emailDeBalcao && !rodando && (
         <p className="mt-2 text-xs text-warn">
-          O e-mail atual é de caixa compartilhada. Vou procurar o endereço do decisor no
-          mesmo domínio — e só troco se o servidor confirmar.
+          O e-mail atual é de caixa compartilhada. Vou procurar o do decisor no mesmo
+          domínio — e só troco se o servidor confirmar.
         </p>
       )}
 
@@ -232,7 +139,7 @@ export default function AtualizarDadosContato({
           {linhas.map((l, i) => (
             <li key={i} className={`text-xs ${cor(l.tom)}`}>
               <span className="inline-block w-4">{icone(l.tom)}</span>
-              <b className="font-medium">{l.passo}</b>: {l.texto}
+              <b className="font-medium">{ROTULO[l.passo]}</b>: {l.texto}
             </li>
           ))}
         </ul>
