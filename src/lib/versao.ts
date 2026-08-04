@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.04-22";
+export const VERSAO_APP = "2026.08.04-23";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "conserto: inscrever em cadencia voltou a funcionar · quadro de canais com valor e link · painel de ajuste abre quando falta algo";
+export const VERSAO_NOTAS = "e-mail e WhatsApp na mesma visao das redes (fim da gaveta dentro da gaveta)";

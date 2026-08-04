@@ -38,6 +38,7 @@ export default function RevisarContato({
   waCheckedAt,
   companyDomain,
   discovery,
+  embutido = false,
 }: {
   contactId: string;
   contactName: string;
@@ -47,6 +48,19 @@ export default function RevisarContato({
   waCheckedAt: string | null;
   companyDomain: string | null;
   discovery: string | null;
+  // ============================================================
+  // DENTRO DE UM PAINEL, ISTO NÃO PODE SER OUTRO PAINEL
+  //
+  // Este bloco nasceu como cartão independente, com cabeçalho e "abrir/fechar"
+  // próprios. Quando ele passou a morar dentro do "Ajustar um canal específico",
+  // virou uma gaveta dentro de outra: as redes apareciam de cara e, para chegar no
+  // e-mail e no WhatsApp, era preciso abrir mais uma. Dois cliques para ver o que
+  // deveria estar na mesma altura dos outros canais.
+  //
+  // `embutido` tira a casca: sem cabeçalho, sem toggle, sempre aberto. O componente
+  // continua servindo como cartão solto em qualquer outro lugar.
+  // ============================================================
+  embutido?: boolean;
 }) {
   const router = useRouter();
   const [aberto, setAberto] = useState(false);
@@ -95,24 +109,28 @@ export default function RevisarContato({
     });
   }
 
-  return (
-    <div className="card mt-4 p-0">
-      <button
-        type="button"
-        className="flex w-full flex-wrap items-center justify-between gap-3 px-5 py-3 text-left hover:bg-muted/50"
-        onClick={() => setAberto((a) => !a)}
-      >
-        <div className="text-sm">
-          <b>Revisar dados de contato</b>{" "}
-          <span className="text-subtle">
-            — conferir se existe e-mail ou WhatsApp mais atual
-          </span>
-        </div>
-        <span className="text-xs text-subtle">{aberto ? "fechar" : "abrir"}</span>
-      </button>
+  const mostrar = embutido || aberto;
 
-      {aberto && (
-        <div className="border-t border-line px-5 py-4">
+  return (
+    <div className={embutido ? "" : "card mt-4 p-0"}>
+      {!embutido && (
+        <button
+          type="button"
+          className="flex w-full flex-wrap items-center justify-between gap-3 px-5 py-3 text-left hover:bg-muted/50"
+          onClick={() => setAberto((a) => !a)}
+        >
+          <div className="text-sm">
+            <b>Revisar dados de contato</b>{" "}
+            <span className="text-subtle">
+              — conferir se existe e-mail ou WhatsApp mais atual
+            </span>
+          </div>
+          <span className="text-xs text-subtle">{aberto ? "fechar" : "abrir"}</span>
+        </button>
+      )}
+
+      {mostrar && (
+        <div className={embutido ? "" : "border-t border-line px-5 py-4"}>
           {/* ---- WhatsApp ---- */}
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="font-semibold">WhatsApp:</span>

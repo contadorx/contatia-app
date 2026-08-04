@@ -294,17 +294,11 @@ export default async function ContatoDetalhe({
                 </>
               )}
 
-              <RedesContato
-          contactId={c.id}
-          instagram={(c as any).instagram || null}
-          linkedin={(c as any).linkedin || null}
-          temDominio={!!((c as any).company_domain || (c as any).accounts?.domain || (c as any).accounts?.website)}
-          igOrigem={(c as any).instagram_origem || null}
-          igConferidoEm={(c as any).instagram_conferido_at || null}
-          liOrigem={(c as any).linkedin_origem || null}
-          liConferidoEm={(c as any).linkedin_conferido_at || null}
-        />
-
+              {/* embutido: aqui dentro ele não pode ser mais uma gaveta — e-mail e
+                  WhatsApp ficam na mesma altura das redes, sem clique extra.
+                  Vem ANTES das redes para a ordem bater com a do quadro de canais
+                  logo acima (E-mail · WhatsApp · Redes · Receita) — a mesma ordem nos
+                  dois lugares é o que evita procurar. */}
               <RevisarContato
                 contactId={c.id}
                 contactName={c.name}
@@ -314,7 +308,21 @@ export default async function ContatoDetalhe({
                 waCheckedAt={(c as any).wa_checked_at || null}
                 companyDomain={dominioContato || null}
                 discovery={(c as any).email_discovery || null}
+                embutido
               />
+
+              <div className="border-t border-line pt-2">
+                <RedesContato
+                  contactId={c.id}
+                  instagram={(c as any).instagram || null}
+                  linkedin={(c as any).linkedin || null}
+                  temDominio={!!((c as any).company_domain || (c as any).accounts?.domain || (c as any).accounts?.website)}
+                  igOrigem={(c as any).instagram_origem || null}
+                  igConferidoEm={(c as any).instagram_conferido_at || null}
+                  liOrigem={(c as any).linkedin_origem || null}
+                  liConferidoEm={(c as any).linkedin_conferido_at || null}
+                />
+              </div>
             </div>
           </details>
         </section>
