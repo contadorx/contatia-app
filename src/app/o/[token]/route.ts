@@ -34,9 +34,13 @@ export async function GET(_req: Request, { params }: { params: { token: string }
   if (!admin) return pixel();
 
   try {
+    // `*` de propósito: `task_id`/`sequence_id`/`step_position` nascem na 0108 e,
+    // pedidas pelo nome, fariam o PIXEL INTEIRO parar de gravar aberturas enquanto a
+    // migration não estivesse aplicada — o app é publicado pela Vercel e a migration é
+    // aplicada à mão, então essa janela existe de verdade.
     const { data: row } = await admin
       .from("email_opens")
-      .select("id, tenant_id, contact_id, opens, first_open_at")
+      .select("*")
       .eq("token", params.token)
       .maybeSingle();
     if (!row) return pixel();
@@ -59,11 +63,15 @@ export async function GET(_req: Request, { params }: { params: { token: string }
     // O contador `opens` continua somando tudo, para quem quiser olhar.
     // ============================================================
     if (primeira && R.contact_id) {
+      // QUAL e-mail foi aberto e de qual cadência — sem isto, "abriu o e-mail" não diz
+      // o suficiente para responder nem para saber qual cadência está funcionando.
+      const { origemDoEnvio } = await import("@/lib/origemEnvio");
+      const origem = await origemDoEnvio(admin, R);
       await admin.from("events").insert({
         tenant_id: R.tenant_id,
         contact_id: R.contact_id,
         type: "email_opened",
-        meta: { fonte: "pixel" },
+        meta: { fonte: "pixel", ...origem },
       });
       const { data: c } = await admin.from("contacts").select("score").eq("id", R.contact_id).single();
       await admin

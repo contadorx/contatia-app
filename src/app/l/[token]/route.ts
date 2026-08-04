@@ -8,9 +8,12 @@ export async function GET(_req: Request, { params }: { params: { token: string }
   const admin = createAdminClient();
   if (!admin) return new NextResponse("Rastreio não configurado.", { status: 500 });
 
+  // `*` pelo mesmo motivo do pixel: as colunas de origem nascem na 0108 e, pedidas
+  // pelo nome, quebrariam TODO clique enquanto a migration não estivesse aplicada —
+  // aqui o estrago seria maior, porque o clique é o que leva a pessoa ao destino.
   const { data: link } = await admin
     .from("link_clicks")
-    .select("id, tenant_id, contact_id, url, clicks, first_click_at")
+    .select("*")
     .eq("token", params.token)
     .maybeSingle();
   if (!link) return new NextResponse("Link inválido.", { status: 404 });
@@ -23,7 +26,9 @@ export async function GET(_req: Request, { params }: { params: { token: string }
     .eq("id", L.id);
 
   if (L.contact_id) {
-    await admin.from("events").insert({ tenant_id: L.tenant_id, contact_id: L.contact_id, type: "link_clicked", meta: { url: L.url } });
+    const { origemDoEnvio } = await import("@/lib/origemEnvio");
+    const origem = await origemDoEnvio(admin, L);
+    await admin.from("events").insert({ tenant_id: L.tenant_id, contact_id: L.contact_id, type: "link_clicked", meta: { url: L.url, ...origem } });
     const { data: c } = await admin.from("contacts").select("score").eq("id", L.contact_id).single();
     await admin
       .from("contacts")

@@ -152,37 +152,76 @@ export default async function Today() {
   const desde48 = new Date(now48).toISOString();
   const { data: evsLivres } = await supabase
     .from("events")
-    .select("contact_id, type, created_at")
+    // `meta` traz o CONTEÚDO do sinal: a URL do clique, o assunto da resposta e — a
+    // partir da 0108 + do enriquecimento no pixel/redirect — o assunto do e-mail e a
+    // cadência de onde ele saiu. Sem isso a tela diz "abriu o e-mail" e ponto, o que
+    // não é suficiente nem para responder nem para saber que cadência funciona.
+    .select("contact_id, type, created_at, meta")
     .in("type", ["replied", "doc_opened", "email_opened", "link_clicked"])
     .gte("created_at", desde48)
     .order("created_at", { ascending: false })
     .limit(1000);
 
   const comTarefa = new Set(contactIds as string[]);
-  const engajou48: Record<string, { type: string; created_at: string }> = {};
+  const engajou48: Record<string, { type: string; created_at: string; meta: any }> = {};
   for (const e of (evsLivres as any[]) || []) {
     if (!e.contact_id || engajou48[e.contact_id]) continue;
-    engajou48[e.contact_id] = { type: e.type, created_at: e.created_at };
+    engajou48[e.contact_id] = { type: e.type, created_at: e.created_at, meta: e.meta || {} };
   }
   const TETO_ENGAJOU = 60;
   const todosIds = Object.keys(engajou48);
   const idsEngajou = todosIds.slice(0, TETO_ENGAJOU);
   const engajouTruncado = todosIds.length > TETO_ENGAJOU;
-  const { data: ctsEngajou } = idsEngajou.length
-    ? await supabase.from("contacts").select("id, name, company, score").in("id", idsEngajou)
-    : { data: [] as any[] };
+  const [{ data: ctsEngajou }, { data: enrEngajou }] = await Promise.all([
+    idsEngajou.length
+      ? supabase.from("contacts").select("id, name, company, score").in("id", idsEngajou)
+      : Promise.resolve({ data: [] as any[] }),
+    // Cadência de reserva: os eventos gravados ANTES deste build não têm a cadência
+    // dentro do `meta`. Em vez de mostrar um espaço em branco para o histórico, a
+    // matrícula mais recente do contato responde "de qual cadência isso veio" —
+    // marcada como aproximação na tela, porque é o que ela é.
+    idsEngajou.length
+      ? supabase
+          .from("enrollments")
+          .select("contact_id, created_at, sequences(name)")
+          .in("contact_id", idsEngajou)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as any[] }),
+  ]);
+  const cadenciaDeReserva: Record<string, string> = {};
+  for (const e of (enrEngajou as any[]) || []) {
+    const nome = (e as any)?.sequences?.name;
+    if (e.contact_id && nome && !cadenciaDeReserva[e.contact_id]) cadenciaDeReserva[e.contact_id] = nome;
+  }
+
+  // o assunto da RESPOSTA já era guardado como texto corrido ('Assunto: "..."') —
+  // aqui ele volta a ser só o assunto, para caber na linha
+  const soOAssunto = (t?: string | null) => {
+    const m = /Assunto:\s*"([^"]+)"/.exec(String(t || ""));
+    return m ? m[1] : (String(t || "").trim() || null);
+  };
+
   const engajaram = ((ctsEngajou as any[]) || [])
-    .map((c) => ({
+    .map((c) => {
+      const ev = engajou48[c.id];
+      const meta = ev.meta || {};
+      return {
       id: c.id as string,
       name: (c.name as string) || "(sem nome)",
       company: (c.company as string) || null,
       score: (c.score as number) ?? 0,
-      tipo: engajou48[c.id].type as string,
-      quando: engajou48[c.id].created_at as string,
+      tipo: ev.type as string,
+      quando: ev.created_at as string,
+      assunto: (meta.assunto as string) || (ev.type === "replied" ? soOAssunto(meta.text) : null),
+      url: (meta.url as string) || null,
+      cadencia: (meta.cadencia as string) || cadenciaDeReserva[c.id] || null,
+      cadenciaExata: !!meta.cadencia,
+      passo: typeof meta.passo === "number" ? (meta.passo as number) : null,
       // quem já tem tarefa está encaminhado; quem não tem é decisão pendente. A lista
       // mostra os dois, mas nessa ordem.
       temTarefa: comTarefa.has(c.id),
-    }))
+      };
+    })
     .sort((a, b) => {
       if (a.temTarefa !== b.temTarefa) return a.temTarefa ? 1 : -1;
       return (b.quando || "").localeCompare(a.quando || "");
