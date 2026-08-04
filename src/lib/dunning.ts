@@ -75,8 +75,9 @@ async function deliver(admin: any, inv: any, step: any): Promise<boolean> {
   const { sendBrevoEmail } = await import("@/lib/brevo");
   const r = await sendBrevoEmail({ to, toName: (t as any)?.name || undefined, subject, text });
   if (r?.error) {
+    // mesma regra das outras réguas: a reserva NÃO volta. Se o e-mail saiu e só o
+    // retorno falhou, devolver a reserva reenviaria a cobrança todo dia, para sempre.
     await logEmail(admin, { tenant_id: inv.tenant_id, to, subject, kind: "cobranca", status: "error", error: r.error });
-    await admin.from("invoice_notice_sends").delete().eq("invoice_id", inv.id).eq("key", step.key);
     return false;
   }
   await logEmail(admin, { tenant_id: inv.tenant_id, to, subject, kind: "cobranca", status: "sent" });

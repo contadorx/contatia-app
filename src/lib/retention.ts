@@ -122,8 +122,10 @@ export async function runRetention(admin: any): Promise<{ warned: number; archiv
         const r = await sendBrevoEmail({ to, toName: t.name || undefined, subject, text });
         if (r?.error) {
           errors.push(`${t.id}/ret_last_chance: ${r.error}`);
+          // não devolve a reserva: se o envio aconteceu e só o retorno falhou (o caso
+          // do Brevo com corpo ilegível), devolver reabriria o ciclo de reenvio. Aviso
+          // de uma vez só é de uma vez só, inclusive quando falha.
           await logEmail(admin, { tenant_id: t.id, to, subject, kind: "retencao", status: "error", error: r.error });
-          await admin.from("business_message_sends").delete().eq("tenant_id", t.id).eq("key", "ret_last_chance");
           continue;
         }
         await logEmail(admin, { tenant_id: t.id, to, subject, kind: "retencao", status: "sent" });

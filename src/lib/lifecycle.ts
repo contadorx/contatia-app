@@ -92,12 +92,22 @@ export async function runLifecycle(admin: any): Promise<{ sent: number; errors: 
 
       const r = await sendBrevoEmail({ to, toName: t.name || undefined, subject, text });
       if (r?.error) {
-        errors.push(`${t.id}/${stage}: ${r.error}`);
+        // ============================================================
+        // FALHOU? NÃO TENTA DE NOVO. MANDOU (OU TENTOU), ACABOU.
+        //
+        // A versão de horas atrás devolvia a reserva aqui, para "tentar amanhã". Isso
+        // parecia cuidadoso e era o mesmo erro de sempre, só que mais lento: quando o
+        // envio na verdade ACONTECE e só o retorno é que falha — foi exatamente o caso
+        // do Brevo devolvendo corpo ilegível — devolver a reserva reabre o ciclo de
+        // reenvio. Uma vez por dia em vez de a cada 5 minutos, mas para sempre.
+        //
+        // Um aviso de ciclo de vida é de uma vez só por definição. Entre "pode não
+        // chegar" e "pode chegar dez vezes", o certo é o primeiro: a falha fica
+        // registrada na Central de E-mails e na resposta do cron, e reenviar é decisão
+        // de gente, não do relógio.
+        // ============================================================
+        errors.push(`${t.id}/${stage}: ${r.error} — NAO reenvio automaticamente; reenvie pelo painel se precisar`);
         await logEmail(admin, { tenant_id: t.id, to, subject, kind: "comunicacao", status: "error", error: r.error });
-        // devolve a reserva: o envio não aconteceu, então amanhã pode tentar de novo.
-        // Como a régua agora roda 1x por dia, isso é uma nova tentativa por dia — não
-        // uma a cada 5 minutos.
-        await admin.from("lifecycle_sends").delete().eq("tenant_id", t.id).eq("stage", stage);
         continue;
       }
 
