@@ -16,6 +16,8 @@ export type EstadoContato = {
   dominio: string;
   temEmail: boolean;
   emailDeBalcao: boolean;
+  // e-mail cujo domínio NÃO é o domínio (vivo) da empresa — herança de cadastro antigo
+  emailForaDoDominio: boolean;
   temTelefone: boolean;
   waStatus: string | null;
   temRede: boolean;
@@ -48,6 +50,12 @@ export const ROTULO_PASSO: Record<PassoId, string> = {
 // · o site só entra se ainda falta algo que ele saiba dar. Num contato completo,
 //   visitá-lo é gastar tempo para reescrever o que já está lá;
 // · ter `contato@` não é ter o e-mail do decisor — vale procurar mesmo assim;
+// · e-mail num domínio DIFERENTE do da empresa também não serve. Caso real: a ficha
+//   tinha `rogerio@asseconassessoria.com.br` numa empresa cujo domínio é
+//   `contabilribeiro.com.br` — outra pessoa, noutro domínio, e ainda por cima um
+//   domínio morto. Como "rogerio" não é caixa de balcão, o bloco concluía "já tem o
+//   e-mail do decisor" e parava. O controle individual achava o certo porque o
+//   operador digitava o domínio na mão;
 // · WhatsApp `invalid` é resposta, não ausência dela. Já sabemos que o número não tem.
 export function passosPendentes(e: EstadoContato): PassoId[] {
   const podeTerDominio = !!e.dominio || (e.temCnpj && !e.enriquecido);
@@ -56,7 +64,7 @@ export function passosPendentes(e: EstadoContato): PassoId[] {
   return [
     e.temCnpj && !e.enriquecido ? "cnpj" : null,
     podeTerDominio && faltaAlgoDoSite ? "site" : null,
-    (!e.temEmail || e.emailDeBalcao) && podeTerDominio ? "email" : null,
+    (!e.temEmail || e.emailDeBalcao || e.emailForaDoDominio) && podeTerDominio ? "email" : null,
     e.temTelefone && !waRespondido ? "whatsapp" : null,
   ].filter(Boolean) as PassoId[];
 }

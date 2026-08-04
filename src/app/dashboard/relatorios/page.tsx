@@ -100,6 +100,42 @@ export default async function Relatorios({
         : supabase.from("opportunities").select("value_mrr").eq("status", "won").gte("updated_at", monthStart)),
     ]);
 
+  // ============================================================
+  // ABERTURAS E CLIQUES NOS RELATÓRIOS
+  //
+  // Estes números existiam só dentro de Cadências, atrás de um "ver desempenho por
+  // passo →" que precisava ser clicado. Quem procura resultado abre Relatórios — e não
+  // achava nada. Cálculo pronto, escondido, é o mesmo que não ter.
+  //
+  // O denominador é "e-mails que levaram pixel/link", não "e-mails enviados": e-mail em
+  // texto puro não leva pixel e e-mail sem link não tem o que clicar. Contar esses
+  // derrubaria a taxa sem motivo.
+  //
+  // As duas consultas são tolerantes de propósito: se a 0108 não estiver aplicada, o
+  // relatório inteiro não pode cair por causa de um bloco. Mas o erro é GUARDADO e
+  // aparece na tela — zero por falta de dado e zero por tabela inexistente são coisas
+  // diferentes.
+  // ============================================================
+  const idsDoFiltro = vendedor
+    ? ((contacts as any[]) || []).filter((c) => c.assigned_to === vendedor).map((c) => c.id)
+    : null;
+
+  const [{ data: aberturas, error: errAb }, { data: cliquesRel, error: errCl }] = await Promise.all([
+    supabase.from("email_opens").select("id, opens, contact_id").gte("created_at", sinceISO),
+    supabase.from("link_clicks").select("id, clicks, contact_id").gte("created_at", sinceISO),
+  ]);
+  const noFiltro = (linhas: any[]) =>
+    idsDoFiltro ? linhas.filter((x) => x.contact_id && idsDoFiltro.includes(x.contact_id)) : linhas;
+  const abs = noFiltro(((aberturas as any[]) || []));
+  const cls = noFiltro(((cliquesRel as any[]) || []));
+  const rastreio = {
+    enviadosComPixel: abs.length,
+    abertos: abs.filter((a) => (a.opens || 0) > 0).length,
+    comLink: cls.length,
+    clicados: cls.filter((c) => (c.clicks || 0) > 0).length,
+    erro: (errAb?.message || errCl?.message || null) as string | null,
+  };
+
   const cts = (contacts as any[]) || [];
   const oppList = (opps as any[]) || [];
   const stageList = (stages as any[]) || [];
@@ -555,6 +591,54 @@ export default async function Relatorios({
           </div>
         </div>
       </div>
+          ) },
+          { id: "engajamento", label: "Aberturas e cliques", node: (
+      <Secao
+        id="engajamento"
+        titulo="Aberturas e cliques"
+        desc={`Últimos ${dias} dias. A base de cada taxa é o que foi RASTREADO — e-mail sem pixel ou sem link não entra na conta.`}
+      >
+        {rastreio.erro ? (
+          <div className="card border-danger/30 p-4">
+            <p className="text-sm font-semibold text-danger">O rastreio não respondeu.</p>
+            <p className="mt-1 text-xs text-subtle">
+              <span className="font-mono">{rastreio.erro}</span>
+            </p>
+            <p className="mt-1 text-xs text-subtle">
+              Se a mensagem fala de tabela inexistente, falta aplicar a migration 0108.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Tile
+                label="Taxa de abertura"
+                value={rastreio.enviadosComPixel ? `${pct(rastreio.abertos, rastreio.enviadosComPixel)}%` : "—"}
+                sub={`${rastreio.abertos} de ${rastreio.enviadosComPixel} e-mails rastreados`}
+              />
+              <Tile
+                label="Taxa de clique"
+                value={rastreio.comLink ? `${pct(rastreio.clicados, rastreio.comLink)}%` : "—"}
+                sub={`${rastreio.clicados} de ${rastreio.comLink} e-mails com link`}
+              />
+              <Tile label="E-mails rastreados" value={String(rastreio.enviadosComPixel)} sub="cadência e envio rápido" />
+              <Tile label="Cliques únicos" value={String(rastreio.clicados)} sub="pessoas que clicaram ao menos uma vez" />
+            </div>
+            <p className="mt-2 text-xs text-subtle">
+              Abertura é um <b>piso</b>, não uma medida exata: cliente que bloqueia imagem não
+              dispara o pixel, e o Gmail carrega por proxy. Clique exige ação, então é o sinal
+              mais confiável dos dois. Convite de reunião e de equipe não levam rastreio — são
+              transacionais.
+            </p>
+            {rastreio.enviadosComPixel === 0 && (
+              <p className="mt-1 text-xs text-warn">
+                Ainda não há e-mail rastreado neste período. O rastreio só vale para envios
+                feitos DEPOIS de a migration 0108 ter sido aplicada — não há histórico.
+              </p>
+            )}
+          </>
+        )}
+      </Secao>
           ) },
           { id: "carteira", label: "Carteira parada", node: (
       <Secao id="carteira" titulo="Carteira parada / a resgatar" desc={`Contatos sem toque há +${frio} dias e fora de cadência ativa — o dinheiro parado. Ordenado por score (os mais quentes primeiro).`}>

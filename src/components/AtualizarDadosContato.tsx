@@ -75,8 +75,12 @@ export default function AtualizarDadosContato({
   const canais: { rotulo: string; valor: string; ok: boolean }[] = [
     {
       rotulo: "E-mail",
-      valor: estado.temEmail ? (estado.emailDeBalcao ? "caixa compartilhada" : "do decisor") : "não tem",
-      ok: estado.temEmail && !estado.emailDeBalcao,
+      valor: !estado.temEmail
+        ? "não tem"
+        : estado.emailForaDoDominio ? "de outro domínio"
+        : estado.emailDeBalcao ? "caixa compartilhada"
+        : "do decisor",
+      ok: estado.temEmail && !estado.emailDeBalcao && !estado.emailForaDoDominio,
     },
     {
       rotulo: "WhatsApp",
@@ -127,7 +131,14 @@ export default function AtualizarDadosContato({
         {rodando && <span className="text-xs text-subtle">{EM_ANDAMENTO[rodando]}</span>}
       </div>
 
-      {estado.emailDeBalcao && !rodando && (
+      {estado.emailForaDoDominio && !rodando && (
+        <p className="mt-2 text-xs text-warn">
+          O e-mail atual é de um domínio diferente do da empresa — herança de cadastro
+          antigo. Vou procurar o do decisor no domínio certo; só troco se o servidor
+          confirmar.
+        </p>
+      )}
+      {estado.emailDeBalcao && !estado.emailForaDoDominio && !rodando && (
         <p className="mt-2 text-xs text-warn">
           O e-mail atual é de caixa compartilhada. Vou procurar o do decisor no mesmo
           domínio — e só troco se o servidor confirmar.

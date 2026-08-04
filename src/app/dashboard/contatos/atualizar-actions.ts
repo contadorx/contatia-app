@@ -66,14 +66,51 @@ async function lerEstado(supabase: any, id: string): Promise<EstadoContato | nul
     .maybeSingle();
   if (!data) return null;
   const c = data as any;
-  const dominio =
-    dominioDe(c.company_domain || c.accounts?.domain || c.accounts?.website || dominioCorporativo(c.email)) || "";
+
+  // ============================================================
+  // ESCOLHER O DOMÍNIO QUE ESTÁ VIVO, NÃO O PRIMEIRO DA FILA
+  //
+  // Havia três candidatos e a regra era "o primeiro que não for vazio". Na Ribeiro
+  // Contabilidade o primeiro era `asseconassessoria.com.br`, gravado pelo
+  // enriquecimento a partir do e-mail da Receita — e esse domínio não existe mais. O
+  // bloco então buscava tudo nele, não achava nada, e ainda o REGRAVAVA no contato
+  // (a busca de e-mail salva o domínio que recebe), desfazendo a correção manual a
+  // cada rodada.
+  //
+  // Agora os candidatos são testados no DNS e vence o primeiro que RESPONDE. Domínio
+  // morto deixa de ganhar de domínio vivo só por estar num campo mais à esquerda.
+  //
+  // Custa uma consulta de DNS por candidato, em paralelo, e só quando há mais de um.
+  // ============================================================
+  const candidatos = Array.from(
+    new Set(
+      [c.company_domain, c.accounts?.domain, c.accounts?.website, dominioCorporativo(c.email)]
+        .map((x: any) => dominioDe(x) || "")
+        .filter(Boolean)
+    )
+  ) as string[];
+
+  let dominio = candidatos[0] || "";
+  if (candidatos.length > 1) {
+    const vivos = await Promise.all(candidatos.map((d) => dominioResolve(d)));
+    const i = vivos.findIndex(Boolean);
+    // Se nenhum responde, fica com o primeiro mesmo: a mensagem do passo do site precisa
+    // de um nome para dizer "este aqui não existe".
+    if (i >= 0) dominio = candidatos[i];
+  }
   return {
     temCnpj: !!(c.cnpj || c.accounts?.cnpj),
     enriquecido: !!(c.custom as any)?.enriched_at,
     dominio,
     temEmail: !!c.email,
     emailDeBalcao: ehCaixaDeBalcao(c.email),
+    // Compara o domínio DO E-MAIL com o domínio escolhido (o que responde no DNS).
+    // Só acusa quando os dois existem e divergem: sem domínio da empresa não há com o
+    // que comparar, e acusar aí seria inventar problema.
+    emailForaDoDominio: (() => {
+      const doEmail = dominioDe(c.email) || "";
+      return !!(doEmail && dominio && doEmail !== dominio);
+    })(),
     temTelefone: !!c.phone,
     waStatus: c.wa_status || null,
     temRede: !!(c.instagram || c.linkedin),
@@ -152,7 +189,9 @@ export async function rodarPasso(contactId: string, passo: PassoId): Promise<Res
       // AGORA — não da foto da página. Se o passo do site acabou de gravar um
       // `contato@`, este passo enxerga isso e roda em modo revisão, procurando o
       // endereço do decisor. Antes ele via "não tinha e-mail" e se comportava errado.
-      if (antes.temEmail && !antes.emailDeBalcao) return fim("já tem o e-mail do decisor", "pulado");
+      if (antes.temEmail && !antes.emailDeBalcao && !antes.emailForaDoDominio) {
+        return fim("já tem o e-mail do decisor", "pulado");
+      }
       if (!antes.dominio) return fim("sem domínio para procurar", "pulado");
       const { buscarEmailAgora } = await import("./discovery-actions");
       const r: any = await buscarEmailAgora(contactId, antes.dominio, antes.temEmail);

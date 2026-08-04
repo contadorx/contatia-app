@@ -238,6 +238,7 @@ export default async function ContatoDetalhe({
                 dominio: dominioContato,
                 temEmail: !!c.email,
                 emailDeBalcao: ehCaixaDeBalcao(c.email),
+                emailForaDoDominio: !!(dominioCorporativo(c.email) && dominioContato && dominioCorporativo(c.email) !== dominioContato),
                 temTelefone: !!c.phone,
                 waStatus: (c as any).wa_status || null,
                 temRede: !!((c as any).instagram || (c as any).linkedin),
