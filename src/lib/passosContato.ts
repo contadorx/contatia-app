@@ -18,6 +18,11 @@ export type EstadoContato = {
   emailDeBalcao: boolean;
   // e-mail cujo domínio NÃO é o domínio (vivo) da empresa — herança de cadastro antigo
   emailForaDoDominio: boolean;
+  // e-mail no domínio certo, não é caixa de balcão, e mesmo assim NÃO é desta pessoa:
+  // o começo do endereço não tem nenhum pedaço do nome dela. Opcional para não quebrar
+  // quem monta o estado sem saber disto — ausente vale como "não sei", e "não sei" não
+  // manda procurar.
+  emailDeOutraPessoa?: boolean;
   temTelefone: boolean;
   waStatus: string | null;
   temRede: boolean;
@@ -73,6 +78,11 @@ export const ROTULO_PASSO: Record<PassoId, string> = {
 // · o site só entra se ainda falta algo que ele saiba dar. Num contato completo,
 //   visitá-lo é gastar tempo para reescrever o que já está lá;
 // · ter `contato@` não é ter o e-mail do decisor — vale procurar mesmo assim;
+// · e-mail que é de OUTRA PESSOA também não serve, mesmo no domínio certo e mesmo
+//   não sendo caixa de balcão. Era o furo que fazia o bloco automático parar antes de
+//   procurar: `rogerio@empresa.com.br` numa ficha do Felipe passava nos dois testes
+//   anteriores e o bloco concluía "já tem o e-mail do decisor". O botão individual não
+//   tinha essa suposição, procurava, e achava — a diferença que o operador via;
 // · e-mail num domínio DIFERENTE do da empresa também não serve. Caso real: a ficha
 //   tinha `rogerio@asseconassessoria.com.br` numa empresa cujo domínio é
 //   `contabilribeiro.com.br` — outra pessoa, noutro domínio, e ainda por cima um
@@ -87,7 +97,7 @@ export function passosPendentes(e: EstadoContato): PassoId[] {
   return [
     e.temCnpj && !e.enriquecido ? "cnpj" : null,
     podeTerDominio && faltaAlgoDoSite ? "site" : null,
-    (!e.temEmail || e.emailDeBalcao || e.emailForaDoDominio) && podeTerDominio ? "email" : null,
+    (!e.temEmail || e.emailDeBalcao || e.emailForaDoDominio || e.emailDeOutraPessoa) && podeTerDominio ? "email" : null,
     e.temTelefone && !waRespondido ? "whatsapp" : null,
   ].filter(Boolean) as PassoId[];
 }

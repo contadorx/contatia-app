@@ -34,7 +34,7 @@
 // ============================================================
 
 import { createClient } from "@/lib/supabase/server";
-import { dominioCorporativo, ehCaixaDeBalcao, dominioDe } from "@/lib/emailFinder";
+import { dominioCorporativo, ehCaixaDeBalcao, dominioDe, pareceEmailDaPessoa } from "@/lib/emailFinder";
 // Tipos e a regra dos passos vivem em @/lib/passosContato: arquivo "use server" só pode
 // exportar funções async, e `passosPendentes` é síncrona (e usada também pela tela).
 import type { PassoId, Tom, EstadoContato, ResultadoPasso } from "@/lib/passosContato";
@@ -114,6 +114,9 @@ async function lerEstado(supabase: any, id: string): Promise<EstadoContato | nul
       const doEmail = dominioDe(c.email) || "";
       return !!(doEmail && dominio && doEmail !== dominio);
     })(),
+    // No domínio certo, não é caixa de balcão — e ainda assim é de outra pessoa. Sem
+    // este teste o bloco parava aqui achando que já tinha o e-mail do decisor.
+    emailDeOutraPessoa: !!c.email && !ehCaixaDeBalcao(c.email) && !pareceEmailDaPessoa(c.email, c.name),
     temTelefone: !!c.phone,
     waStatus: c.wa_status || null,
     temRede: !!(c.instagram || c.linkedin),
@@ -233,15 +236,37 @@ export async function rodarPasso(contactId: string, passo: PassoId): Promise<Res
       // AGORA — não da foto da página. Se o passo do site acabou de gravar um
       // `contato@`, este passo enxerga isso e roda em modo revisão, procurando o
       // endereço do decisor. Antes ele via "não tinha e-mail" e se comportava errado.
-      if (antes.temEmail && !antes.emailDeBalcao && !antes.emailForaDoDominio) {
-        return fim("já tem o e-mail do decisor", "pulado");
+      // ============================================================
+      // "JÁ TEM O E-MAIL DO DECISOR" ERA UMA SUPOSIÇÃO
+      //
+      // Este atalho parava a busca com três condições, e só sabia checar duas: domínio
+      // certo e não ser caixa de balcão. A terceira — que o endereço é DA PESSOA da
+      // ficha — ele apenas supunha. Resultado: `rogerio@empresa.com.br` numa ficha do
+      // Felipe passava, o bloco parava, e o e-mail do Felipe nunca era procurado. O
+      // botão individual não tinha a suposição, procurava, e achava. Era essa a
+      // diferença entre os dois caminhos, e não a busca em si — ela é a mesma função.
+      //
+      // Agora a terceira condição é verificada de verdade (`emailDeOutraPessoa`), e a
+      // mensagem diz o que foi conferido, em vez de afirmar algo que ninguém apurou.
+      // ============================================================
+      if (antes.temEmail && !antes.emailDeBalcao && !antes.emailForaDoDominio && !antes.emailDeOutraPessoa) {
+        return fim(`${antes.email} confere com o nome e com o domínio — não procurei outro`, "pulado");
       }
       if (!antes.dominio) return fim("sem domínio para procurar", "pulado");
+
+      const motivo = !antes.temEmail
+        ? "sem e-mail"
+        : antes.emailForaDoDominio ? `${antes.email} é de outro domínio`
+        : antes.emailDeBalcao ? `${antes.email} é caixa compartilhada`
+        : `${antes.email} não parece ser desta pessoa`;
+
       const { buscarEmailAgora } = await import("./discovery-actions");
       const r: any = await buscarEmailAgora(contactId, antes.dominio, antes.temEmail);
       if (r?.error) return fim(r.error, "erro");
-      if (r?.ok && r?.email) return fim(`achei ${r.email}`, "ok");
-      return fim(r?.detalhe || r?.titulo || "nenhum endereço confirmado pelo servidor", "nada");
+      if (r?.ok && r?.email) return fim(`${motivo} → achei ${r.email}`, "ok");
+      // Sem confirmação, o endereço antigo FICA. Dizer por que se procurou evita a
+      // leitura de que o app estragou algo que estava certo.
+      return fim(`${motivo}; ${r?.detalhe || r?.titulo || "nenhum endereço confirmado pelo servidor"}`, "nada");
     }
 
     // whatsapp

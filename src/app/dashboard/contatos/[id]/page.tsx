@@ -21,7 +21,7 @@ import RedesContato from "@/components/RedesContato";
 import { EmailVerifyBadge, TestEmailBox } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
 import { produtosDoContato } from "@/lib/produtos";
-import { dominioCorporativo, ehCaixaDeBalcao } from "@/lib/emailFinder";
+import { dominioCorporativo, ehCaixaDeBalcao, pareceEmailDaPessoa } from "@/lib/emailFinder";
 import { dataHora } from "@/lib/datas";
 
 export const dynamic = "force-dynamic";
@@ -249,6 +249,7 @@ export default async function ContatoDetalhe({
                 temEmail: !!c.email,
                 emailDeBalcao: ehCaixaDeBalcao(c.email),
                 emailForaDoDominio: !!(dominioCorporativo(c.email) && dominioContato && dominioCorporativo(c.email) !== dominioContato),
+                emailDeOutraPessoa: !!c.email && !ehCaixaDeBalcao(c.email) && !pareceEmailDaPessoa(c.email, c.name),
                 temTelefone: !!c.phone,
                 waStatus: (c as any).wa_status || null,
                 temRede: !!((c as any).instagram || (c as any).linkedin),

@@ -226,3 +226,56 @@ export function ehCaixaDeBalcao(email?: string | null): boolean {
   const raiz = usuario.split(/[.\-_+0-9]/)[0];
   return CAIXA_DE_BALCAO.has(usuario.replace(/[.\-_]/g, "")) || CAIXA_DE_BALCAO.has(raiz);
 }
+
+// ============================================================
+// ESTE E-MAIL É DESTA PESSOA?
+//
+// O bloco "Atualizar dados" pulava a busca sempre que o contato já tinha um e-mail
+// que não fosse caixa de balcão e estivesse no domínio certo, dizendo "já tem o
+// e-mail do decisor". Duas dessas três condições ele sabia verificar; a terceira —
+// que o endereço é DA PESSOA — ele só supunha.
+//
+// Na prática, `rogerio@empresa.com.br` numa ficha chamada "Felipe" passava em todos
+// os testes: domínio certo, não é caixa compartilhada. O bloco parava ali e nunca
+// procurava o endereço do Felipe. Já o botão "Conferir e-mail" não tinha essa
+// suposição, procurava, e achava — que é exatamente a diferença que o operador
+// enxergava entre os dois caminhos.
+//
+// A regra aqui é a mesma que gera os candidatos em `candidatePatterns`, lida ao
+// contrário: se o começo do endereço não tem nenhum pedaço do nome da pessoa, não é
+// dela. Fica de fora quem tem número no meio (joao2), abreviação (jsilva) e
+// composição (joao.silva) — todos casam.
+//
+// Na dúvida a resposta é TRUE (é da pessoa). Errar para o lado de "é dela" custa uma
+// busca que não acontece; errar para o outro custa reescrever o e-mail certo de
+// alguém — e a busca só troca com confirmação do servidor, mas nem assim vale correr
+// o risco por adivinhação.
+// ============================================================
+export function pareceEmailDaPessoa(email?: string | null, nome?: string | null): boolean {
+  const usuario = String(email || "").trim().toLowerCase().split("@")[0];
+  if (!usuario) return true;
+  const strip = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const partes = strip(String(nome || ""))
+    .toLowerCase()
+    .split(/\s+/)
+    .map((p) => p.replace(/[^a-z]/g, ""))
+    // "de", "da", "dos" e afins não identificam ninguém
+    .filter((p) => p.length >= 3 && !["de", "da", "do", "das", "dos", "e"].includes(p));
+  if (!partes.length) return true;   // sem nome, não há como julgar
+
+  const u = strip(usuario).replace(/[^a-z]/g, "");
+  const pedacos = strip(usuario).split(/[^a-z]+/).filter(Boolean);
+
+  for (const p of partes) {
+    if (u.includes(p)) return true;              // joao.silva, joaosilva, joao2
+    if (pedacos.includes(p)) return true;
+    // inicial + sobrenome (jsilva) e nome + inicial (joaos)
+    if (u.length > 1 && (u === p[0] + partes[partes.length - 1] || u === partes[0] + p[0])) return true;
+  }
+  // abreviação genérica: primeira letra do primeiro nome + sobrenome inteiro
+  const primeiro = partes[0];
+  const ultimo = partes[partes.length - 1];
+  if (primeiro && ultimo && (u === primeiro[0] + ultimo || u === primeiro + ultimo[0])) return true;
+
+  return false;
+}
