@@ -63,7 +63,10 @@ function extractWhatsApp(html: string): string[] {
 
   // 1) link direto — o caso fácil, e o mais confiável
   for (const m of html.matchAll(
-    /(?:wa\.me\/|api\.whatsapp\.com\/send\?phone=|web\.whatsapp\.com\/send\?phone=|whatsapp:\/\/send\?phone=|whatsapp\.com\/send\?phone=)(\+?[\d]{8,15})/gi
+    // `send/?phone=` COM barra antes da interrogação é o que o Elementor gera, e era
+  // exatamente o que faltava: o padrão antigo exigia `send?phone=`. Uma barra.
+  // Também aceito `&amp;`/`&#038;` depois, que é como o WordPress escapa o &.
+  /(?:wa\.me\/|(?:api|web)\.whatsapp\.com\/send\/?\?phone=|whatsapp:\/\/send\/?\?phone=|whatsapp\.com\/send\/?\?phone=)(\+?[\d]{8,15})/gi
   )) guarda(m[1]);
 
   // 2) atributo de dado: data-phone, data-number, data-whatsapp, data-telefone…
@@ -167,6 +170,15 @@ export async function captureContactsBatch(
 //  - wa.me → WhatsApp confirmado (wa_status='valid'), preenche o telefone se estiver vazio
 //  - telefone comum → preenche se vazio e joga na fila de verificação (wa_status='queued')
 //  - nada → web_capture='notfound'
+// Fixo brasileiro: depois do DDI e do DDD, o local começa em 2, 3, 4 ou 5.
+// Celular começa em 9 (ou 6-8, nos antigos de 8 dígitos).
+export function ehFixoBr(numero?: string | null): boolean {
+  const d = String(numero || "").replace(/\D/g, "");
+  const semDdi = d.startsWith("55") && d.length >= 12 ? d.slice(2) : d;
+  if (semDdi.length !== 10) return false;          // 2 do DDD + 8 do local
+  return /^[2-5]/.test(semDdi.slice(2));
+}
+
 export function buildCaptureUpdate(
   r: CapResult,
   cur: { phone?: string | null; wa_status?: string | null },
@@ -174,7 +186,21 @@ export function buildCaptureUpdate(
 ): Record<string, any> {
   const upd: Record<string, any> = {};
   if (r.whatsapp) {
-    if (!cur.phone) upd.phone = r.whatsapp;
+    // ============================================================
+    // WHATSAPP PUBLICADO GANHA DE FIXO GUARDADO
+    //
+    // A regra era "só preenche se estiver vazio". No caso da Ribeiro o contato já
+    // tinha o fixo `11 2451-1469` (que não tem WhatsApp, e nem poderia), e o site
+    // publicava `11 91186-3161` num botão de WhatsApp. O `wa_number` recebia o
+    // celular certo, mas o `phone` continuava o fixo — e é o `phone` que a tela
+    // mostra e a cadência usa. Você via "não veio o WhatsApp" com o número certo
+    // gravado ao lado.
+    //
+    // Regra nova: número que o dono publicou como WhatsApp substitui um FIXO. Não
+    // substitui outro celular — aí são dois números plausíveis e trocar seria
+    // arbitrário.
+    // ============================================================
+    if (!cur.phone || ehFixoBr(cur.phone)) upd.phone = r.whatsapp;
     upd.wa_number = r.whatsapp;
     upd.wa_status = "valid";
     upd.wa_checked_at = nowIso;
