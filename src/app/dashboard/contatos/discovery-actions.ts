@@ -145,8 +145,25 @@ export async function buscarEmailAgora(contactId: string, siteOuDominio: string,
     };
   }
 
-  // guarda o domínio (no contato e na empresa) mesmo que a busca falhe
-  await supabase.from("contacts").update({ company_domain: dominio } as any).eq("id", contactId);
+  // ============================================================
+  // SÓ GUARDA O DOMÍNIO SE ELE EXISTIR
+  //
+  // Esta linha gravava `company_domain` com QUALQUER coisa que chegasse — inclusive um
+  // domínio morto vindo do bloco automático. Aí o morto virava candidato outra vez na
+  // rodada seguinte, e se reinstalava sozinho depois de apagado. Era o motor do
+  // vaivém: conserta, roda, volta.
+  //
+  // Quando o operador digita na mão, o domínio existe e é gravado como sempre.
+  // ============================================================
+  let dominioVivo = true;
+  try {
+    const r = (await import("node:dns")).promises;
+    const t = await Promise.allSettled([r.resolve4(dominio), r.resolve6(dominio), r.resolveMx(dominio)]);
+    dominioVivo = t.some((x) => x.status === "fulfilled" && (x.value as any[])?.length > 0);
+  } catch { dominioVivo = true; }   // na dúvida, comporta-se como antes
+  if (dominioVivo) {
+    await supabase.from("contacts").update({ company_domain: dominio } as any).eq("id", contactId);
+  }
 
   const accId = (contact as any).account_id;
   if (accId) {

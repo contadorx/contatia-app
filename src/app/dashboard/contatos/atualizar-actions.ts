@@ -90,6 +90,9 @@ async function lerEstado(supabase: any, id: string): Promise<EstadoContato | nul
     )
   ) as string[];
 
+  // Guardados para a mensagem: quando o escolhido não existe, o operador precisa ver
+  // QUAIS opções o app tinha. Sem isso viramos adivinhação — que foi o que aconteceu.
+  const candidatosBrutos = candidatos.join(", ");
   let dominio = candidatos[0] || "";
   if (candidatos.length > 1) {
     const vivos = await Promise.all(candidatos.map((d) => dominioResolve(d)));
@@ -114,6 +117,7 @@ async function lerEstado(supabase: any, id: string): Promise<EstadoContato | nul
     temTelefone: !!c.phone,
     waStatus: c.wa_status || null,
     temRede: !!(c.instagram || c.linkedin),
+    candidatos: candidatosBrutos,
   };
 }
 
@@ -160,6 +164,20 @@ export async function rodarPasso(contactId: string, passo: PassoId): Promise<Res
       if (web?.whats) achou.push("WhatsApp confirmado pelo wa.me");
       if (redes?.comIg) achou.push("Instagram");
       if (redes?.comLi) achou.push("LinkedIn");
+      // ============================================================
+      // O BLOCO USA O MESMO CAMINHO DO BOTÃO QUE FUNCIONA
+      //
+      // O botão "Buscar WhatsApp no site" trazia o número e o bloco não. Eram dois
+      // códigos fazendo a mesma coisa por caminhos diferentes — e só um estava certo.
+      // Em vez de consertar o segundo, o bloco passa a CHAMAR o primeiro quando a
+      // captura em lote não trouxe WhatsApp. Um caminho, um comportamento.
+      // ============================================================
+      if (!web?.whats) {
+        const { atualizarWhatsAppDoSite } = await import("./wa-actions");
+        const w: any = await atualizarWhatsAppDoSite(contactId);
+        if (w?.ok && w?.numero) achou.push(`WhatsApp ${w.numero}`);
+      }
+
       if (achou.length) return fim(achou.join(" · "), "ok");
 
       // ============================================================
@@ -175,13 +193,27 @@ export async function rodarPasso(contactId: string, passo: PassoId): Promise<Res
       // milissegundos e separa as duas coisas.
       // ============================================================
       const existe = await dominioResolve(antes.dominio);
-      return existe
-        ? fim(`${antes.dominio} responde, mas não publica e-mail nem redes`, "nada")
-        : fim(
-            `${antes.dominio} NÃO EXISTE (o DNS não responde). Corrija o domínio em Editar dados — ` +
-            `enquanto ele estiver errado, nenhuma busca de site, rede ou e-mail vai achar nada.`,
-            "erro"
-          );
+      if (existe) return fim(`${antes.dominio} responde, mas não publica e-mail nem redes`, "nada");
+
+      // ============================================================
+      // DOMÍNIO MORTO NÃO PODE FICAR GUARDADO
+      //
+      // Enquanto `company_domain` apontar para um domínio que não resolve, ele volta a
+      // ser candidato em toda rodada e disputa com o bom. A busca de e-mail ainda
+      // REGRAVA o domínio que recebe, então o morto se reinstala sozinho.
+      //
+      // Se não existe, apagamos do contato. Não é perda de informação: é remoção de
+      // informação errada — e o candidato vivo (o domínio do e-mail, por exemplo)
+      // passa a vencer na próxima leitura.
+      // ============================================================
+      await supabase.from("contacts").update({ company_domain: null } as any).eq("id", contactId);
+
+      return fim(
+        `${antes.dominio} NÃO EXISTE (o DNS não responde) — apaguei esse domínio do contato para ele parar ` +
+        `de atrapalhar. Candidatos que o app tinha: ${antes.candidatos || "nenhum"}. ` +
+        `Se o site certo não estiver nessa lista, preencha em Editar dados.`,
+        "erro"
+      );
     }
 
     if (passo === "email") {

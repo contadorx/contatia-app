@@ -170,8 +170,28 @@ export async function GET(req: Request) {
   // ---- Automações por TEMPO (sem atividade / fim de cadência / oportunidade
   // perdida ou ganha → recuperação, cross-sell etc). Todas respeitam o escopo por
   // produto. Lógica centralizada em runTimeAutomations. ----
+  // ============================================================
+  // O QUE PODE RODAR A CADA MINUTO E O QUE NÃO PODE
+  //
+  // Esta rota faz três coisas muito diferentes:
+  //   · LER as caixas (IMAP) — barato e é o que precisa ser rápido: resposta parada
+  //     um dia esfria o lead;
+  //   · AUTOMAÇÕES POR TEMPO — varrem a base inteira procurando "sem atividade há N
+  //     dias". Rodar isso 1.440 vezes por dia é 1.440 varreduras para produzir o mesmo
+  //     resultado, já que a condição muda uma vez por dia;
+  //   · DESCOBERTA DE E-MAIL — conversa SMTP com servidores de terceiros. Repetir de
+  //     minuto em minuto é a receita para o worker ser bloqueado.
+  //
+  // Com o cron a cada 5 minutos, as duas últimas ganham uma trava de uma vez por
+  // hora. `?forcar=1` ignora a trava, para rodar tudo na mão.
+  // ============================================================
+  const agoraMin = new Date().getUTCMinutes();
+  const forcar = new URL(req.url).searchParams.get("forcar") === "1";
+  const faseHoraria = forcar || agoraMin < 5;   // 1x por hora (o cron cai em :00, :05, :10…)
+
   let autoRan = 0;
   try {
+    if (!faseHoraria) throw new Error("__pular__");
     const { runTimeAutomations } = await import("@/lib/automations");
     const res = await runTimeAutomations(admin);
     autoRan = res.ran;
@@ -300,10 +320,11 @@ export async function GET(req: Request) {
   // descoberta de e-mail dos leads sem endereço (chama o worker no VPS)
   let discovery = { found: 0, notFound: 0, errors: 0 };
   try {
+    if (!faseHoraria) throw new Error("__pular__");
     const { processEmailDiscovery } = await import("@/lib/emailDiscoverySync");
     discovery = await processEmailDiscovery(admin);
   } catch (e: any) {
-    errors.push(`discovery: ${e?.message || "erro"}`);
+    if (e?.message !== "__pular__") errors.push(`discovery: ${e?.message || "erro"}`);
   }
 
   return NextResponse.json({ ok: true, accounts: (accounts as any[])?.length || 0, marked, suggestions, bounced, autoRan, purged, reminders, seatsSynced, lifecycle, dunning, retention, crm, discovery, errors });

@@ -90,7 +90,10 @@ function extractPhones(html: string): string[] {
     if (n) out.add(n);
   }
   // padrão BR no texto: (11) 99999-9999 / +55 11 99999 9999 / 11 3333-4444
-  for (const m of html.matchAll(/(?:\+?55[\s.-]?)?\(?\d{2}\)?[\s.-]?9?\d{4}[\s.-]?\d{4}/g)) {
+  // `(11) 9 1186 3161` — com ESPAÇO entre o 9 e o resto — é como muito site escreve, e
+  // o padrão antigo não permitia separador aí: exigia `9` colado nos 4 dígitos. Agora o
+  // nono dígito pode vir separado.
+  for (const m of html.matchAll(/(?:\+?55[\s.-]?)?\(?\d{2}\)?[\s.-]?(?:9[\s.-]?)?\d{4}[\s.-]?\d{4}/g)) {
     const n = normBr(m[0]);
     if (n) out.add(n);
   }

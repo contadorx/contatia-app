@@ -21,6 +21,9 @@ export type EstadoContato = {
   temTelefone: boolean;
   waStatus: string | null;
   temRede: boolean;
+  // Todos os domínios que o app considerou, em ordem. Só para a mensagem de erro —
+  // nenhuma decisão usa isto.
+  candidatos?: string;
 };
 
 export type ResultadoPasso = {

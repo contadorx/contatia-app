@@ -17,6 +17,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { rodarPasso } from "@/app/dashboard/contatos/atualizar-actions";
+import { atualizarWhatsAppDoSite } from "@/app/dashboard/contatos/wa-actions";
+import { buscarEmailAgora } from "@/app/dashboard/contatos/discovery-actions";
 import {
   passosPendentes,
   ORDEM_PASSOS,
@@ -47,6 +49,52 @@ export default function AtualizarDadosContato({
   const [linhas, setLinhas] = useState<ResultadoPasso[]>([]);
   const [pronto, setPronto] = useState(false);
 
+  // Botão próprio para o WhatsApp: "verificar" pergunta sobre o número que já está na
+  // ficha; este vai atrás de um número DIFERENTE, no site. Estava enterrado em dois
+  // painéis recolhidos e ninguém achava — subiu para cá.
+  const [buscandoWa, setBuscandoWa] = useState(false);
+  const [recadoWa, setRecadoWa] = useState<{ titulo: string; detalhe: string; ok?: boolean } | null>(null);
+
+  async function buscarWaNoSite() {
+    setBuscandoWa(true);
+    setRecadoWa(null);
+    try {
+      const r: any = await atualizarWhatsAppDoSite(contactId);
+      setRecadoWa({ titulo: r?.titulo || "Sem resposta", detalhe: r?.detalhe || "", ok: r?.ok });
+      if (r?.ok) router.refresh();
+    } catch (e: any) {
+      setRecadoWa({ titulo: "Falhou", detalhe: e?.message || "erro de rede" });
+    } finally {
+      setBuscandoWa(false);
+    }
+  }
+
+  // Conferir o e-mail contra o servidor do domínio. Existia só dentro de dois painéis
+  // recolhidos e o operador não achava — mesma história do botão de WhatsApp.
+  // Quando o servidor confirma, a descoberta já grava o selo "SMTP validado".
+  const [conferindoEmail, setConferindoEmail] = useState(false);
+  const [recadoEmail, setRecadoEmail] = useState<{ titulo: string; detalhe: string; ok?: boolean } | null>(null);
+
+  async function conferirEmail() {
+    setConferindoEmail(true);
+    setRecadoEmail(null);
+    try {
+      // forcar = true quando já existe endereço: modo revisão, só troca se o servidor
+      // confirmar um diferente.
+      const r: any = await buscarEmailAgora(contactId, estado.dominio || "", estado.temEmail);
+      setRecadoEmail({
+        titulo: r?.titulo || (r?.email ? `Confirmado: ${r.email}` : "Sem resposta"),
+        detalhe: r?.detalhe || "",
+        ok: !!r?.ok,
+      });
+      if (r?.ok) router.refresh();
+    } catch (e: any) {
+      setRecadoEmail({ titulo: "Falhou", detalhe: e?.message || "erro de rede" });
+    } finally {
+      setConferindoEmail(false);
+    }
+  }
+
   const pendentes = passosPendentes(estado);
   const nadaAFazer = pendentes.length === 0;
 
@@ -55,7 +103,25 @@ export default function AtualizarDadosContato({
     setPronto(false);
     for (const passo of ORDEM_PASSOS) {
       setRodando(passo);
-      const r = await rodarPasso(contactId, passo);
+      // ============================================================
+      // UM PASSO PODE NÃO DEVOLVER NADA
+      //
+      // Server action que falha no servidor pode chegar aqui como `undefined`. O
+      // código antigo empurrava isso direto para a lista, e a renderização quebrava a
+      // ficha inteira em `l.tom` — o contato ficava inacessível por causa de UM passo.
+      //
+      // Agora a falha vira uma linha normal de erro, os passos seguintes continuam, e
+      // o try/catch garante que nem exceção derruba o laço.
+      // ============================================================
+      let r: ResultadoPasso;
+      try {
+        r = (await rodarPasso(contactId, passo)) as ResultadoPasso;
+      } catch (e: any) {
+        r = { passo, texto: e?.message || "falhou no servidor", tom: "erro" };
+      }
+      if (!r || typeof r !== "object") {
+        r = { passo, texto: "o servidor não respondeu neste passo", tom: "erro" };
+      }
       setLinhas((prev) => [...prev, r]);
       // O estado devolvido é o do banco DEPOIS do passo — é ele que decide o próximo.
       if (r.estado) setEstado(r.estado);
@@ -129,7 +195,38 @@ export default function AtualizarDadosContato({
           <span className="text-xs text-subtle">{pendentes.map((p) => ROTULO[p]).join(" → ")}</span>
         )}
         {rodando && <span className="text-xs text-subtle">{EM_ANDAMENTO[rodando]}</span>}
+        <button
+          type="button"
+          className="ml-auto rounded-lg border border-line bg-white px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-40"
+          disabled={buscandoWa || !!rodando}
+          onClick={buscarWaNoSite}
+          title="Lê o site da empresa atrás de um botão de WhatsApp. Pode trazer um número diferente do cadastrado — é o caso quando o telefone salvo é fixo."
+        >
+          {buscandoWa ? "Lendo o site…" : "↻ Buscar WhatsApp no site"}
+        </button>
+        <button
+          type="button"
+          className="rounded-lg border border-line bg-white px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-40"
+          disabled={conferindoEmail || !!rodando}
+          onClick={conferirEmail}
+          title="Testa os padrões do decisor contra o servidor do domínio. Só troca se o servidor confirmar um endereço diferente — e o confirmado já vem com o selo SMTP validado."
+        >
+          {conferindoEmail ? "Conferindo…" : "✉ Conferir e-mail"}
+        </button>
       </div>
+
+      {recadoEmail && (
+        <div className={`mt-2 rounded-lg border p-2 text-xs ${recadoEmail.ok ? "border-signal/30 bg-signal/5" : "border-line bg-white"}`}>
+          <p className="font-semibold">{recadoEmail.titulo}</p>
+          {recadoEmail.detalhe && <p className="mt-0.5 text-subtle">{recadoEmail.detalhe}</p>}
+        </div>
+      )}
+      {recadoWa && (
+        <div className={`mt-2 rounded-lg border p-2 text-xs ${recadoWa.ok ? "border-signal/30 bg-signal/5" : "border-line bg-white"}`}>
+          <p className="font-semibold">{recadoWa.titulo}</p>
+          {recadoWa.detalhe && <p className="mt-0.5 text-subtle">{recadoWa.detalhe}</p>}
+        </div>
+      )}
 
       {estado.emailForaDoDominio && !rodando && (
         <p className="mt-2 text-xs text-warn">
@@ -147,10 +244,10 @@ export default function AtualizarDadosContato({
 
       {linhas.length > 0 && (
         <ul className="mt-3 space-y-1">
-          {linhas.map((l, i) => (
+          {linhas.filter(Boolean).map((l, i) => (
             <li key={i} className={`text-xs ${cor(l.tom)}`}>
               <span className="inline-block w-4">{icone(l.tom)}</span>
-              <b className="font-medium">{ROTULO[l.passo]}</b>: {l.texto}
+              <b className="font-medium">{ROTULO[l.passo] || l.passo}</b>: {l.texto}
             </li>
           ))}
         </ul>
