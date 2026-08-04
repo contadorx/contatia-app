@@ -3,6 +3,7 @@ import { getUsage } from "@/lib/plan";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import SignOut from "@/components/SignOut";
+import { VERSAO_APP, VERSAO_NOTAS } from "@/lib/versao";
 import DashboardNav from "@/components/DashboardNav";
 import { MobileNav } from "@/components/MobileNav";
 import { stopImpersonation } from "@/app/dashboard/superadmin/impersonate-actions";
@@ -175,6 +176,10 @@ export default async function DashboardLayout({
             <p className="truncate text-sm font-medium">{profile?.full_name || user?.email}</p>
             <p className="mb-2 text-xs text-subtle">{profile?.role === "owner" ? "Dono" : "Parceiro"}</p>
             <SignOut />
+            {/* Carimbo da versão: responde em 1 segundo "o build que estou vendo já tem
+                o conserto?". Hoje isso custou duas rodadas de diagnóstico em cima de um
+                bug que já estava corrigido, só que noutro build. */}
+            <p className="mt-3 text-[10px] text-subtle/70" title={VERSAO_NOTAS}>v{VERSAO_APP}</p>
           </div>
         </aside>
 

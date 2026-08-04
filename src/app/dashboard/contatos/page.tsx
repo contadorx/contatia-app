@@ -20,6 +20,7 @@ export default async function Contatos({
     frio?: string;
     produto?: string | string[];
     cadencia?: string | string[];
+    responsavel?: string | string[];
     semcontato?: string;
     view?: string;
   };
@@ -30,6 +31,7 @@ export default async function Contatos({
   const produtoFilter = comoLista(searchParams.produto);
   const cadenciaFilter = comoLista(searchParams.cadencia);
   const frio = searchParams.frio || ""; // "15" | "30" | "nunca"
+  const responsavelFilter = comoLista(searchParams.responsavel);
   // visão rápida: completar | prontos | resgatar | quentes (vazio = todos). semcontato=1 vira "completar".
   const view = searchParams.view || (searchParams.semcontato === "1" ? "completar" : "");
   const q = (searchParams.q || "").trim();
@@ -44,7 +46,7 @@ export default async function Contatos({
   // O filtro é montado por consultaContatos (@/lib/contatosFiltro) — o MESMO código que
   // a exclusão em massa usa. Antes essa lógica vivia só aqui; se a ação em lote a
   // recriasse "parecida", uma diferença sutil apagaria contatos fora do filtro.
-  const filtro = { q, view, tag: tagFilter, produto: produtoFilter, cadencia: cadenciaFilter, frio };
+  const filtro = { q, view, tag: tagFilter, produto: produtoFilter, cadencia: cadenciaFilter, frio, responsavel: responsavelFilter };
   // `.query` (e não a consulta já executada): o builder do postgrest executa sozinho
   // se for devolvido de uma função async, e aí ele sairia do Promise.all abaixo —
   // uma ida a mais ao banco, em série, logo na consulta mais pesada da página.
@@ -120,9 +122,11 @@ export default async function Contatos({
         produto={produtoFilter}
         cadencia={cadenciaFilter}
         frio={frio}
+        responsavel={responsavelFilter}
         tags={tagList}
         produtos={produtoList}
         cadencias={seqs}
+        membros={memberList.map((m) => ({ id: m.id, name: m.full_name || m.email }))}
       />
 
       {erroContatos && (

@@ -32,3 +32,13 @@ export function paraUrl(vals: string[]): string {
 export function contarFacetas(...facetas: (string | string[] | null | undefined)[]): number {
   return facetas.filter((f) => (Array.isArray(f) ? f.length > 0 : !!f)).length;
 }
+
+// ============================================================
+// "SEM DONO" É UMA ESCOLHA, NÃO A AUSÊNCIA DELA
+//
+// Mora aqui, e não em contatosFiltro, porque este módulo é neutro: a barra de filtros
+// é componente de CLIENTE e contatosFiltro é `server-only`. Importar de lá quebra o
+// build inteiro — e quebrou, o que foi útil: obrigou a constante a ficar no lugar
+// certo em vez de virar duas cópias que um dia divergem.
+// ============================================================
+export const SEM_DONO = "__sem__";

@@ -61,7 +61,39 @@ function fmt(iso: string) {
   return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
-export default async function ContatoDetalhe({ params }: { params: { id: string } }) {
+// ============================================================
+// VOLTAR SEM PERDER O FILTRO
+//
+// A lista é uma fila de trabalho: você filtra "sem e-mail, do fulano, tag X", abre o
+// primeiro, trata, volta — e caía numa lista sem filtro nenhum, tendo que remontar tudo
+// para pegar o segundo. Isso torna impossível trabalhar uma sequência, que é o uso
+// normal da tela.
+//
+// A lista agora manda a própria query string no parâmetro `de`, e o "← Contatos" a
+// devolve. Só isso. Sem histórico do navegador, sem estado global: o link carrega de
+// onde veio, então funciona igual se você abrir em nova aba ou mandar o link para
+// alguém.
+// ============================================================
+export default async function ContatoDetalhe({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: { de?: string };
+}) {
+  const voltarPara = (() => {
+    const de = typeof searchParams?.de === "string" ? searchParams.de : "";
+    if (!de) return "/dashboard/contatos";
+    // decodifica e remonta com URLSearchParams: nada do que veio na URL entra cru num
+    // href, e um `de` malformado vira simplesmente a lista sem filtro.
+    try {
+      const qs = new URLSearchParams(decodeURIComponent(de)).toString();
+      return qs ? `/dashboard/contatos?${qs}` : "/dashboard/contatos";
+    } catch {
+      return "/dashboard/contatos";
+    }
+  })();
+
   const supabase = createClient();
 
   const { data: contact } = await supabase
@@ -73,7 +105,7 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
     .maybeSingle();
   if (!contact) notFound();
 
-  const [{ data: sequences }, { data: enrollments }, { data: tasks }, { data: events }, { data: meetings }, { data: opps }] =
+  const [{ data: sequences }, { data: enrollments }, { data: tasks }, { data: events }, { data: meetings }, { data: opps }, { data: irmaos }] =
     await Promise.all([
       supabase.from("sequences").select("id, name").eq("is_active", true),
       supabase.from("enrollments").select("id, status, sequences(name)").eq("contact_id", params.id).order("created_at", { ascending: false }),
@@ -81,6 +113,19 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
       supabase.from("events").select("id, type, created_at, meta").eq("contact_id", params.id).order("created_at", { ascending: false }).limit(50),
       supabase.from("meetings").select("id, title, datetime, status").eq("contact_id", params.id).order("datetime", { ascending: false }),
       supabase.from("opportunities").select("id, title, value_mrr, status").eq("primary_contact_id", params.id).order("created_at", { ascending: false }),
+      // Outros contatos da MESMA empresa. Entra aqui no Promise.all porque `contact` já
+      // foi buscado acima — não custa uma ida a mais em série.
+      // A guarda do account_id importa: `.eq("account_id", null)` no PostgREST não
+      // devolve "os sem empresa", devolve nada útil. Sem empresa, nem consulta.
+      (contact as any).account_id
+        ? supabase
+            .from("contacts")
+            .select("id, name, role_title, email, phone, score, wa_status")
+            .eq("account_id", (contact as any).account_id)
+            .neq("id", params.id)
+            .order("score", { ascending: false })
+            .limit(25)
+        : Promise.resolve({ data: [] as any[] }),
     ]);
 
   const produtos = await produtosDoContato(supabase, params.id);
@@ -121,12 +166,13 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
   const evs = (events as any[]) || [];
   const mtgs = (meetings as any[]) || [];
   const oppList = (opps as any[]) || [];
+  const daEmpresa = ((irmaos as any[]) || []);
   const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
   return (
     <div className="max-w-4xl">
-      <Link href="/dashboard/contatos" className="text-sm text-subtle hover:text-brand">
-        ← Contatos
+      <Link href={voltarPara} className="text-sm text-subtle hover:text-brand">
+        ← Contatos{voltarPara.includes("?") ? " (com seus filtros)" : ""}
       </Link>
 
       {/* Cabeçalho */}
@@ -275,6 +321,54 @@ export default async function ContatoDetalhe({ params }: { params: { id: string 
         linkedin={linkedin || ""}
         rapport={rapport}
       />
+
+      {/* ============================================================
+          OUTROS CONTATOS DA MESMA EMPRESA
+          Numa empresa com três sócios, tratar um e ter que voltar à lista para achar os
+          outros é atrito puro — e é o caminho normal depois de enriquecer pelo CNPJ, que
+          cria justamente um contato por sócio. O bloco só aparece quando há empresa
+          vinculada e alguém além do contato aberto.
+          ============================================================ */}
+      {daEmpresa.length > 0 && (
+        <div className="mt-6 card p-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-display text-sm font-semibold">
+              Outros contatos {acc.name ? `da ${acc.name}` : "desta empresa"}
+            </h2>
+            <span className="text-xs text-subtle">{daEmpresa.length}</span>
+            {c.account_id && (
+              <Link href={`/dashboard/contas/${c.account_id}`} className="ml-auto text-xs text-brand-dark hover:underline">
+                ver a empresa →
+              </Link>
+            )}
+          </div>
+          <ul className="mt-3 divide-y divide-line">
+            {daEmpresa.map((o: any) => {
+              const canais = [
+                o.email ? "e-mail" : null,
+                o.wa_status === "valid" ? "WhatsApp" : o.phone ? "telefone" : null,
+              ].filter(Boolean);
+              return (
+                <li key={o.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
+                  <Link
+                    href={`/dashboard/contatos/${o.id}${searchParams?.de ? `?de=${encodeURIComponent(searchParams.de)}` : ""}`}
+                    className="font-medium text-brand-dark hover:underline"
+                  >
+                    {o.name}
+                  </Link>
+                  {o.role_title && <span className="text-xs text-subtle">{o.role_title}</span>}
+                  <span className="ml-auto text-xs text-subtle">
+                    {canais.length ? canais.join(" · ") : "sem canal — precisa completar"}
+                  </span>
+                  {(o.score ?? 0) >= HOT_THRESHOLD && (
+                    <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[11px] font-bold text-warn">QUENTE</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         {/* Próximos toques + reuniões */}

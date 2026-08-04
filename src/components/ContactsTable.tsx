@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition, useMemo, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import AssignSelect from "@/components/AssignSelect";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
@@ -102,6 +102,22 @@ export default function ContactsTable({
   filtro?: { q?: string; view?: string; tag?: string[]; produto?: string[]; cadencia?: string[]; frio?: string };
 }) {
   const router = useRouter();
+  // ============================================================
+  // LEVAR O FILTRO JUNTO PARA A FICHA
+  //
+  // A lista é uma fila de trabalho: filtra, abre o primeiro, trata, volta para pegar o
+  // segundo. Só que o "← Contatos" da ficha ia para a lista PELADA, e você tinha que
+  // remontar o filtro a cada contato — o que inviabiliza trabalhar uma sequência.
+  //
+  // Cada link para a ficha leva a query string atual em `de`. A ficha devolve por ela.
+  // Fica na URL de propósito: abrir em nova aba, recarregar ou mandar o link para
+  // alguém continua funcionando, o que um estado de navegação em memória não daria.
+  // ============================================================
+  const searchParams = useSearchParams();
+  const qsAtual = searchParams?.toString() || "";
+  const hrefFicha = (id: string, hash = "") =>
+    `/dashboard/contatos/${id}${qsAtual ? `?de=${encodeURIComponent(qsAtual)}` : ""}${hash}`;
+
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [seq, setSeq] = useState("");
   const [assignTo, setAssignTo] = useState("");
@@ -667,7 +683,7 @@ export default function ContactsTable({
                     <input type="checkbox" checked={checked} onChange={() => toggle(c.id)} aria-label={`Selecionar ${c.name}`} />
                   </td>
                   <td className="max-w-[260px] px-4 py-3 font-medium">
-                    <Link href={`/dashboard/contatos/${c.id}`} className="text-brand-dark hover:underline" title={c.name}>
+                    <Link href={hrefFicha(c.id)} className="text-brand-dark hover:underline" title={c.name}>
                       {c.name}
                     </Link>
                     {(() => {
@@ -709,7 +725,7 @@ export default function ContactsTable({
                       if (!temAlgo) {
                         return (
                           <Link
-                            href={`/dashboard/contatos/${c.id}`}
+                            href={hrefFicha(c.id)}
                             className="rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-semibold text-danger hover:bg-danger/20"
                             title="Sem e-mail nem telefone — clique para completar o cadastro. Sem um deles, o contato não entra em cadência."
                           >
@@ -721,7 +737,7 @@ export default function ContactsTable({
                         <div className="flex flex-wrap items-center gap-1">
                           {c.email && (
                             <Link
-                              href={`/dashboard/contatos/${c.id}#enviar`}
+                              href={hrefFicha(c.id, "#enviar")}
                               title={`Escrever para ${c.email}`}
                               className="inline-flex items-center gap-1 rounded-full border border-brand/30 bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand-dark hover:border-brand"
                             >
@@ -730,7 +746,7 @@ export default function ContactsTable({
                           )}
                           {c.phone && c.wa_status === "valid" && (
                             <Link
-                              href={`/dashboard/contatos/${c.id}#enviar`}
+                              href={hrefFicha(c.id, "#enviar")}
                               title={`Conversar no WhatsApp — ${c.phone}`}
                               className="inline-flex items-center gap-1 rounded-full border border-signal/30 bg-signal/10 px-2 py-0.5 text-[11px] font-semibold text-signal hover:border-signal"
                             >
@@ -794,7 +810,7 @@ export default function ContactsTable({
                           )}
                           {rev && (
                             <Link
-                              href={`/dashboard/contatos/${c.id}`}
+                              href={hrefFicha(c.id)}
                               title={rev.title}
                               className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700 hover:bg-amber-200"
                             >

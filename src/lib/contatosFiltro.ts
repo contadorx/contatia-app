@@ -14,9 +14,10 @@ import "server-only";
 
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import { contatoIdsPorProduto } from "@/lib/produtos";
-import { comoLista } from "@/lib/filtros";
+import { comoLista, SEM_DONO } from "@/lib/filtros";
 
 const NENHUM = "00000000-0000-0000-0000-000000000000";
+export { SEM_DONO };
 const VIEWS_VALIDAS = ["completar", "quentes", "com_wa", "prontos", "resgatar"];
 const FRIOS_VALIDOS = ["nunca", "15", "30"];
 // Páginas de 1.000 ao varrer as tabelas de vínculo. O PostgREST corta em 1.000 por
@@ -33,7 +34,9 @@ export type FiltroContatos = {
   produto?: string[];
   cadencia?: string[];
   frio?: string;                 // "15" | "30" | "nunca"
+  responsavel?: string[];        // ids de profiles; "__sem__" = sem dono
 };
+
 
 // A busca passa por saneamento: `%`, `*`, vírgula e parênteses viram espaço, porque
 // vão direto num `or=(name.ilike.%…)` do PostgREST. Exportada porque quem decide se o
@@ -56,6 +59,17 @@ export function normalizarFiltro(f: any): FiltroContatos {
     produto: comoLista(f?.produto),
     cadencia: comoLista(f?.cadencia),
     frio,
+    // Só uuid ou o marcador de "sem dono". E se o pedido tinha valores mas NENHUM
+    // sobreviveu, o resultado é NENHUM contato — não "todos". Faceta descartada em
+    // silêncio alarga a consulta, e esta mesma lista alimenta a exclusão em massa: o
+    // erro tem de cair para o lado de mostrar de menos. É a lição do filtro de CNAE do
+    // Radar, onde a validação transformou "contabilidade" em "a base inteira".
+    responsavel: (() => {
+      const pedidos = comoLista(f?.responsavel);
+      if (!pedidos.length) return [];
+      const bons = pedidos.filter((x) => x === SEM_DONO || /^[0-9a-f-]{36}$/i.test(x));
+      return bons.length ? bons : [NENHUM];
+    })(),
   };
 }
 
@@ -67,7 +81,8 @@ export function filtroVazio(bruto: any): boolean {
   const f = normalizarFiltro(bruto);
   return (
     !buscaEfetiva(f.q) && !f.view && !f.frio &&
-    !f.tag?.length && !f.produto?.length && !f.cadencia?.length
+    !f.tag?.length && !f.produto?.length && !f.cadencia?.length &&
+    !f.responsavel?.length
   );
 }
 
@@ -166,6 +181,30 @@ export async function consultaContatos(
   // (como os crons fazem), sem esta linha a consulta atravessaria workspaces.
   if (ctx.tenantId) q = q.eq("tenant_id", ctx.tenantId);
   if (!ctx.gerente) q = q.eq("assigned_to", ctx.userId ?? "");
+
+  // ============================================================
+  // FILTRO POR RESPONSÁVEL
+  //
+  // A coluna `assigned_to` sempre existiu, aparece na lista e dá para atribuir em
+  // lote — só não dava para FILTRAR por ela, que é justamente o que se quer fazer
+  // antes de agir sobre um conjunto ("os meus", "os do fulano", "os sem dono").
+  //
+  // `SEM_DONO` vira `is null`, e por isso não pode entrar num `.in()` junto com os
+  // uuids: `in("assigned_to", [null])` não casa com NULL no Postgres. Quando os dois
+  // são pedidos juntos, o jeito certo é um `or` com as duas condições.
+  // ============================================================
+  const resp = f.responsavel || [];
+  if (resp.length) {
+    const donos = resp.filter((x) => x !== SEM_DONO);
+    const querSemDono = resp.includes(SEM_DONO);
+    if (querSemDono && donos.length) {
+      q = q.or(`assigned_to.is.null,assigned_to.in.(${donos.join(",")})`);
+    } else if (querSemDono) {
+      q = q.is("assigned_to", null);
+    } else {
+      q = q.in("assigned_to", donos);
+    }
+  }
 
   const qSafe = buscaEfetiva(f.q);
   if (qSafe) q = q.or(`name.ilike.%${qSafe}%,email.ilike.%${qSafe}%,company.ilike.%${qSafe}%`);

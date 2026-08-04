@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import SmartSelect from "@/components/SmartSelect";
-import { paraUrl, contarFacetas } from "@/lib/filtros";
+import { paraUrl, contarFacetas, SEM_DONO } from "@/lib/filtros";
 
 type Opt = { id: string; name: string };
 
@@ -18,18 +18,21 @@ const VIEWS: { v: string; label: string; tone?: "danger" | "warn" }[] = [
 ];
 
 export default function ContactsFilterBar({
-  view, q, tag, produto, cadencia, frio,
-  tags, produtos, cadencias,
+  view, q, tag, produto, cadencia, frio, responsavel,
+  tags, produtos, cadencias, membros,
 }: {
-  // tag/produto/cadencia agora são MULTI (arrays); frio segue single (faixas
+  // tag/produto/cadencia/responsavel são MULTI (arrays); frio segue single (faixas
   // aninhadas: "+30d" já contém "+15d", marcar as duas não quer dizer nada).
   view: string; q: string; tag: string[]; produto: string[]; cadencia: string[]; frio: string;
-  tags: Opt[]; produtos: Opt[]; cadencias: Opt[];
+  responsavel: string[];
+  tags: Opt[]; produtos: Opt[]; cadencias: Opt[]; membros: Opt[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [busca, setBusca] = useState(q);
-  const detailedCount = contarFacetas(tag, produto, cadencia, frio);
+  // responsavel entra na contagem: sem isso o "Filtros (2)" mentiria e o operador
+  // não veria que há um filtro de dono ativo dentro do painel recolhido.
+  const detailedCount = contarFacetas(tag, produto, cadencia, frio, responsavel);
   const [open, setOpen] = useState(detailedCount > 0);
 
   // Escreve a URL com listas separadas por vírgula (?tag=a,b) — a página lê com
@@ -121,6 +124,21 @@ export default function ContactsFilterBar({
                 values={cadencia}
                 onValuesChange={(v) => go({ cadencia: paraUrl(v) })}
                 options={cadencias.map((c) => ({ value: c.id, label: c.name }))}
+              />
+            </div>
+          </Field>
+          {/* Responsável: a coluna sempre existiu e dava para atribuir em lote — faltava
+              justamente FILTRAR, que é o passo anterior a agir sobre um conjunto.
+              "Sem dono" é uma opção de verdade aqui, não a ausência de escolha. */}
+          <Field label="Responsável">
+            <div className="w-[200px]">
+              <SmartSelect
+                multiple
+                placeholder="Todos"
+                className="py-1.5 text-sm"
+                values={responsavel}
+                onValuesChange={(v) => go({ responsavel: paraUrl(v) })}
+                options={[{ value: SEM_DONO, label: "— sem dono —" }, ...membros.map((m) => ({ value: m.id, label: m.name }))]}
               />
             </div>
           </Field>

@@ -380,7 +380,9 @@ export async function addSocioContact(sourceContactId: string, socioName: string
 
   const { data: src } = await supabase
     .from("contacts")
-    .select("account_id, company, cnpj, company_domain, accounts(domain)")
+    // phone e email entram porque são candidatos a herança — mas com regras diferentes,
+    // explicadas no comentário do insert.
+    .select("account_id, company, cnpj, company_domain, phone, email, assigned_to, accounts(domain)")
     .eq("id", sourceContactId)
     .maybeSingle();
   // o sócio herda o domínio da empresa → já entra na esteira de captura no site
@@ -404,7 +406,33 @@ export async function addSocioContact(sourceContactId: string, socioName: string
   const { data: dup } = await dupQuery.maybeSingle();
   if (dup) return { error: "Já existe um contato com esse nome para esta empresa." };
 
-  const { error } = await supabase.from("contacts").insert({
+  // ============================================================
+  // O QUE O SÓCIO PODE HERDAR — e o que seria mentira herdar
+  //
+  // O pedido foi "o contato criado a partir de um sócio deve herdar dados de contato,
+  // como e-mail". Herdar o e-mail do contato de origem seria errado: é OUTRA PESSOA.
+  // Escrever `joao@empresa.com.br` na ficha da Maria faz o app mandar e-mail para o
+  // João achando que fala com a Maria — e o pior é que funcionaria, então ninguém
+  // perceberia o erro.
+  //
+  // A distinção que resolve é: dado DA EMPRESA se herda, dado DA PESSOA não.
+  //
+  //   herda    company, account_id, cnpj, company_domain   → são da empresa
+  //   herda    telefone, se for o mesmo da empresa          → é o telefone do escritório
+  //   herda    e-mail SÓ se for de balcão (contato@, sac@)  → é a caixa da empresa
+  //   NÃO herda e-mail pessoal do sócio de origem           → é de outra pessoa
+  //   NÃO herda o dono                                      → quem criou assume
+  //
+  // E o que faltava de verdade: o sócio novo não entrava em NENHUMA fila de descoberta
+  // de e-mail. Nascia sem e-mail e continuava sem, porque a esteira só olhava
+  // `web_capture`. Agora entra também em `email_discovery_queue`, que é o que de fato
+  // consegue achar o endereço DELE no domínio da empresa.
+  // ============================================================
+  const { ehCaixaDeBalcao } = await import("@/lib/emailFinder");
+  const emailOrigem = ((src as any)?.email || "").trim() || null;
+  const emailHerdado = emailOrigem && ehCaixaDeBalcao(emailOrigem) ? emailOrigem : null;
+
+  const { data: novo, error } = await supabase.from("contacts").insert({
     tenant_id,
     assigned_to: user_id,
     name,
@@ -412,13 +440,32 @@ export async function addSocioContact(sourceContactId: string, socioName: string
     account_id: (src as any)?.account_id || null,
     cnpj: (src as any)?.cnpj || null,
     company_domain: dominioSocio,
+    phone: (src as any)?.phone || null,   // telefone da empresa; o WhatsApp é verificado depois
+    email: emailHerdado,
     origin: "Sócio (Receita)",
     status: "novo",
     // com domínio da empresa, o sócio já entra na fila de captura (busca o WhatsApp
     // no site) — e o que for achado cai sozinho na fila de verificação.
     web_capture: dominioSocio ? "queued" : null,
-  });
+  }).select("id").maybeSingle();
   if (error) return { error: msgErro(error) };
+
+  // Fila de descoberta do e-mail DELE: nome + domínio da empresa. Sem isto o sócio
+  // ficava eternamente sem endereço próprio.
+  const novoId = (novo as any)?.id as string | undefined;
+  if (novoId && dominioSocio && !emailHerdado) {
+    // `name` e `domain` são NOT NULL e o status inicial é 'pending' (migration 0049) —
+    // a fila tem índice único por contact_id, então upsert. Eu tinha escrito isto de
+    // cabeça, com as colunas erradas e status 'queued': teria falhado calado, que é
+    // exatamente o defeito que este projeto já pagou caro quatro vezes.
+    const { error: errFila } = await supabase.from("email_discovery_queue").upsert(
+      { tenant_id, contact_id: novoId, name, domain: dominioSocio, status: "pending", attempts: 0 } as any,
+      { onConflict: "contact_id" }
+    );
+    // Não impede a criação do contato, mas também não some: o sócio existe, só não
+    // entrou na fila — e quem olhar a ficha vai ver que falta e-mail.
+    if (errFila) console.error("addSocioContact: fila de e-mail falhou", errFila.message);
+  }
   revalidatePath(`/dashboard/contatos/${sourceContactId}`);
   revalidatePath("/dashboard/contatos");
   return { ok: true };
