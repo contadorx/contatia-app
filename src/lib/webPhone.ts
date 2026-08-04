@@ -134,7 +134,13 @@ async function fetchText(url: string): Promise<string | null> {
   }
 }
 
-export type ContatoWeb = { whatsapp: string | null; phone: string | null; source: string | null };
+export type ContatoWeb = {
+  whatsapp: string | null; phone: string | null; source: string | null;
+  // Diagnóstico: sem isto, "não achei" e "não consegui abrir a página" viram a mesma
+  // frase na tela — e foi por isso que passamos rodadas atrás da regex quando o
+  // problema era o download.
+  paginasLidas?: number; paginasTentadas?: number;
+};
 
 /** Procura WhatsApp/telefone publicado no site. Prioriza wa.me (WhatsApp confirmado). */
 export async function findPublishedContact(domain: string): Promise<ContatoWeb> {
@@ -142,22 +148,31 @@ export async function findPublishedContact(domain: string): Promise<ContatoWeb> 
   if (!base) return { whatsapp: null, phone: null, source: null };
 
   const phones = new Set<string>();
+  let lidas = 0;
 
   for (const path of PATHS) {
     const url = `https://${base}${path}`;
     const html = await fetchText(url);
     if (!html) continue;
+    lidas++;
 
     const was = extractWhatsApp(html);
-    if (was.length) return { whatsapp: was[0], phone: was[0], source: url }; // wa.me = confirmado, para cedo
+    if (was.length) {
+      return { whatsapp: was[0], phone: was[0], source: url, paginasLidas: lidas, paginasTentadas: PATHS.length };
+    }
 
     for (const p of extractPhones(html)) phones.add(p);
-    // se já achamos um telefone na home, não precisa varrer tudo
-    if (phones.size && path === "") break;
+    // ANTES parava aqui se a home tivesse QUALQUER telefone em texto. Um fixo no
+    // cabeçalho — que quase toda página tem — encerrava a varredura, e a página
+    // /contato, onde mora o botão de WhatsApp, nunca era visitada. Telefone em texto
+    // não é motivo para parar; WhatsApp confirmado é, e esse já retorna acima.
   }
 
   const phone = phones.size ? Array.from(phones)[0] : null;
-  return { whatsapp: null, phone, source: phone ? `https://${base}` : null };
+  return {
+    whatsapp: null, phone, source: phone ? `https://${base}` : null,
+    paginasLidas: lidas, paginasTentadas: PATHS.length,
+  };
 }
 
 export type CapContact = { id: string; domain: string | null };

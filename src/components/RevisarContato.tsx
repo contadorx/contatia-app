@@ -19,7 +19,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { EmailFinder } from "@/components/EmailFinder";
-import { verificarWhatsAppLote } from "@/app/dashboard/contatos/wa-actions";
+import { verificarWhatsAppLote, atualizarWhatsAppDoSite } from "@/app/dashboard/contatos/wa-actions";
 
 const SELO_WA: Record<string, { txt: string; cls: string }> = {
   valid: { txt: "tem WhatsApp", cls: "bg-signal/10 text-signal" },
@@ -53,6 +53,28 @@ export default function RevisarContato({
   const [recado, setRecado] = useState<{ ok: boolean; texto: string } | null>(null);
 
   const selo = waStatus ? SELO_WA[waStatus] : null;
+  // Botão separado: "verificar" pergunta sobre o número que JÁ está aqui; "buscar no
+  // site" vai atrás de um número DIFERENTE. Com fixo cadastrado, o primeiro sempre
+  // responde "não tem" — corretamente — e nunca chega no certo.
+  const [buscandoSite, setBuscandoSite] = useState(false);
+  const [recadoSite, setRecadoSite] = useState<{ titulo: string; detalhe: string; ok?: boolean } | null>(null);
+
+
+  function buscarNoSite() {
+    setBuscandoSite(true);
+    setRecadoSite(null);
+    (async () => {
+      try {
+        const r: any = await atualizarWhatsAppDoSite(contactId);
+        setRecadoSite({ titulo: r?.titulo || "Sem resposta", detalhe: r?.detalhe || "", ok: r?.ok });
+        if (r?.ok) router.refresh();
+      } catch (e: any) {
+        setRecadoSite({ titulo: "Falhou", detalhe: e?.message || "erro de rede" });
+      } finally {
+        setBuscandoSite(false);
+      }
+    })();
+  }
   const quando = waCheckedAt
     ? new Date(waCheckedAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })
     : null;
@@ -110,11 +132,26 @@ export default function RevisarContato({
                 >
                   {pending ? "Verificando…" : selo ? "Verificar de novo" : "Verificar agora"}
                 </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-line bg-white px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-40"
+                  disabled={buscandoSite}
+                  onClick={buscarNoSite}
+                  title="Lê o site da empresa atrás de um botão de WhatsApp. Pode trazer um número diferente do cadastrado."
+                >
+                  {buscandoSite ? "Lendo o site…" : "↻ Buscar no site"}
+                </button>
               </>
             ) : (
               <span className="text-subtle">sem telefone cadastrado — edite os dados para incluir um.</span>
             )}
           </div>
+          {recadoSite && (
+            <div className={`mt-2 rounded-lg border p-2 text-xs ${recadoSite.ok ? "border-signal/30 bg-signal/5" : "border-line bg-muted/40"}`}>
+              <p className="font-semibold">{recadoSite.titulo}</p>
+              {recadoSite.detalhe && <p className="mt-0.5 text-subtle">{recadoSite.detalhe}</p>}
+            </div>
+          )}
           {recado && (
             <p className={`mt-2 rounded-lg px-3 py-2 text-xs font-medium ${recado.ok ? "bg-brand-soft text-brand-dark" : "bg-danger/10 text-danger"}`}>
               {recado.texto}

@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.04-10";
+export const VERSAO_APP = "2026.08.04-11";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "captura do site: 3MB, 15s e agente de navegador (o corte de 500KB engolia o botao de WhatsApp) · link send/?phone=";
+export const VERSAO_NOTAS = "botao Buscar no site no WhatsApp, com diagnostico · varredura nao para mais na home · captura 3MB/15s";

@@ -97,3 +97,81 @@ export async function verificarWhatsAppLote(contactIds: string[]): Promise<{
   revalidatePath("/dashboard/contatos");
   return { ok: true, verificados: inline.length, comWa, semWa, enfileirados, semTelefone };
 }
+
+// ============================================================
+// ATUALIZAR O WHATSAPP A PARTIR DO SITE — botão próprio, com diagnóstico
+//
+// Verificar e capturar são duas perguntas diferentes, e estavam num botão só:
+//   · "este número tem WhatsApp?"  → pergunta ao Evolution sobre o que já está lá
+//   · "qual é o WhatsApp no site?" → lê a página e pode trazer um número DIFERENTE
+//
+// Com fixo cadastrado, verificar sempre responde "não tem" — corretamente, e sem
+// nunca chegar no número certo. Faltava o segundo botão.
+//
+// E esta ação DIZ O QUE ACONTECEU: quantas páginas conseguiu abrir, se achou, se
+// substituiu. "Não achei" e "não consegui abrir o site" pararam de ser a mesma frase.
+// ============================================================
+export async function atualizarWhatsAppDoSite(
+  contactId: string
+): Promise<{ ok?: boolean; titulo: string; detalhe: string; numero?: string | null; error?: string }> {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { titulo: "Sem workspace", detalhe: "", error: "Sem workspace." };
+
+  const { data: c } = await supabase
+    .from("contacts")
+    .select("id, phone, wa_status, company_domain, email, accounts(domain, website)")
+    .eq("id", contactId)
+    .eq("tenant_id", tenant_id)
+    .maybeSingle();
+  if (!c) return { titulo: "Contato não encontrado", detalhe: "" };
+
+  const { dominioDe, dominioCorporativo } = await import("@/lib/emailFinder");
+  const dominio = dominioDe(
+    (c as any).company_domain || (c as any).accounts?.domain || (c as any).accounts?.website ||
+    dominioCorporativo((c as any).email)
+  );
+  if (!dominio) {
+    return { titulo: "Sem site para visitar", detalhe: "Preencha o domínio da empresa em Editar dados." };
+  }
+
+  const { findPublishedContact, ehFixoBr } = await import("@/lib/webPhone");
+  const r = await findPublishedContact(dominio);
+  const lidas = r.paginasLidas ?? 0;
+
+  if (!lidas) {
+    return {
+      titulo: `Não consegui abrir ${dominio}`,
+      detalhe: "Nenhuma das páginas respondeu — site fora do ar, bloqueando robôs ou domínio errado. Não é que não tenha WhatsApp: eu não cheguei a ler.",
+    };
+  }
+
+  if (!r.whatsapp) {
+    return {
+      titulo: "Li o site e não achei botão de WhatsApp",
+      detalhe: `${lidas} página(s) de ${dominio} lida(s). ${r.phone ? `Achei o telefone ${r.phone}, mas não um link de WhatsApp.` : "Nenhum telefone publicado."}`,
+      numero: r.phone ?? null,
+    };
+  }
+
+  const atual = ((c as any).phone as string | null) || null;
+  const patch: Record<string, any> = {
+    wa_number: r.whatsapp, wa_status: "valid", wa_checked_at: new Date().toISOString(), web_capture: "done",
+  };
+  // Só toma o lugar do telefone se não havia nenhum, ou se o que havia era FIXO.
+  // Trocar um celular por outro seria arbitrário.
+  const substitui = !atual || ehFixoBr(atual);
+  if (substitui) patch.phone = r.whatsapp;
+
+  const { error } = await supabase.from("contacts").update(patch as any).eq("id", contactId).eq("tenant_id", tenant_id);
+  if (error) return { titulo: "Achei, mas não consegui salvar", detalhe: error.message };
+
+  revalidatePath(`/dashboard/contatos/${contactId}`);
+  return {
+    ok: true,
+    titulo: `WhatsApp encontrado: ${r.whatsapp}`,
+    detalhe: substitui
+      ? (atual ? `Substituí o fixo ${atual} — fixo não tem WhatsApp.` : "Era o único número; virou o telefone do contato.")
+      : `Guardei como WhatsApp. O telefone ${atual} continua como está, porque também é celular.`,
+    numero: r.whatsapp,
+  };
+}
