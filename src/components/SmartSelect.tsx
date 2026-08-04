@@ -227,6 +227,20 @@ export default function SmartSelect(props: Props) {
             zIndex: 1000,
           }}
           className="overflow-hidden rounded-xl border border-line bg-surface shadow-lg"
+          // ============================================================
+          // ESTA LISTA NÃO MORA ONDE PARECE MORAR
+          //
+          // Ela é desenhada por um portal: no DOM fica pendurada no <body>, e não
+          // dentro do componente que abriu o select. Quem tiver um "fechar ao clicar
+          // fora" enxerga um clique numa opção daqui como clique FORA — fecha tudo
+          // antes de a escolha acontecer, e a ação some sem erro nenhum. Foi o que
+          // quebrou o "inscrever em cadência" dentro do contato.
+          //
+          // Esta marca existe para esses controles perguntarem "o clique caiu dentro
+          // de uma lista de seleção?" antes de fechar. Se mudar o nome, procure por
+          // data-select-portal antes.
+          // ============================================================
+          data-select-portal="1"
           role="listbox"
           id={listboxId}
           aria-multiselectable={multiple}

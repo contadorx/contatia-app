@@ -24,6 +24,26 @@ export type EstadoContato = {
   // Todos os domínios que o app considerou, em ordem. Só para a mensagem de erro —
   // nenhuma decisão usa isto.
   candidatos?: string;
+
+  // ============================================================
+  // OS VALORES, NÃO SÓ OS "TEM / NÃO TEM"
+  //
+  // O quadro de canais dizia "E-mail: do decisor" e "WhatsApp: confirmado". Certo e
+  // inútil: depois de descobrir, a pergunta seguinte é sempre "qual?", e para
+  // responder era preciso rolar até o cabeçalho, abrir o painel recolhido das redes,
+  // e daí copiar na mão. Muitos cliques para ver o que o app acabou de achar.
+  //
+  // Estes campos NÃO participam de nenhuma decisão — `passosPendentes` continua
+  // olhando só os booleanos acima. São para a tela mostrar o valor e o link.
+  // ============================================================
+  email?: string | null;
+  emailConferido?: boolean;      // servidor do domínio confirmou (selo SMTP)
+  emailConferidoEm?: string | null;
+  telefone?: string | null;
+  waCheckedAt?: string | null;
+  instagram?: string | null;
+  linkedin?: string | null;
+  enriquecidoEm?: string | null;
 };
 
 export type ResultadoPasso = {

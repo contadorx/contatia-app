@@ -38,9 +38,25 @@ export default function EnrollButton({ contactId, sequences }: { contactId: stri
   useEffect(() => {
     if (!open) return;
     const foraDaqui = (e: MouseEvent) => {
-      if (caixa.current && !caixa.current.contains(e.target as Node)) setOpen(false);
+      const alvo = e.target as Element | null;
+      // ============================================================
+      // A LISTA DE CADÊNCIAS NÃO ESTÁ DENTRO DESTA CAIXA
+      //
+      // O select desenha as opções num PORTAL, pendurado no <body>. Para o
+      // `contains` daqui, clicar numa cadência é clicar FORA — a caixa fechava no
+      // mousedown e a opção era desmontada antes do clique virar escolha. O botão
+      // não dava erro, não fazia nada, e a pessoa clicava de novo. Fui eu que
+      // introduzi isso ao fazer a caixa fechar; o conserto é reconhecer o portal.
+      // ============================================================
+      if (alvo?.closest?.("[data-select-portal]")) return;
+      if (caixa.current && alvo && !caixa.current.contains(alvo)) setOpen(false);
     };
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // com a lista de cadências aberta, o Esc é dela: fecha a lista, não a caixa
+      if (document.querySelector("[data-select-portal]")) return;
+      setOpen(false);
+    };
     // fase de captura: componentes de seleção costumam parar a propagação do próprio
     // clique, e sem isto o clique de fora nunca chegaria aqui.
     document.addEventListener("mousedown", foraDaqui, true);

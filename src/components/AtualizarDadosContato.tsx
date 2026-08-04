@@ -136,43 +136,124 @@ export default function AtualizarDadosContato({
   const icone = (t: ResultadoPasso["tom"]) =>
     t === "ok" ? "✓" : t === "erro" ? "✕" : t === "nada" ? "—" : "·";
 
-  // Um quadro do que o contato TEM, sempre visível. Antes só existiam mensagens do que
-  // aconteceu; faltava a resposta para "afinal, o que este contato tem hoje?".
-  const canais: { rotulo: string; valor: string; ok: boolean }[] = [
+  // ============================================================
+  // O QUADRO MOSTRA O VALOR, NÃO O ADJETIVO
+  //
+  // Antes cada canal dizia "do decisor", "confirmado", "Instagram ou LinkedIn". Certo
+  // e insuficiente: depois de descobrir, a pergunta seguinte é sempre "qual?" — e
+  // responder exigia rolar até o cabeçalho, abrir o painel recolhido das redes e
+  // copiar na mão. Muitos cliques para ver o que o app tinha acabado de achar.
+  //
+  // Agora aparece o endereço, o número e a rede, cada um clicável no lugar certo:
+  // escrever o e-mail, abrir a conversa no WhatsApp, abrir o perfil. E como o
+  // servidor devolve o estado NOVO depois de cada passo, o que foi descoberto aparece
+  // aqui na hora, sem recarregar a página.
+  // ============================================================
+  const soDigitos = (t: string) => (t || "").replace(/\D+/g, "");
+  const linkWa = (tel: string) => {
+    const d = soDigitos(tel);
+    if (d.length < 10) return null;
+    return `https://wa.me/${d.startsWith("55") ? d : "55" + d}`;
+  };
+  const linkRede = (v: string, base: string) => {
+    const t = (v || "").trim();
+    if (!t) return null;
+    if (/^https?:\/\//i.test(t)) return t;
+    return base + t.replace(/^@/, "");
+  };
+  const dia = (iso?: string | null) =>
+    iso ? new Date(iso).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) : null;
+
+  type Canal = {
+    rotulo: string;
+    valor: string;
+    href?: string | null;
+    nota?: string | null;
+    ok: boolean;
+    alerta?: boolean;
+  };
+
+  const igHref = estado.instagram ? linkRede(estado.instagram, "https://instagram.com/") : null;
+  const liHref = estado.linkedin ? linkRede(estado.linkedin, "https://linkedin.com/in/") : null;
+  const waHref = estado.telefone ? linkWa(estado.telefone) : null;
+
+  const canais: Canal[] = [
     {
       rotulo: "E-mail",
-      valor: !estado.temEmail
-        ? "não tem"
-        : estado.emailForaDoDominio ? "de outro domínio"
+      valor: estado.email || "não tem",
+      href: estado.email ? `mailto:${estado.email}` : null,
+      nota: !estado.email
+        ? null
+        : estado.emailForaDoDominio ? "domínio diferente do da empresa"
         : estado.emailDeBalcao ? "caixa compartilhada"
-        : "do decisor",
-      ok: estado.temEmail && !estado.emailDeBalcao && !estado.emailForaDoDominio,
+        : estado.emailConferido ? `SMTP validado${dia(estado.emailConferidoEm) ? ` · ${dia(estado.emailConferidoEm)}` : ""}`
+        : "não conferido",
+      ok: !!estado.email && !estado.emailDeBalcao && !estado.emailForaDoDominio && !!estado.emailConferido,
+      alerta: !!estado.email && (estado.emailDeBalcao || estado.emailForaDoDominio),
     },
     {
       rotulo: "WhatsApp",
-      valor:
-        estado.waStatus === "valid" ? "confirmado"
-        : estado.waStatus === "invalid" ? "número não tem"
-        : estado.temTelefone ? "não verificado"
-        : "sem telefone",
+      valor: estado.telefone || "sem telefone",
+      // o link da conversa só aparece quando o número FOI confirmado: mandar mensagem
+      // para número não verificado é como o fixo virou WhatsApp de estranho semana
+      // passada.
+      href: estado.waStatus === "valid" ? waHref : null,
+      nota:
+        estado.waStatus === "valid" ? `tem WhatsApp${dia(estado.waCheckedAt) ? ` · ${dia(estado.waCheckedAt)}` : ""}`
+        : estado.waStatus === "invalid" ? "este número não tem WhatsApp"
+        : estado.telefone ? "não verificado"
+        : null,
       ok: estado.waStatus === "valid",
+      alerta: estado.waStatus === "invalid",
     },
-    { rotulo: "Redes", valor: estado.temRede ? "Instagram ou LinkedIn" : "não tem", ok: estado.temRede },
+    {
+      rotulo: "Redes",
+      valor: igHref && liHref ? "Instagram" : igHref ? "Instagram" : liHref ? "LinkedIn" : "não tem",
+      href: igHref || liHref,
+      ok: estado.temRede,
+    },
     {
       rotulo: "Receita",
-      valor: estado.enriquecido ? "enriquecido" : estado.temCnpj ? "não enriquecido" : "sem CNPJ",
+      valor: estado.enriquecido
+        ? `enriquecido${dia(estado.enriquecidoEm) ? ` · ${dia(estado.enriquecidoEm)}` : ""}`
+        : estado.temCnpj ? "não enriquecido" : "sem CNPJ",
       ok: estado.enriquecido,
     },
   ];
 
   return (
     <div className="rounded-lg border border-line bg-muted/30 p-3">
-      {/* o quadro de canais: o que existe hoje, num relance */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-4">
+      {/* o quadro de canais: o que existe hoje, com o valor e o link */}
+      <div className="grid gap-2 sm:grid-cols-2">
         {canais.map((c) => (
-          <div key={c.rotulo} className="text-xs">
-            <span className="text-subtle">{c.rotulo}: </span>
-            <span className={c.ok ? "font-medium text-brand-dark" : "text-subtle"}>{c.valor}</span>
+          <div key={c.rotulo} className="min-w-0 rounded-lg border border-line bg-white px-2.5 py-1.5">
+            <p className="text-[11px] uppercase tracking-wide text-subtle">{c.rotulo}</p>
+            <p className="truncate text-sm" title={c.valor}>
+              {c.href ? (
+                <a
+                  href={c.href}
+                  target={c.href.startsWith("mailto:") ? undefined : "_blank"}
+                  rel="noreferrer"
+                  className="font-medium text-brand-dark hover:underline"
+                >
+                  {c.valor}
+                </a>
+              ) : (
+                <span className={c.ok ? "font-medium text-brand-dark" : "text-subtle"}>{c.valor}</span>
+              )}
+              {/* o segundo perfil precisa do clique dele */}
+              {c.rotulo === "Redes" && igHref && liHref && (
+                <a href={liHref} target="_blank" rel="noreferrer" className="ml-2 text-xs text-brand-dark hover:underline">
+                  LinkedIn ↗
+                </a>
+              )}
+            </p>
+            {c.nota && (
+              <p className={`truncate text-[11px] ${c.alerta ? "text-warn" : c.ok ? "text-signal" : "text-subtle"}`} title={c.nota}>
+                {c.ok && !c.alerta ? "✓ " : c.alerta ? "⚠ " : ""}
+                {c.nota}
+              </p>
+            )}
           </div>
         ))}
       </div>

@@ -118,6 +118,18 @@ async function lerEstado(supabase: any, id: string): Promise<EstadoContato | nul
     waStatus: c.wa_status || null,
     temRede: !!(c.instagram || c.linkedin),
     candidatos: candidatosBrutos,
+
+    // Os VALORES. Nenhuma decisão usa estes campos — eles existem para a tela mostrar
+    // o que acabou de ser descoberto, com link, sem obrigar a rolar a página e abrir
+    // painel recolhido para ver.
+    email: c.email || null,
+    emailConferido: (c.custom as any)?.email_check?.valid === true,
+    emailConferidoEm: (c.custom as any)?.email_check?.checked_at || null,
+    telefone: c.phone || null,
+    waCheckedAt: c.wa_checked_at || null,
+    instagram: c.instagram || null,
+    linkedin: c.linkedin || null,
+    enriquecidoEm: (c.custom as any)?.enriched_at || null,
   };
 }
 

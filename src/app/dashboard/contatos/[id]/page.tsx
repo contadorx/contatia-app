@@ -170,6 +170,15 @@ export default async function ContatoDetalhe({
   const daEmpresa = ((irmaos as any[]) || []);
   const brl = (v: number) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
+  // Falta algum canal? Decide se o painel de ajuste fino já abre aberto. Um contato
+  // completo não precisa de painel nenhum; um incompleto não deveria cobrar três
+  // cliques para mostrar o que falta.
+  const faltaAlgumCanal =
+    !c.email ||
+    (c as any).custom?.email_check?.valid !== true ||
+    (c as any).wa_status !== "valid" ||
+    !((c as any).instagram || (c as any).linkedin);
+
   return (
     <div className="max-w-4xl">
       <Link href={voltarPara} className="text-sm text-subtle hover:text-brand">
@@ -243,13 +252,32 @@ export default async function ContatoDetalhe({
                 temTelefone: !!c.phone,
                 waStatus: (c as any).wa_status || null,
                 temRede: !!((c as any).instagram || (c as any).linkedin),
+                // Os VALORES. Sem eles o quadro abriria dizendo "não tem" para um
+                // contato que tem, e só passaria a mostrar depois de rodar um passo.
+                email: c.email || null,
+                emailConferido: (c as any).custom?.email_check?.valid === true,
+                emailConferidoEm: (c as any).custom?.email_check?.checked_at || null,
+                telefone: c.phone || null,
+                waCheckedAt: (c as any).wa_checked_at || null,
+                instagram: (c as any).instagram || null,
+                linkedin: (c as any).linkedin || null,
+                enriquecidoEm: enrichedAt || null,
               }}
             />
           </div>
 
-          <details className="mt-3">
+          {/* ============================================================
+              ABERTO QUANDO AINDA FALTA ALGO
+              O painel vinha sempre fechado, então em toda ficha incompleta a
+              sequência era a mesma: abrir para ver as redes, abrir de novo para o
+              e-mail, de novo para o WhatsApp. Três cliques para chegar ao trabalho
+              que ainda existe. Fechar por padrão só faz sentido quando não há mais
+              nada a fazer — e é exatamente isso que a condição diz.
+              ============================================================ */}
+          <details className="mt-3" open={faltaAlgumCanal}>
             <summary className="cursor-pointer text-xs font-medium text-subtle hover:text-ink">
               Ajustar um canal específico
+              {faltaAlgumCanal && <span className="ml-1 text-warn">· ainda falta algo</span>}
             </summary>
             <div className="mt-2 space-y-2 border-l-2 border-line pl-3">
               {!c.email && (
