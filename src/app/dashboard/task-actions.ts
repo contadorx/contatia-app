@@ -107,6 +107,23 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     .single();
   if (!task) return { error: "Tarefa não encontrada." };
   if (task.channel !== "email") return { error: "Tarefa não é de e-mail." };
+
+  // ============================================================
+  // A ÚLTIMA PORTA ANTES DO DESTINATÁRIO
+  //
+  // As tarefas guardam o texto JÁ MONTADO. Quem foi criado enquanto o Radar produzia
+  // nomes quebrados carrega "[object Object]" dentro do corpo, e nenhum conserto no
+  // render alcança o que já está gravado. Só a checagem no envio alcança.
+  //
+  // Recusar é a escolha certa aqui: um e-mail que sai errado não volta, e o custo de
+  // segurar é uma mensagem na tela para quem pode corrigir.
+  // ============================================================
+  {
+    const { textoTemLixo, AVISO_LIXO } = await import("@/lib/nomeValido");
+    if (textoTemLixo((task as any).title) || textoTemLixo((task as any).generated_content)) {
+      return { error: AVISO_LIXO };
+    }
+  }
   const to = (task as any).contacts?.email as string | undefined;
   if (!to) {
     // contato sem e-mail: pula a tarefa (não fica pendente para sempre) — cobre também
@@ -397,6 +414,11 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
     .single();
   if (!task) return { error: "Tarefa não encontrada." };
   if (task.channel !== "whatsapp") return { error: "Tarefa não é de WhatsApp." };
+  {
+    // mesma porta do e-mail: no WhatsApp o estrago é ainda mais visível
+    const { textoTemLixo, AVISO_LIXO } = await import("@/lib/nomeValido");
+    if (textoTemLixo((task as any).generated_content)) return { error: AVISO_LIXO };
+  }
   const phone = (task as any).contacts?.phone as string | undefined;
   if (!phone) return { error: "Contato sem telefone." };
 

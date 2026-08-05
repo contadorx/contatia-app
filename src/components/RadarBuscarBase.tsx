@@ -8,13 +8,33 @@ import { diaISO } from "@/lib/datas";
 const UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
 
 type Atividade = { cnae: string; descricao: string };
+type SocioApi = string | { nome?: string; qualificacao?: string; pessoa_juridica?: boolean; desde?: string | null };
+
 type Empresa = {
   cnpj: string; razao_social: string | null; nome_fantasia: string | null;
   cnae: string | null; cnae_descricao: string | null; uf: string | null;
   municipio: string | null; email: string | null; telefone: string | null; porte: string | null;
+  // Vêm da base da Receita no VPS. Todos opcionais: o app é publicado pela Vercel e a
+  // API do VPS é atualizada à mão — na janela entre as duas, estes campos não existem
+  // e a tela não pode depender deles.
+  socios?: SocioApi[];
+  simples?: boolean | null;   // null = SEM INFORMAÇÃO, que é diferente de "não é"
+  mei?: boolean | null;
+  situacao?: string | null;
   jaTem?: boolean;
   descartado?: boolean;
 };
+
+// Nome do sócio nos dois formatos que a API pode devolver (lista de nomes na v2,
+// lista de objetos na v3).
+function nomeSocio(s: SocioApi): string {
+  return (typeof s === "string" ? s : s?.nome || "").trim();
+}
+function ehSocioPJ(s: SocioApi): boolean {
+  return typeof s === "object" && s?.pessoa_juridica === true;
+}
+// 49 sócio-administrador · 05 administrador · 16 presidente · 10 diretor
+const QUALIF: Record<string, string> = { "49": "sócio-adm.", "05": "administrador", "16": "presidente", "10": "diretor", "22": "sócio", "65": "titular" };
 
 export default function RadarBusca({ configurada }: { configurada: boolean }) {
   // filtros
@@ -245,12 +265,26 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   }
   function baixarCsv(linhas: any[]) {
     if (!linhas.length) return;
-    const headers = ["CNPJ", "Razão social", "Nome fantasia", "CNAE", "Atividade", "UF", "Município", "Bairro", "CEP", "E-mail", "Telefone", "Telefone 2", "Porte", "Tipo"];
-    const corpo = linhas.map((r) => [
-      r.cnpj, r.razao_social, r.nome_fantasia, r.cnae, r.cnae_descricao, r.uf, r.municipio,
-      r.bairro, r.cep, r.email, r.telefone, r.telefone2, r.porte,
-      r.matriz === true ? "Matriz" : r.matriz === false ? "Filial" : "",
-    ].map(csvCell).join(";"));
+    // Sócio e enquadramento também no CSV: quem exporta para trabalhar fora do app
+    // precisa saber com QUEM falar e sob qual regime — sem isso a planilha obriga a
+    // voltar aqui empresa por empresa.
+    const headers = ["CNPJ", "Razão social", "Nome fantasia", "CNAE", "Atividade", "UF", "Município", "Bairro", "CEP", "E-mail", "Telefone", "Telefone 2", "Porte", "Tipo", "Sócio principal", "Qualificação", "Outros sócios", "Regime"];
+    const regimeTxt = (r: any) =>
+      r.mei === true ? "MEI" : r.simples === true ? "Simples" : r.simples === false ? "Lucro Presumido/Real" : "";
+    const corpo = linhas.map((r) => {
+      const socios: SocioApi[] = Array.isArray(r.socios) ? r.socios : [];
+      const primeiro = socios[0];
+      const q = primeiro && typeof primeiro === "object" ? (primeiro as any).qualificacao : "";
+      return [
+        r.cnpj, r.razao_social, r.nome_fantasia, r.cnae, r.cnae_descricao, r.uf, r.municipio,
+        r.bairro, r.cep, r.email, r.telefone, r.telefone2, r.porte,
+        r.matriz === true ? "Matriz" : r.matriz === false ? "Filial" : "",
+        primeiro ? nomeSocio(primeiro) : "",
+        q ? (QUALIF[q] || q) : "",
+        socios.slice(1).map(nomeSocio).filter(Boolean).join(" | "),
+        regimeTxt(r),
+      ].map(csvCell).join(";");
+    });
     const csv = "﻿" + [headers.join(";"), ...corpo].join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -520,7 +554,27 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
                         {r.jaTem && <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-subtle">✓ já na base</span>}
                         {!r.jaTem && r.descartado && <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-subtle">descartado</span>}
                       </p>
-                      <p className="text-xs text-subtle">{r.cnpj}{r.porte ? ` · ${r.porte}` : ""}</p>
+                      <p className="text-xs text-subtle">
+                        {r.cnpj}{r.porte ? ` · ${r.porte}` : ""}
+                        {/* Enquadramento: muda a conversa de venda antes do primeiro
+                            contato. Só aparece quando a base RESPONDEU — ausente é
+                            "não sei", e não "não é". */}
+                        {r.mei === true && <span className="ml-2 rounded-full bg-warn/15 px-1.5 py-0.5 text-[10px] font-semibold text-warn">MEI</span>}
+                        {r.mei !== true && r.simples === true && <span className="ml-2 rounded-full bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand-dark">Simples</span>}
+                        {r.mei !== true && r.simples === false && <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-subtle">Lucro Presumido/Real</span>}
+                      </p>
+                      {/* O DECISOR, na própria linha. Era o dado que obrigava a abrir a
+                          empresa noutro lugar para saber com quem se vai falar. */}
+                      {!!r.socios?.length && (
+                        <p className="mt-0.5 text-xs text-subtle" title={r.socios.map(nomeSocio).join(" · ")}>
+                          <span className="text-ink">{nomeSocio(r.socios[0])}</span>
+                          {typeof r.socios[0] === "object" && (r.socios[0] as any).qualificacao
+                            ? ` (${QUALIF[(r.socios[0] as any).qualificacao] || "sócio"})`
+                            : ""}
+                          {ehSocioPJ(r.socios[0]) ? " · empresa" : ""}
+                          {r.socios.length > 1 ? ` +${r.socios.length - 1}` : ""}
+                        </p>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-subtle">{r.cnae_descricao || r.cnae || "—"}</td>
                     <td className="px-3 py-3 text-subtle">{[r.municipio, r.uf].filter(Boolean).join("/") || "—"}</td>

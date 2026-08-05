@@ -19,6 +19,11 @@ async function ctx() {
 }
 
 export async function sendQuickEmail(contactId: string, subject: string, body: string) {
+  {
+    // mesma porta do envio por tarefa — o envio rápido não pode ser o caminho de fuga
+    const { textoTemLixo, AVISO_LIXO } = await import("@/lib/nomeValido");
+    if (textoTemLixo(subject) || textoTemLixo(body)) return { error: AVISO_LIXO };
+  }
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (!subject.trim() || !body.trim()) return { error: "Preencha assunto e mensagem." };
@@ -137,6 +142,10 @@ export async function sendQuickEmail(contactId: string, subject: string, body: s
 }
 
 export async function sendQuickWhatsApp(contactId: string, body: string) {
+  {
+    const { textoTemLixo, AVISO_LIXO } = await import("@/lib/nomeValido");
+    if (textoTemLixo(body)) return { error: AVISO_LIXO };
+  }
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (!body.trim()) return { error: "Escreva a mensagem." };

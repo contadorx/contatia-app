@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import { saveContactExtra, enrichContact, addSocioContact } from "@/app/dashboard/contatos/actions";
 import { dataCurta } from "@/lib/datas";
 
+// 49 sócio-administrador · 05 administrador · 16 presidente · 10 diretor · 22 sócio
+const QUALIF_SOCIO: Record<string, string> = {
+  "49": "Sócio-administrador", "05": "Administrador", "16": "Presidente",
+  "10": "Diretor", "22": "Sócio", "65": "Titular",
+};
+
 type Receita = {
   cnae: string | null;
   cnae_descricao: string | null;
@@ -12,6 +18,11 @@ type Receita = {
   porte: string | null;
   uf: string | null;
   municipio: string | null;
+  // opcionais: fichas anteriores ao Radar novo não têm estes campos
+  simples?: boolean | null;
+  mei?: boolean | null;
+  qualificacao?: string | null;
+  socioPJ?: boolean;
 };
 
 // campos de rapport (livres, guardados em custom.rapport)
@@ -97,6 +108,26 @@ export default function ContactExtras({
             <Item label="CNAE" value={receita.cnae_descricao || receita.cnae} />
             <Item label="Porte" value={receita.porte} />
             <Item label="Situação" value={receita.situacao} />
+            {/* Regime tributário: para quem vende serviço contábil, é a primeira coisa
+                que define a abordagem. `null` fica de fora de propósito — inventar
+                "Lucro Presumido" por falta de dado seria pior que não mostrar nada. */}
+            <Item
+              label="Regime"
+              value={
+                receita.mei === true ? "MEI"
+                : receita.simples === true ? "Simples Nacional"
+                : receita.simples === false ? "Fora do Simples (Presumido/Real)"
+                : null
+              }
+            />
+            <Item
+              label="No quadro societário"
+              value={
+                receita.qualificacao
+                  ? `${QUALIF_SOCIO[receita.qualificacao] || "sócio"}${receita.socioPJ ? " · pessoa jurídica" : ""}`
+                  : null
+              }
+            />
             <Item label="Município/UF" value={[receita.municipio, receita.uf].filter(Boolean).join(" / ")} />
           </div>
         ) : (

@@ -576,20 +576,75 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
   //     estourar limite/timeout das APIs públicas quando a seleção é grande.
   const MAX_ENRIQUECER = 30;
   let enriquecidos = 0;
-  async function sociosDaEmpresa(e: any, cnpj: string): Promise<string[]> {
-    const doRow = Array.isArray(e?.socios) ? e.socios : [];
-    const limpos = doRow.map((s: any) => (nomeProprio(String(s || "")) || String(s || "")).trim()).filter(Boolean);
-    if (limpos.length) return Array.from(new Set(limpos));
+
+  // ============================================================
+  // O SÓCIO PODE VIR DE DUAS FORMAS — E PODE NÃO SER UMA PESSOA
+  //
+  // A API da Receita no VPS devolvia `socios: ["FULANO", "CICRANA"]`. A versão nova
+  // devolve objetos: `{ nome, qualificacao, pessoa_juridica, desde }`. As duas formas
+  // são aceitas aqui de propósito: o app é publicado pela Vercel e o VPS é atualizado
+  // à mão, então existe uma janela em que as duas convivem — e nela nada pode quebrar.
+  //
+  // `pessoa_juridica` importa de verdade: no quadro societário entra holding, e mandar
+  // "Oi, {{primeiro_nome}}" para a "PARTICIPACOES LTDA" é o tipo de erro que o
+  // destinatário vê. Ela vira contato mesmo assim (é um caminho legítimo para chegar
+  // ao decisor), mas fica marcada — quem monta a cadência sabe com o que está falando.
+  //
+  // A QUALIFICAÇÃO também vem: 49 é sócio-administrador, 05 administrador, 16
+  // presidente, 10 diretor. A API já ordena colocando quem decide primeiro, e essa
+  // ordem é preservada porque o primeiro sócio é quem herda o e-mail e o telefone da
+  // empresa.
+  // ============================================================
+  type SocioRF = { nome: string; qualificacao?: string; pessoaJuridica?: boolean; desde?: string | null };
+
+  function normalizarSocios(bruto: any): SocioRF[] {
+    if (!Array.isArray(bruto)) return [];
+    const vistos = new Set<string>();
+    const saida: SocioRF[] = [];
+    for (const s of bruto) {
+      const cru = typeof s === "string" ? { nome: s } : (s || {});
+      const nomeCru = String((cru as any).nome || "").trim();
+      if (!nomeCru) continue;
+      const nome = (nomeProprio(nomeCru) || nomeCru).trim();
+      const chave = normNome(nome);
+      if (!chave || vistos.has(chave)) continue;
+      vistos.add(chave);
+      saida.push({
+        nome,
+        qualificacao: String((cru as any).qualificacao || "").trim() || undefined,
+        // `pessoa_juridica` da API nova; sem ela, o nome ainda entrega a maioria dos
+        // casos (LTDA, S/A, PARTICIPACOES…)
+        pessoaJuridica: (cru as any).pessoa_juridica === true || pareceEmpresa(nome),
+        desde: (cru as any).desde || null,
+      });
+    }
+    return saida;
+  }
+
+  async function sociosDaEmpresa(e: any, cnpj: string): Promise<SocioRF[]> {
+    const doRow = normalizarSocios(e?.socios);
+    if (doRow.length) return doRow;
     if (!criarContato || enriquecidos >= MAX_ENRIQUECER) return [];
     enriquecidos++;
     try {
       const r = await enrichCnpj(cnpj);
-      const nomes = (r.data?.socios || []).map((s) => (s || "").trim()).filter(Boolean);
-      return Array.from(new Set(nomes));
+      return normalizarSocios(r.data?.socios || []);
     } catch {
       return [];
     }
   }
+
+  // Enquadramento tributário: `simples`/`mei` vêm como true/false/null. `null` é "sem
+  // informação", e é diferente de false — dizer "não é do Simples" sem saber seria pior
+  // que não dizer nada, porque muda a abordagem de venda.
+  const enquadramento = (e: any) => {
+    const o: Record<string, unknown> = {};
+    if (typeof e?.simples === "boolean") o.simples = e.simples;
+    if (typeof e?.mei === "boolean") o.mei = e.mei;
+    if (e?.porte) o.porte = String(e.porte);
+    if (e?.situacao || e?.situacao_cadastral) o.situacao = String(e.situacao || e.situacao_cadastral);
+    return o;
+  };
 
   for (const e of empresas) {
     const cnpj = soDigitos(e.cnpj);
@@ -618,6 +673,10 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
           municipio: nomeProprio(e.municipio) || null,
           domain: dominio,
           phone: e.telefone || null,
+          porte: e.porte || null,
+          // custom guarda o que não tem coluna própria (Simples/MEI/situação). Vai
+          // como objeto: colunas novas exigiriam migration, e isto aqui já existe.
+          custom: { receita: { ...enquadramento(e), atualizado_em: new Date().toISOString() } },
         })
         .select("id")
         .single();
@@ -645,11 +704,14 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
     // um contato POR SÓCIO; se a empresa não tiver sócio identificado, cai no antigo
     // (um contato com o nome da empresa) — nunca fica sem contato nenhum.
     const socios = await sociosDaEmpresa(e, cnpj);
-    const nomes = socios.length ? socios : [nomeEmpresa];
+    // sem sócio identificado, cai no antigo: um contato com o nome da empresa
+    const pessoas: SocioRF[] = socios.length ? socios : [{ nome: nomeEmpresa, pessoaJuridica: true }];
     const companyNome = nomeProprio(e.razao_social || e.nome_fantasia) || null;
+    const dadosReceita = enquadramento(e);
     let criouAlgum = false;
 
-    for (const nome of nomes) {
+    for (const socio of pessoas) {
+      const nome = socio.nome;
       if (contatosCriados >= budgetContatos) { limiteAtingido = true; break; }
       // o e-mail e o telefone são DA EMPRESA (não da pessoa): só o primeiro contato os
       // carrega — assim não duplicamos o mesmo e-mail corporativo em todos os sócios,
@@ -668,6 +730,21 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
         company_domain: dominio,
         origin: socios.length ? "Radar (sócio)" : "Radar",
         status: "novo",
+        // O que a Receita sabe sobre a empresa e sobre o papel desta pessoa nela.
+        // Fica em `custom` porque não há coluna para isso e uma migration só para
+        // carregar quatro campos não se paga.
+        custom: {
+          receita: { ...dadosReceita, atualizado_em: new Date().toISOString() },
+          ...(socios.length
+            ? {
+                socio: {
+                  qualificacao: socio.qualificacao || null,
+                  pessoa_juridica: !!socio.pessoaJuridica,
+                  desde: socio.desde || null,
+                },
+              }
+            : {}),
+        },
         // ESTEIRA AUTOMÁTICA: telefone da Receita (só no 1º) → fila de verificação de
         // WhatsApp; domínio corporativo (em todos) → fila de captura no site do sócio.
         wa_status: primeiro && e.telefone ? "queued" : null,
@@ -678,7 +755,10 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
         contatosCriados++;
         contatoIds.push((novoContato as any).id as string);
         // sem e-mail + domínio + nome de pessoa → entra na descoberta de e-mail (SMTP)
-        if (!emailContato && dominio && !pareceEmpresa(nome)) {
+        // `pessoaJuridica` vem da Receita (identificador 1 = sócio PJ) e é mais
+        // confiável que deduzir pelo nome: procurar "felipe@" faz sentido, procurar
+        // um e-mail pessoal de uma holding não.
+        if (!emailContato && dominio && !socio.pessoaJuridica) {
           filaEmail.push({ tenant_id, contact_id: (novoContato as any).id, name: nome, domain: dominio });
         }
       }

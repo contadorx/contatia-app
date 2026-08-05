@@ -1,4 +1,5 @@
 import { diaISO } from "@/lib/datas";
+import { nomeUsavel } from "@/lib/nomeValido";
 
 // Helpers do motor de cadência.
 
@@ -43,12 +44,16 @@ export const TEMPLATE_VARS: { k: string; desc: string }[] = [
 // Substitui variáveis {{...}} pelos campos do contato (inclui rapport e dados da Receita).
 export function renderTemplate(text: string | null | undefined, c: ContactLike): string {
   if (!text) return "";
-  const first = (c.name || "").trim().split(/\s+/)[0] || "";
+  // `nomeUsavel` devolve vazio quando o nome é lixo ("[object Object]", "undefined").
+  // Assim o modelo cai na saudação neutra em vez de imprimir a sujeira — e o operador
+  // vê "Olá," em vez de "Oi, [object Object]" já na pré-visualização.
+  const nomeLimpo = nomeUsavel(c.name);
+  const first = nomeLimpo.split(/\s+/)[0] || "";
   const cu = (c.custom || {}) as Record<string, any>;
   const rp = (cu.rapport || {}) as Record<string, any>;
   const map: Record<string, string> = {
     primeiro_nome: first,
-    nome: c.name || "",
+    nome: nomeLimpo,
     empresa: c.company || "",
     email: c.email || "",
     telefone: c.phone || "",

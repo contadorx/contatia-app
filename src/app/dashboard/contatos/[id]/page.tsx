@@ -139,19 +139,30 @@ export default async function ContatoDetalhe({
   const acc = c.accounts || {};
   const cnpj = c.cnpj || acc.cnpj || null;
   // Receita: prefere o que o Radar enriqueceu no contato; cai para os campos da empresa
+  // `custom.receita` é o bloco novo que o Radar grava (porte, situação, Simples/MEI).
+  // Os campos soltos continuam sendo lidos primeiro para não perder o que já existe
+  // nas fichas antigas.
+  const rf = (custom.receita as any) || {};
   const receita = {
     cnae: custom.cnae || acc.cnae || null,
     cnae_descricao: custom.cnae_descricao || null,
-    situacao: custom.situacao || null,
-    porte: custom.porte || acc.porte || null,
+    situacao: custom.situacao || rf.situacao || null,
+    porte: custom.porte || rf.porte || acc.porte || null,
     uf: custom.uf || acc.uf || null,
     municipio: custom.municipio || acc.municipio || null,
+    // true/false/null — null é "sem informação", e a tela precisa distinguir isso de
+    // "não é do Simples": as duas coisas mudam a conversa de venda de formas opostas.
+    simples: typeof rf.simples === "boolean" ? rf.simples : null,
+    mei: typeof rf.mei === "boolean" ? rf.mei : null,
+    // papel desta pessoa no quadro societário
+    qualificacao: (custom.socio as any)?.qualificacao || null,
+    socioPJ: (custom.socio as any)?.pessoa_juridica === true,
   };
   const socios: string[] = Array.isArray(custom.socios) ? custom.socios : [];
   const enrichedAt = custom.enriched_at || null;
   const linkedin = custom.linkedin || null;
   const rapport = custom.rapport || {};
-  const hasReceita = !!(receita.cnae || receita.cnae_descricao || receita.situacao || receita.porte || socios.length);
+  const hasReceita = !!(receita.cnae || receita.cnae_descricao || receita.situacao || receita.porte || receita.simples !== null || receita.mei !== null || socios.length);
 
   // ============================================================
   // O DOMÍNIO PODE ESTAR ESCONDIDO NO E-MAIL
