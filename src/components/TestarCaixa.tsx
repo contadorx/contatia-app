@@ -1,24 +1,30 @@
 "use client";
 
 // ============================================================
-// TESTAR OUTRA CAIXA DO MESMO DOMÍNIO — SEM SUMIR DA TELA
+// TESTAR OUTRO ENDEREÇO DO MESMO DOMÍNIO — SEM SUMIR DA TELA
 //
 // A caixa de teste só existia quando o contato NÃO tinha e-mail. Assim que um
 // endereço era gravado, ela desaparecia. Só que é justamente aí que ela passa a ser
-// mais útil: num escritório contábil o app costuma achar `societario@`, e quem
-// trabalha a conta sabe que existe `fiscal@`, `dp@`, `contabil@` — e quer testar,
-// confirmar e trocar. Com o campo escondido, a saída era editar o contato na mão e
-// perder a verificação.
+// mais útil: o app costuma achar um endereço genérico da empresa, e quem trabalha a
+// conta sabe que existe outro melhor para o assunto — e quer testar, confirmar e
+// trocar. Com o campo escondido, a saída era editar o contato na mão e perder a
+// verificação.
 //
-// Agora ela é fixa, fica logo abaixo do e-mail em uso, e o domínio já vem preenchido:
-// digita-se só o começo do endereço. Os prefixos mais comuns de escritório contábil
-// viraram atalhos de um clique, porque essa é a busca que se repete.
+// TEXTO E ATALHOS SÃO NEUTROS DE PROPÓSITO. A primeira versão falava em "escritório
+// contábil" e sugeria `fiscal@`, `societario@`, `dp@`. O Contatia atende outros
+// segmentos, e uma tela que fala a língua de UM mercado é uma tela errada nos demais
+// — pior, ensina o operador a procurar a caixa errada.
+//
+// A lista abaixo é o conjunto que existe em empresa de qualquer ramo. O que é
+// específico do seu mercado entra sozinho: o que você digita fica guardado NESTE
+// navegador e passa a aparecer na frente. Assim a ferramenta se adapta ao segmento
+// sem ninguém configurar nada, e sem o app fingir que só existe um.
 //
 // A troca só é oferecida quando o servidor CONFIRMA a caixa. Testar é barato; trocar
 // um endereço que funciona por um que ninguém confirmou, não.
 // ============================================================
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { testarEmailAvulso, aplicarEmailContato } from "@/app/dashboard/contatos/verify-actions";
 
@@ -31,9 +37,32 @@ const MAPA: Record<string, { txt: string; cls: string; podeUsar: boolean }> = {
   error: { txt: "não foi possível verificar agora", cls: "text-subtle", podeUsar: false },
 };
 
-// Os endereços por função que aparecem em escritório contábil. A ordem é a de uso:
-// quem procura outra caixa quase sempre procura uma destas.
-const PREFIXOS = ["fiscal", "contabil", "societario", "dp", "pessoal", "financeiro", "contato", "comercial"];
+// Endereços por função que existem em empresa de qualquer segmento.
+const PREFIXOS = ["contato", "comercial", "vendas", "financeiro", "atendimento", "diretoria", "suporte", "rh"];
+
+// Os que ESTE operador já usou, guardados no navegador. É o que traz `fiscal@` de
+// volta para quem trabalha contabilidade, e `obras@` para quem trabalha construção,
+// sem que o app precise escolher um mercado.
+const CHAVE_USADOS = "contatia:prefixos-usados";
+const MAX_USADOS = 6;
+
+function lerUsados(): string[] {
+  try {
+    const cru = JSON.parse(window.localStorage.getItem(CHAVE_USADOS) || "[]");
+    return Array.isArray(cru) ? cru.filter((x) => typeof x === "string").slice(0, MAX_USADOS) : [];
+  } catch {
+    return [];
+  }
+}
+
+function guardarUsado(pref: string) {
+  const p = (pref || "").trim().toLowerCase();
+  if (!p || p.includes("@")) return;   // endereço inteiro colado não vira atalho
+  try {
+    const atual = lerUsados().filter((x) => x !== p);
+    window.localStorage.setItem(CHAVE_USADOS, JSON.stringify([p, ...atual].slice(0, MAX_USADOS)));
+  } catch { /* navegador sem storage: só não guarda */ }
+}
 
 export default function TestarCaixa({
   contactId,
@@ -52,6 +81,10 @@ export default function TestarCaixa({
   const [pending, start] = useTransition();
   const [salvando, startSalvar] = useTransition();
   const [aviso, setAviso] = useState<string | null>(null);
+  // lido depois de montar: `localStorage` no primeiro render daria um HTML diferente
+  // do que o servidor gerou, e o React reclamaria de hidratação
+  const [usados, setUsados] = useState<string[]>([]);
+  useEffect(() => setUsados(lerUsados()), []);
 
   const dom = (dominioLivre || "").trim().replace(/^@/, "");
   // aceita tanto "fiscal" quanto "fiscal@outrodominio.com.br" colado inteiro
@@ -62,6 +95,9 @@ export default function TestarCaixa({
     const alvo = pref ? (pref.includes("@") ? pref : `${pref}@${dom}`) : endereco;
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(alvo)) return;
     if (pref) setPrefixo(pref);
+    const soPrefixo = alvo.split("@")[0];
+    guardarUsado(soPrefixo);
+    setUsados(lerUsados());
     setRes(null);
     setAviso(null);
     setTestado(alvo);
@@ -91,21 +127,35 @@ export default function TestarCaixa({
   return (
     <div className="mt-2 rounded-lg border border-brand/30 bg-brand-soft/20 px-3 py-2.5">
       <p className="text-sm font-semibold text-ink">
-        ✓ Testar outra caixa {dom ? <span className="font-normal text-subtle">em {dom}</span> : null}
+        ✓ Testar outro endereço {dom ? <span className="font-normal text-subtle">em {dom}</span> : null}
       </p>
       <p className="mt-0.5 text-xs text-subtle">
-        Escritório costuma ter caixa por área. Digite só o começo do endereço — eu pergunto ao
-        servidor se ela existe e, se existir, você troca aqui mesmo.
+        Empresa costuma ter caixa por área ou por função. Digite só o começo do endereço — eu
+        pergunto ao servidor se ela existe e, se existir, você troca aqui mesmo.
       </p>
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-1">
-        {PREFIXOS.map((p) => (
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {/* os que você já usou vêm primeiro: é assim que a lista aprende o vocabulário
+            do seu segmento sem o app ter de escolher um */}
+        {usados.map((p) => (
+          <button
+            key={`u-${p}`}
+            type="button"
+            disabled={pending || !dom}
+            onClick={() => testar(p)}
+            className="rounded-full border border-brand/40 bg-white px-2.5 py-0.5 text-xs font-medium text-brand-dark hover:bg-brand-soft disabled:opacity-40"
+            title={dom ? `Testar ${p}@${dom} (você já usou este)` : "Sem domínio para testar"}
+          >
+            {p}@
+          </button>
+        ))}
+        {PREFIXOS.filter((p) => !usados.includes(p)).map((p) => (
           <button
             key={p}
             type="button"
             disabled={pending || !dom}
             onClick={() => testar(p)}
-            className="rounded-full border border-line bg-white px-2 py-0.5 text-xs text-subtle hover:border-brand hover:text-brand-dark disabled:opacity-40"
+            className="rounded-full border border-line bg-white px-2.5 py-0.5 text-xs text-subtle hover:border-brand hover:text-brand-dark disabled:opacity-40"
             title={dom ? `Testar ${p}@${dom}` : "Sem domínio para testar"}
           >
             {p}@
@@ -118,7 +168,7 @@ export default function TestarCaixa({
           className="input w-28 py-1 text-sm"
           value={prefixo}
           onChange={(e) => setPrefixo(e.target.value)}
-          placeholder="fiscal"
+          placeholder="ex.: fiscal"
           onKeyDown={(e) => { if (e.key === "Enter" && valido) testar(); }}
         />
         <span className="text-sm text-subtle">@</span>
