@@ -167,6 +167,11 @@ export async function atualizarWhatsAppDoSite(
     await supabase.from("contacts").update(extras as any).eq("id", contactId).eq("tenant_id", tenant_id);
   };
   const deBrinde = ganhos.length ? ` De brinde, na mesma leitura: ${ganhos.join(", ")}.` : "";
+  // Site com cadeia de certificado incompleta abre no navegador e falhava aqui. Agora
+  // é lido assim mesmo, e o operador precisa saber que a leitura foi por esse caminho.
+  const avisoTls = achados.tlsFraco
+    ? " Obs.: o certificado deste site está incompleto (falta o intermediário); li a página mesmo assim."
+    : "";
 
   if (!lidas) {
     return {
@@ -182,7 +187,7 @@ export async function atualizarWhatsAppDoSite(
     return {
       ok: ganhos.length > 0,
       titulo: "Li o site e não achei botão de WhatsApp",
-      detalhe: `${lidas} página(s) de ${dominio} lida(s). ${r.phone ? `Achei o telefone ${r.phone}, mas não um link de WhatsApp.` : "Nenhum telefone publicado."}${deBrinde}`,
+      detalhe: `${lidas} página(s) de ${dominio} lida(s). ${r.phone ? `Achei o telefone ${r.phone}, mas não um link de WhatsApp.` : "Nenhum telefone publicado."}${deBrinde}${avisoTls}`,
       numero: r.phone ?? null,
     };
   }
@@ -204,8 +209,8 @@ export async function atualizarWhatsAppDoSite(
     ok: true,
     titulo: `WhatsApp encontrado: ${r.whatsapp}`,
     detalhe: substitui
-      ? (atual ? `Substituí o fixo ${atual} — fixo não tem WhatsApp.${deBrinde}` : `Era o único número; virou o telefone do contato.${deBrinde}`)
-      : `Guardei como WhatsApp. O telefone ${atual} continua como está, porque também é celular.${deBrinde}`,
+      ? (atual ? `Substituí o fixo ${atual} — fixo não tem WhatsApp.${deBrinde}${avisoTls}` : `Era o único número; virou o telefone do contato.${deBrinde}${avisoTls}`)
+      : `Guardei como WhatsApp. O telefone ${atual} continua como está, porque também é celular.${deBrinde}${avisoTls}`,
     numero: r.whatsapp,
   };
 }

@@ -79,6 +79,26 @@ function mapBase(e: any): CnpjData {
     bairro: e.bairro || undefined,
     cep: e.cep || undefined,
     abertura: e.data_inicio || undefined,
+    // ============================================================
+    // A NOSSA BASE JÁ TEM OS SÓCIOS — E ELES ERAM DESCARTADOS
+    //
+    // `mapBase` mapeava 13 campos e ignorava `socios`, que a API do VPS entrega desde
+    // a v2. Só o provedor externo preenchia sócios. Resultado: quando a linha da busca
+    // vinha sem sócio, o Radar ia para a BrasilAPI — que tem rate-limit e devolve 429
+    // depois de poucas chamadas —, voltava vazio, e você recebia contatos com o NOME
+    // DA EMPRESA depois de ter pedido "empresa + sócios". Nada na tela distinguia isso
+    // de "a Receita não tem sócio registrado".
+    //
+    // A normalização aqui não é zelo: `socios` pode vir como lista de strings (v2) ou
+    // de objetos (v3), e logo abaixo o merge chama `nomeProprio(s)`, que espera string.
+    // Passar o objeto cru produziria exatamente o "[object Object]" de ontem.
+    // ============================================================
+    socios: Array.isArray(e.socios)
+      ? e.socios
+          .map((s: any) => (typeof s === "string" ? s : s?.nome || ""))
+          .map((n: string) => String(n || "").trim())
+          .filter(Boolean)
+      : undefined,
   };
 }
 
@@ -207,7 +227,13 @@ export async function enrichCnpj(cnpjRaw: string): Promise<{ data?: CnpjData; er
     logradouro: nomeProprio(pref(externo?.logradouro, base?.logradouro)),
     numero: pref(externo?.numero, base?.numero),
     complemento: pref(externo?.complemento, base?.complemento),
-    socios: sociosRaw?.map((s) => nomeProprio(s) || s).filter(Boolean),
+    // `String(s)` de propósito: mesmo com o mapeamento acima, um provedor externo pode
+    // devolver objeto no lugar de nome. Aqui nada pode virar "[object Object]".
+    socios: sociosRaw
+      ?.map((s: any) => (typeof s === "string" ? s : (s?.nome || s?.nome_socio || "")))
+      .map((n: any) => String(n || "").trim())
+      .filter(Boolean)
+      .map((n: string) => nomeProprio(n) || n),
     capital_social: pref(externo?.capital_social, base?.capital_social),
     natureza_juridica: nomeProprio(pref(externo?.natureza_juridica, base?.natureza_juridica)),
     abertura: pref(externo?.abertura, base?.abertura),

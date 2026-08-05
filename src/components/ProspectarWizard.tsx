@@ -131,7 +131,13 @@ export default function ProspectarWizard({
       setAviso(r?.avisoMulti || null);
       const novas: Empresa[] = r?.rows || [];
       if (offset === 0) { setResultados(novas); setTotal(r?.total ?? null); setSel(new Set()); }
-      else setResultados((p) => [...p, ...novas]);
+      // mesma proteção do Radar: a base pagina sem `order by`, então a página 2 repete
+      // linhas da 1 e a lista fica com CNPJ duplicado (checkbox compartilhado, contagem
+      // errada, "já existia" inventado no envio)
+      else setResultados((p) => {
+        const jaTenho = new Set(p.map((x) => x.cnpj));
+        return [...p, ...novas.filter((n: any) => !jaTenho.has(n.cnpj))];
+      });
       setNextOffset(typeof r?.nextOffset === "number" ? r.nextOffset : offset + novas.length);
       setTemMais(!!r?.temMais);
       setPasso(2);
@@ -422,7 +428,7 @@ export default function ProspectarWizard({
           </span>
           {temMais && (
             <button className="btn-ghost py-1 text-xs" onClick={() => buscar(nextOffset)} disabled={buscando}>
-              {buscando ? "Carregando…" : "Carregar mais 100"}
+              {buscando ? "Carregando…" : "Carregar mais"}
             </button>
           )}
         </div>

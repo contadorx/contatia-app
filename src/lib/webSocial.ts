@@ -85,19 +85,13 @@ export function extrairFacebook(html: string): string | null {
 }
 
 async function fetchText(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(15_000),
-      headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" },
-    });
-    if (!res.ok) return null;
-    const ct = res.headers.get("content-type") || "";
-    if (!ct.includes("text/html") && !ct.includes("application/xhtml")) return null;
-    return (await res.text()).slice(0, 3_000_000);
-  } catch {
-    return null;
-  }
+  // Delega para @/lib/baixarPagina: é lá que mora o tratamento de site com cadeia de
+  // certificado incompleta — comum em PME brasileira, e que fazia estas varreduras
+  // voltarem vazias dizendo "o site não publica esses dados" quando o problema era
+  // não ter conseguido entrar.
+  const { baixarPagina } = await import("@/lib/baixarPagina");
+  const r = await baixarPagina(url);
+  return r ? r.html : null;
 }
 
 export type RedesWeb = { instagram: string | null; linkedin: string | null; facebook: string | null; source: string | null };

@@ -29,6 +29,7 @@ import "server-only";
 import { extractWhatsApp, extractPhones } from "@/lib/webPhone";
 import { extractEmails, rank } from "@/lib/webEmail";
 import { extrairInstagram, extrairLinkedin, extrairFacebook } from "@/lib/webSocial";
+import { baixarPagina } from "@/lib/baixarPagina";
 
 // União das três listas, da mais provável para a menos.
 const CAMINHOS = [
@@ -53,33 +54,15 @@ export type AchadosSite = {
    *  diferentes, e confundir as duas já nos custou rodadas atrás de regex quando o
    *  problema era o download. */
   siteInacessivel: boolean;
+  /** o site só respondeu ignorando a cadeia do certificado (ver lib/baixarPagina) */
+  tlsFraco: boolean;
+  /** o endereço que respondeu — pode ser o com www, quando o sem www não abre */
+  hostUsado: string | null;
 };
 
-async function baixar(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(15_000),
-      headers: {
-        // Agente de navegador comum: "ContatiaBot" é convite para WAF bloquear.
-        // Não é disfarce — continuamos só lendo a página pública, sem executar nada.
-        "user-agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
-      },
-    });
-    if (!res.ok) return null;
-    const ct = res.headers.get("content-type") || "";
-    if (!ct.includes("text/html") && !ct.includes("application/xhtml")) return null;
-    // 3 MB: página em Elementor/WordPress passa de 500 KB só de CSS embutido no
-    // <head>, e o botão de WhatsApp costuma vir depois. Cortar antes disso era cortar
-    // exatamente o que se procura.
-    return (await res.text()).slice(0, 3_000_000);
-  } catch {
-    return null;
-  }
-}
+// O download mora em @/lib/baixarPagina: é lá que fica o tratamento de site com
+// cadeia de certificado incompleta, que é comum em PME brasileira e fazia a varredura
+// voltar vazia dizendo "o site não publica esses dados".
 
 export async function varrerSite(
   dominio: string,
@@ -89,6 +72,7 @@ export async function varrerSite(
   const vazio: AchadosSite = {
     instagram: null, linkedin: null, facebook: null, email: null, telefone: null, whatsapp: null,
     fonte: {}, paginasLidas: 0, paginasTentadas: 0, siteInacessivel: true,
+    tlsFraco: false, hostUsado: null,
   };
   if (!base) return vazio;
 
@@ -104,15 +88,35 @@ export async function varrerSite(
     achados.fonte[campo] = url;
   };
 
+  // ============================================================
+  // SEM www E COM www NÃO SÃO O MESMO ENDEREÇO
+  //
+  // O código normaliza tirando o `www.`, o que é certo para comparar domínios e
+  // errado para BUSCAR: existe site cujo certificado só cobre o www, ou cujo host sem
+  // www simplesmente não responde. A home decide: se ela não abrir de um jeito,
+  // tentamos o outro antes de desistir do site inteiro.
+  // ============================================================
+  let host = base;
+  {
+    const home = await baixarPagina(`https://${host}`);
+    if (!home) {
+      const comWww = await baixarPagina(`https://www.${base}`);
+      if (comWww) host = `www.${base}`;
+    }
+  }
+
   for (const caminho of CAMINHOS) {
     // Só https. O http foi retirado de propósito: dobrava as requisições para cobrir
     // um caso que praticamente não existe mais, e o `redirect: "follow"` já resolve
     // site que só responde em http e redireciona.
-    const url = `https://${base}${caminho}`;
-    const html = await baixar(url);
-    if (!html) continue;
+    const url = `https://${host}${caminho}`;
+    const pag = await baixarPagina(url);
+    if (!pag) continue;
+    const html = pag.html;
+    if (pag.tlsFraco) achados.tlsFraco = true;
     achados.paginasLidas++;
     achados.siteInacessivel = false;
+    achados.hostUsado = host;
 
     // ===== todos os extratores no MESMO html =====
     if (quero.has("whatsapp") && !achados.whatsapp) {
@@ -144,10 +148,10 @@ export async function varrerSite(
 
   if (!achados.email && emails.size) {
     const melhor = rank(Array.from(emails));
-    if (melhor) guardar("email", melhor, achados.fonte.email || `https://${base}`);
+    if (melhor) guardar("email", melhor, achados.fonte.email || `https://${host}`);
   }
   if (!achados.telefone && telefones.size) {
-    guardar("telefone", Array.from(telefones)[0], `https://${base}`);
+    guardar("telefone", Array.from(telefones)[0], `https://${host}`);
   }
 
   return achados;

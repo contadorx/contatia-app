@@ -185,7 +185,24 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
         setAssinaturaBusca(JSON.stringify(enviado));
         setSel(new Set());
       } else {
-        setResultados((prev) => [...prev, ...novas]);
+        // ============================================================
+      // A BASE PAGINA SEM ORDEM — ENTÃO A PÁGINA 2 REPETE LINHAS DA 1
+      //
+      // Isto já era conhecido e está documentado na exportação, que ganhou um `Set` de
+      // CNPJs vistos justamente por isso: `limit/offset` sem `order by` no Postgres
+      // devolve linhas repetidas entre páginas (e pula outras). A navegação nunca
+      // ganhou a mesma proteção.
+      //
+      // Sem ela, "Carregar mais" traz a mesma empresa duas vezes: `key={r.cnpj}`
+      // duplica (as duas linhas passam a compartilhar o checkbox — marcar uma marca a
+      // outra), "marcar todos" conta 250 onde há 248 distintas, e o envio volta
+      // dizendo "2 já existia(m)" para empresas que você nunca teve. Quem lê esse
+      // número como sinal de dedup está lendo algo inventado.
+      // ============================================================
+      setResultados((prev) => {
+        const jaTenho = new Set(prev.map((x) => x.cnpj));
+        return [...prev, ...novas.filter((n: any) => !jaTenho.has(n.cnpj))];
+      });
       }
       // paginação pelo offset BRUTO consumido da base (não pelo nº exibido), para o
       // "carregar mais" não repetir quando escondemos as já cadastradas.
@@ -224,6 +241,10 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
       let sufixo = modoSalvar === "empresa_contato" ? ". Veja em Empresas e Contatos." : ". Veja em Empresas.";
       if (r.limiteAtingido) sufixo += " (parei ao atingir o limite de contatos do seu plano.)";
       setMsg(partes.join(" · ") + sufixo);
+      // A esteira pode ter falhado mesmo com os contatos criados. Isso vai em ERRO, e
+      // não no recado de sucesso: é uma etapa que não vai acontecer sozinha e alguém
+      // precisa decidir o que fazer.
+      if (r.avisoEsteira) setErro(r.avisoEsteira);
       setSel(new Set());
     });
   }

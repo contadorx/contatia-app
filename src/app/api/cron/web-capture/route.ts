@@ -103,7 +103,7 @@ export async function GET(req: Request) {
   const grupos = Array.from(porDominio.values()).map((g) => g.slice());
 
   const prazo = Date.now() + 45_000;
-  let achou = 0, whats = 0, emails = 0, redes = 0, inacessivel = 0, adiados = 0, irmaosPoupados = 0;
+  let achou = 0, whats = 0, emails = 0, redes = 0, inacessivel = 0, adiados = 0, irmaosPoupados = 0, certificadoRuim = 0;
 
   let i = 0;
   const trabalhador = async () => {
@@ -144,6 +144,7 @@ export async function GET(req: Request) {
         continue;
       }
 
+      if (r.tlsFraco) certificadoRuim++;
       if (r.siteInacessivel) {
         inacessivel++;
         await admin.from("contacts").update({ web_capture: "notfound" }).eq("id", c.id);
@@ -211,5 +212,8 @@ export async function GET(req: Request) {
     // quantos sócios deixaram de ser lidos por já terem sido cobertos pelo irmão —
     // é o número que mostra o tamanho do desperdício que existia
     irmaosPoupados,
+    // sites que só abriram ignorando a cadeia do certificado: se este número for
+    // alto, é o mundo real, não um defeito nosso
+    certificadoRuim,
   });
 }

@@ -274,6 +274,28 @@ export async function contarNaBase(input: any) {
   if (!receitaConfigurada()) return { error: "Base da Receita não configurada." };
   if (cnaePerdido(input)) return { error: ERRO_CNAE_PERDIDO };
   const f = montarFiltro(input);
+
+  // ============================================================
+  // CONTAR O QUE FOI BUSCADO, E NÃO OUTRA COISA
+  //
+  // `montarFiltro` não conhece o campo de busca por nome — quem aplica isso é o
+  // `buscarNaBase`, que preenche `f.termo` depois. A contagem não fazia essa parte, e
+  // ainda testava `!f.termo` numa condição onde ele nunca poderia estar preenchido.
+  //
+  // Dois estragos visíveis: buscar "Silva Contabilidade" em SP e clicar em "tentar
+  // contar" devolvia o total de TODAS as empresas de SP ("mais de 100.000 — mostrando
+  // 12"); e buscar só por nome, sem UF nem atividade, respondia "Escolha um filtro
+  // antes de contar" com a lista de resultados na tela.
+  //
+  // O bloco abaixo é o mesmo do `buscarNaBase`, de propósito: contagem e busca têm de
+  // enxergar exatamente o mesmo filtro, ou o número não descreve a lista.
+  // ============================================================
+  const buscaC = typeof input?.busca === "string" ? input.busca.trim() : "";
+  const digitosC = buscaC.replace(/\D/g, "");
+  // CNPJ completo devolve no máximo uma empresa: contar é resposta pronta.
+  if (digitosC.length === 14) return { ok: true, total: 1 };
+  if (buscaC.length >= 3) f.termo = semAcento(buscaC);
+
   if (!f.atividade && !f.cnae && !f.uf && !f.termo) return { error: "Escolha um filtro antes de contar." };
   // limit 1: não queremos linhas, só o total. 50s de teto (a rota tem 60).
   const r = await buscarEmpresas({ ...f, limit: 1, offset: 0, contar: true }, 50_000);
@@ -576,6 +598,8 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
   //     estourar limite/timeout das APIs públicas quando a seleção é grande.
   const MAX_ENRIQUECER = 30;
   let enriquecidos = 0;
+  // (empresa + nome) já criado neste envio — ver o comentário no laço
+  const pessoaNaConta = new Set<string>();
 
   // ============================================================
   // O SÓCIO PODE VIR DE DUAS FORMAS — E PODE NÃO SER UMA PESSOA
@@ -614,7 +638,23 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
         qualificacao: String((cru as any).qualificacao || "").trim() || undefined,
         // `pessoa_juridica` da API nova; sem ela, o nome ainda entrega a maioria dos
         // casos (LTDA, S/A, PARTICIPACOES…)
-        pessoaJuridica: (cru as any).pessoa_juridica === true || pareceEmpresa(nome),
+        // ============================================================
+        // O CAMPO GANHA DA ADIVINHAÇÃO
+        //
+        // Era `pessoa_juridica === true || pareceEmpresa(nome)`. O `||` fazia a
+        // heurística vencer mesmo quando a Receita tinha dito `false`. E
+        // `pareceEmpresa` casa `\bsa\b` sobre o nome sem acento: a sócia "ANA PAULA
+        // DE SÁ" virava pessoa jurídica. Consequência: ela nunca entrava na fila de
+        // descoberta de e-mail (a fila exige pessoa física) e a ficha exibia o selo de
+        // sócio PJ para uma pessoa. Vale para qualquer "de Sá".
+        //
+        // Agora: se o campo veio, ele decide. A heurística só responde quando a API
+        // não mandou nada — o caso da v2.
+        // ============================================================
+        pessoaJuridica:
+          typeof (cru as any).pessoa_juridica === "boolean"
+            ? (cru as any).pessoa_juridica
+            : pareceEmpresa(nome),
         desde: (cru as any).desde || null,
       });
     }
@@ -674,6 +714,21 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
           domain: dominio,
           phone: e.telefone || null,
           porte: e.porte || null,
+          // ============================================================
+          // NÃO JOGAR FORA O QUE A BASE JÁ ENTREGOU
+          //
+          // O insert gravava 8 campos e descartava e-mail, bairro, CEP e a descrição
+          // do CNAE — todos presentes na resposta da busca e todos com coluna própria.
+          // O efeito era desconcertante: você via o e-mail na coluna "E-mail" da lista,
+          // mandava para Empresas, abria a ficha e o campo estava vazio. Como a conta
+          // passava a existir, o Radar marcava "✓ já na base" e reenviar não corrigia —
+          // só o "Enriquecer pelo CNPJ", que vai buscar na BrasilAPI um dado que já
+          // estava em mãos.
+          // ============================================================
+          email: email,
+          cnae_descricao: e.cnae_descricao || null,
+          bairro: e.bairro || null,
+          cep: e.cep || null,
           // custom guarda o que não tem coluna própria (Simples/MEI/situação). Vai
           // como objeto: colunas novas exigiriam migration, e isto aqui já existe.
           custom: { receita: { ...enquadramento(e), atualizado_em: new Date().toISOString() } },
@@ -712,6 +767,22 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
 
     for (const socio of pessoas) {
       const nome = socio.nome;
+      // ============================================================
+      // MATRIZ E FILIAL TRAZEM O MESMO SÓCIO
+      //
+      // O dedup de contato era por CNPJ do estabelecimento. Só que a base junta os
+      // sócios por `cnpj_basico`: matriz `…/0001-90` e filial `…/0002-71` devolvem o
+      // MESMO quadro societário. Selecionando as duas, o dedup por nome apontava as
+      // duas para uma única conta, e como os CNPJs diferem nada barrava o contato —
+      // "João Silva" entrava duas vezes na mesma empresa, os dois na fila de
+      // descoberta de e-mail e os dois inscritíveis na mesma cadência.
+      //
+      // A chave certa é (empresa + nome da pessoa), que é o que define duplicidade
+      // aos olhos de quem usa.
+      // ============================================================
+      const chavePessoa = `${account_id || cnpj}|${normNome(nome)}`;
+      if (pessoaNaConta.has(chavePessoa)) { pulados++; continue; }
+      pessoaNaConta.add(chavePessoa);
       if (contatosCriados >= budgetContatos) { limiteAtingido = true; break; }
       // o e-mail e o telefone são DA EMPRESA (não da pessoa): só o primeiro contato os
       // carrega — assim não duplicamos o mesmo e-mail corporativo em todos os sócios,
@@ -781,13 +852,28 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
   // hora em hora). Falha aqui não derruba o envio — os contatos já foram criados.
   // UPSERT, não insert: edq_contact_idx é UNIQUE em contact_id, então um contato que
   // já passou pela fila faria o lote inteiro estourar num insert simples.
+  // ============================================================
+  // SE A FILA NÃO ENTROU, O ENVIO PRECISA DIZER
+  //
+  // O erro deste upsert era descartado. O cliente Supabase não lança exceção, então
+  // uma recusa (rede, RLS num contexto de suporte, timeout do PostgREST) passava
+  // batida: a tela dizia "12 empresas e 34 contatos criados" e a etapa de descoberta
+  // de e-mail simplesmente nunca acontecia. Pior: o Radar não tem botão para
+  // re-enfileirar, então o silêncio era definitivo.
+  // ============================================================
+  let avisoEsteira: string | null = null;
   if (filaEmail.length) {
-    await supabase
+    const { error: erroFila } = await supabase
       .from("email_discovery_queue")
       .upsert(
         filaEmail.map((j) => ({ ...j, status: "pending", attempts: 0, result: null, last_error: null, processed_at: null })),
         { onConflict: "contact_id" }
       );
+    if (erroFila) {
+      avisoEsteira =
+        `Os contatos foram criados, mas ${filaEmail.length} não entraram na fila de descoberta de e-mail ` +
+        `(${(erroFila as any).message || "erro no banco"}). Rode a busca de e-mail na ficha, ou tente o envio de novo.`;
+    }
   }
 
   await logAction(supabase, {
@@ -806,5 +892,5 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
 
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/contas");
-  return { ok: true, empresasCriadas, contatosCriados, pulados, limiteAtingido, contatoIds, contaIds };
+  return { ok: true, empresasCriadas, contatosCriados, pulados, limiteAtingido, contatoIds, contaIds, avisoEsteira };
 }

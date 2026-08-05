@@ -53,19 +53,13 @@ export function rank(emails: string[]): string | null {
 }
 
 async function fetchText(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(8000),
-      headers: { "user-agent": "Mozilla/5.0 (compatible; ContatiaBot/1.0)" },
-    });
-    if (!res.ok) return null;
-    const ct = res.headers.get("content-type") || "";
-    if (!ct.includes("text/html") && !ct.includes("application/xhtml")) return null;
-    return (await res.text()).slice(0, 500_000);
-  } catch {
-    return null;
-  }
+  // Delega para @/lib/baixarPagina: é lá que mora o tratamento de site com cadeia de
+  // certificado incompleta — comum em PME brasileira, e que fazia estas varreduras
+  // voltarem vazias dizendo "o site não publica esses dados" quando o problema era
+  // não ter conseguido entrar.
+  const { baixarPagina } = await import("@/lib/baixarPagina");
+  const r = await baixarPagina(url);
+  return r ? r.html : null;
 }
 
 /** Procura um e-mail publicado no site do domínio. Devolve o melhor ou null. */

@@ -101,40 +101,13 @@ export function extractPhones(html: string): string[] {
 }
 
 async function fetchText(url: string): Promise<string | null> {
-  try {
-    // ============================================================
-    // TRÊS LIMITES QUE FAZIAM A CAPTURA FALHAR EM SILÊNCIO
-    //
-    // 1. TAMANHO — o corte era 500 KB. Página feita em Elementor/WordPress passa
-    //    disso só de CSS embutido no <head>, e o botão de WhatsApp costuma vir depois.
-    //    Cortávamos o HTML exatamente antes do que procurávamos. Agora 3 MB.
-    //
-    // 2. TEMPO — 6s. Site em hospedagem compartilhada, frio, com plugins, leva mais
-    //    que isso com frequência. Agora 15s, que ainda cabe no teto de 60s da rota.
-    //
-    // 3. USER-AGENT — "ContatiaBot" é convite para WAF bloquear. Um agente de
-    //    navegador comum passa. Não é disfarce: continuamos só lendo a página
-    //    pública, sem executar nada.
-    //
-    // Os três tinham o mesmo efeito visível: "o site não publica esses dados".
-    // ============================================================
-    const res = await fetch(url, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(15_000),
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
-      },
-    });
-    if (!res.ok) return null;
-    const ct = res.headers.get("content-type") || "";
-    if (!ct.includes("text/html") && !ct.includes("application/xhtml")) return null;
-    return (await res.text()).slice(0, 3_000_000);
-  } catch {
-    return null;
-  }
+  // Delega para @/lib/baixarPagina: é lá que mora o tratamento de site com cadeia de
+  // certificado incompleta — comum em PME brasileira, e que fazia estas varreduras
+  // voltarem vazias dizendo "o site não publica esses dados" quando o problema era
+  // não ter conseguido entrar.
+  const { baixarPagina } = await import("@/lib/baixarPagina");
+  const r = await baixarPagina(url);
+  return r ? r.html : null;
 }
 
 export type ContatoWeb = {
