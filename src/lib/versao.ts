@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.05-39";
+export const VERSAO_APP = "2026.08.05-40";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "testar endereco: texto e atalhos neutros de segmento; os prefixos que voce usa sobem para a frente";
+export const VERSAO_NOTAS = "detalhe de limite por caixa saiu da tela Hoje e foi para Config → Canais, onde vira acao";

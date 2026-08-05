@@ -56,7 +56,12 @@ function Chip({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-const RAMP = [10, 15, 20, 25, 30, 40, 50, 65, 80, 100, 125, 150, 175, 200];
+// A curva do aquecimento NÃO é redeclarada aqui. Ela estava copiada nesta tela, com
+// a contagem de dias antiga (blocos de 24h a partir do instante da criação), enquanto
+// o envio já usava a contagem por dia de calendário. Duas cópias da mesma regra
+// divergiram, e a configuração passou a mostrar um limite diferente do que o envio
+// aplicava — o pior tipo de tela: a que informa errado com convicção.
+import { effectiveDailyCap } from "@/lib/warmup";
 
 export default async function Config({ searchParams }: { searchParams?: { tab?: string } }) {
   const supabase = createClient();
@@ -110,12 +115,10 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
   const waPlatformReady = !!process.env.EVOLUTION_URL && !!process.env.EVOLUTION_API_KEY;
 
   const activeBoxes = rows.filter((a) => a.is_active);
-  const capOf = (a: any) => {
-    const target = Number(a.daily_cap) || 40;
-    const on = (a.warmup_stage ?? 0) !== -1;
-    const days = a.created_at ? Math.floor((Date.now() - new Date(a.created_at).getTime()) / 86400000) : 0;
-    return !on || days >= RAMP.length ? target : Math.min(RAMP[Math.max(0, days)], target);
-  };
+  // uma fonte só para o limite do dia — a mesma que o envio consulta
+  const detalheCap = (a: any) =>
+    effectiveDailyCap(a.created_at, Number(a.daily_cap) || 40, (a.warmup_stage ?? 0) !== -1);
+  const capOf = (a: any) => detalheCap(a).cap;
 
   // status de setup
   const idOk = !!(tenant as any)?.legal_name;
@@ -217,8 +220,14 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
                               onCompartilhar={async (c) => { "use server"; return definirCompartilhamentoCaixa(a.id, c); }}
                             />
                           </p>
+                          {/* O NÚMERO E O PORQUÊ, no lugar onde se resolve.
+                              "Ontem 10, hoje 10" tem duas causas opostas: a rampa
+                              (sobe amanhã, não faça nada) ou o limite configurado
+                              desta caixa (não sobe nunca, até você mudar — e o botão
+                              para mudar está logo abaixo). Sem a frase, os dois casos
+                              são o mesmo número na tela. */}
                           <p className="text-xs text-subtle">
-                            {warming ? `Aquecendo: hoje envia ${cap} e-mails. Sobe até ${target}/dia automaticamente.` : `Limite diário: ${target}/dia${on ? " (aquecida)" : " (aquecimento desligado)"}.`}
+                            <b className="text-ink">Hoje: {cap} e-mail(is)</b> — {detalheCap(a).motivo}.
                             {a.provider !== "gmail" && !a.verified && " · A conexão não validou no último teste — clique em Editar para corrigir host/porta/senha."}
                           </p>
                           {a.provider !== "gmail" && (
