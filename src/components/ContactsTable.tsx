@@ -74,6 +74,45 @@ function precisaRevisar(c: Contact): Revisao {
   return null;
 }
 
+// ============================================================
+// O E-MAIL EMBAIXO DO NOME — para decidir sem abrir a ficha
+//
+// A coluna "Contato" virou ação (acima), e isso tirou da tela a única informação que
+// permite julgar, no meio de uma lista, se o endereço ainda precisa de trabalho. Quem
+// revisa 200 linhas não quer abrir 200 fichas para descobrir que 150 já estavam boas.
+//
+// A regra é a MESMA que o enriquecimento individual e o em lote usam
+// (`ehCaixaDeBalcao` e `pareceEmailDaPessoa`, de @/lib/emailFinder) — nada de uma
+// segunda opinião aqui que diverge da primeira. Três respostas:
+//   bate com o nome → verde discreto, é só aceitar
+//   caixa geral     → âmbar: chega em alguém, mas não no decisor
+//   outro nome      → âmbar: o endereço é de outra pessoa da empresa
+// Sem e-mail não ganha linha: o alerta forte disso já está na coluna Contato, e repetir
+// só tiraria peso do que precisa de olho.
+// ============================================================
+type SinalEmail = { texto: string; cls: string; title: string };
+function sinalEmail(c: Contact): SinalEmail | null {
+  const email = String(c.email || "").trim();
+  if (!email) return null;
+  if (ehCaixaDeBalcao(email))
+    return {
+      texto: "caixa geral",
+      cls: "text-amber-700",
+      title: "Endereço compartilhado da empresa (contato@, financeiro@…). Chega em alguém, mas não no decisor — vale procurar o pessoal.",
+    };
+  if (!pareceEmailDaPessoa(email, c.name))
+    return {
+      texto: "outro nome",
+      cls: "text-amber-700",
+      title: "O endereço não parece ser desta pessoa. Pode ser de outro sócio ou ter sobrado de um cadastro antigo — confira antes de escrever.",
+    };
+  return {
+    texto: "bate com o nome",
+    cls: "text-emerald-700",
+    title: "O endereço combina com o nome do contato. Nada a fazer aqui — é só aceitar.",
+  };
+}
+
 // Estágio da esteira do Radar, derivado dos campos existentes (sem query extra por linha).
 // Ordem: raspando o site → descobrindo e-mail → verificando WhatsApp → pronto → sem canal.
 function esteiraStage(c: Contact): { label: string; cls: string; pulse: boolean } | null {
@@ -678,7 +717,7 @@ export default function ContactsTable({
               <th className="px-3 py-3">
                 <input type="checkbox" checked={allChecked} onChange={toggleAll} aria-label="Selecionar todos" />
               </th>
-              <th className="px-4 py-3 font-medium">Nome</th>
+              <th className="px-4 py-3 font-medium">Nome e e-mail</th>
               <th className="px-4 py-3 font-medium">Empresa</th>
               <th className="px-4 py-3 font-medium">Contato</th>
               <th className="px-4 py-3 font-medium">Origem</th>
@@ -707,6 +746,18 @@ export default function ContactsTable({
                           {st.pulse && <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current" />}
                           {st.label}
                         </span>
+                      );
+                    })()}
+                    {(() => {
+                      const sinal = sinalEmail(c);
+                      if (!sinal) return null;
+                      return (
+                        <div className="mt-0.5 flex items-baseline gap-1.5 text-[11px] font-normal leading-tight">
+                          <span className="min-w-0 truncate text-subtle" title={c.email || ""}>{c.email}</span>
+                          <span className={`shrink-0 ${sinal.cls}`} title={sinal.title}>
+                            · {sinal.texto}
+                          </span>
+                        </div>
                       );
                     })()}
                     {c.contact_tags && c.contact_tags.length > 0 && (
