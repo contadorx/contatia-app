@@ -258,16 +258,20 @@ export default function AtualizarDadosContato({
                 {c.nota}
               </p>
             )}
-            {/* Presa ao cartão do E-MAIL, e não num painel à parte: a pergunta "será
-                que existe fiscal@?" nasce olhando o endereço que está lá. Antes esta
-                caixa só existia enquanto o contato NÃO tinha e-mail — sumia
-                exatamente quando passava a ser útil. */}
-            {c.rotulo === "E-mail" && (
-              <TestarCaixa contactId={contactId} dominio={estado.dominio || null} emailAtual={estado.email || null} />
-            )}
           </div>
         ))}
       </div>
+
+      {/* ============================================================
+          LOGO ABAIXO DO E-MAIL, E EM LARGURA INTEIRA
+
+          Na primeira tentativa eu enfiei este bloco DENTRO do cartão de e-mail, que
+          é meia coluna e tem `truncate`. Um formulário com oito atalhos e dois campos
+          não cabe ali: fica espremido a ponto de não parecer um formulário — na
+          prática, invisível. Continuar "colado no e-mail" não exigia estar dentro do
+          cartão; exigia estar logo depois dele.
+          ============================================================ */}
+      <TestarCaixa contactId={contactId} dominio={estado.dominio || null} emailAtual={estado.email || null} />
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
         <button

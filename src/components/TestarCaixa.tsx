@@ -89,11 +89,11 @@ export default function TestarCaixa({
   const jaEhOAtual = !!emailAtual && testado.toLowerCase() === emailAtual.toLowerCase();
 
   return (
-    <div className="mt-2 rounded-lg border border-line bg-white px-2.5 py-2">
-      <p className="text-[11px] font-semibold text-ink">
-        Testar outra caixa {dom ? <span className="font-normal text-subtle">em {dom}</span> : null}
+    <div className="mt-2 rounded-lg border border-brand/30 bg-brand-soft/20 px-3 py-2.5">
+      <p className="text-sm font-semibold text-ink">
+        ✓ Testar outra caixa {dom ? <span className="font-normal text-subtle">em {dom}</span> : null}
       </p>
-      <p className="mt-0.5 text-[11px] text-subtle">
+      <p className="mt-0.5 text-xs text-subtle">
         Escritório costuma ter caixa por área. Digite só o começo do endereço — eu pergunto ao
         servidor se ela existe e, se existir, você troca aqui mesmo.
       </p>
@@ -105,7 +105,7 @@ export default function TestarCaixa({
             type="button"
             disabled={pending || !dom}
             onClick={() => testar(p)}
-            className="rounded-full border border-line px-2 py-0.5 text-[11px] text-subtle hover:border-brand hover:text-brand-dark disabled:opacity-40"
+            className="rounded-full border border-line bg-white px-2 py-0.5 text-xs text-subtle hover:border-brand hover:text-brand-dark disabled:opacity-40"
             title={dom ? `Testar ${p}@${dom}` : "Sem domínio para testar"}
           >
             {p}@
