@@ -11,19 +11,52 @@ export const dynamic = "force-dynamic";
 export default async function Contas({
   searchParams,
 }: {
-  searchParams: { tag?: string | string[]; q?: string; produto?: string | string[]; view?: string };
+  searchParams: { tag?: string | string[]; q?: string; produto?: string | string[]; view?: string; uf?: string | string[]; cidade?: string };
 }) {
   const supabase = createClient();
   const q = (searchParams.q || "").trim();
   const qSafe = q.slice(0, 80).replace(/[,()%*]/g, " ").trim();
+
+  // ============================================================
+  // LOCALIDADE FILTRA NO BANCO, NÃO NA TELA
+  //
+  // Tag, produto e "visão" são filtrados em memória sobre as 300 empresas que a
+  // consulta traz. Para localidade isso seria errado de um jeito silencioso: filtrar
+  // "Santo André" dentro das 300 mais recentes responderia "nenhuma empresa" para
+  // quem tem 40 em Santo André mais antigas que isso. Por isso UF e cidade entram na
+  // CONSULTA, junto com a busca por texto.
+  //
+  // O acento é o detalhe que decide se funciona: município vindo da Receita é gravado
+  // sem acento ("SANTO ANDRE"), e digitado à mão costuma vir com ("Santo André"). O
+  // Postgres não normaliza sozinho, então perguntamos das duas formas.
+  // ============================================================
+  const semAcento = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const ufs = comoLista(searchParams.uf).map((u) => u.toUpperCase().slice(0, 2)).filter((u) => /^[A-Z]{2}$/.test(u));
+  const cidade = (searchParams.cidade || "").trim().slice(0, 60).replace(/[,()%*]/g, " ").trim();
 
   let accountsQuery = supabase
     .from("accounts")
     .select("id, name, uf, municipio, cnpj, domain, contacts(id, name, role_title, email, last_activity_at), opportunities(id, title, value_mrr, status, product_id, products(id, name)), account_tags(tags(id, name, color))")
     .order("created_at", { ascending: false })
     .limit(300);
-  // busca por nome, CNPJ ou domínio
-  if (qSafe) accountsQuery = accountsQuery.or(`name.ilike.%${qSafe}%,cnpj.ilike.%${qSafe}%,domain.ilike.%${qSafe}%`);
+  // busca por nome, CNPJ, domínio — e também por cidade, que é o que a pessoa digita
+  // sem pensar em qual campo é qual
+  if (qSafe) {
+    const qSem = semAcento(qSafe);
+    const alternativas = [
+      `name.ilike.%${qSafe}%`, `cnpj.ilike.%${qSafe}%`, `domain.ilike.%${qSafe}%`,
+      `municipio.ilike.%${qSafe}%`,
+    ];
+    if (qSem !== qSafe) alternativas.push(`name.ilike.%${qSem}%`, `municipio.ilike.%${qSem}%`);
+    accountsQuery = accountsQuery.or(alternativas.join(","));
+  }
+  if (ufs.length) accountsQuery = accountsQuery.in("uf", ufs);
+  if (cidade) {
+    const cSem = semAcento(cidade);
+    accountsQuery = accountsQuery.or(
+      cSem !== cidade ? `municipio.ilike.%${cidade}%,municipio.ilike.%${cSem}%` : `municipio.ilike.%${cidade}%`
+    );
+  }
   // guarda o erro: sem isso, uma consulta que estoura o tempo limite vira "nenhuma
   // empresa" na tela — indistinguível de base vazia.
   const { data: accounts, error: erroEmpresas } = await accountsQuery;
@@ -96,6 +129,8 @@ export default async function Contas({
         q={q}
         tag={tagFilter}
         produto={produtoFilter}
+        uf={ufs}
+        cidade={cidade}
         tags={(allTags as { id: string; name: string }[]) || []}
         produtos={produtoList}
       />

@@ -51,6 +51,11 @@ export type EstadoContato = {
   emailSeloOk?: boolean;
   emailSeloAlerta?: boolean;
   telefone?: string | null;
+  // O número que a verificação CONFIRMOU. Pode ser diferente do `telefone`: o Brasil
+  // tem celular cadastrado sem o nono dígito, e a verificação testa as duas formas —
+  // 11 9506-4987 e 11 99506-4987 — gravando em `wa_number` a que respondeu. Abrir a
+  // conversa pelo `telefone` nesse caso é abrir com o número errado.
+  waNumero?: string | null;
   waCheckedAt?: string | null;
   instagram?: string | null;
   linkedin?: string | null;

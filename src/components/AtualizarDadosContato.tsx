@@ -176,7 +176,20 @@ export default function AtualizarDadosContato({
 
   const igHref = estado.instagram ? linkRede(estado.instagram, "https://instagram.com/") : null;
   const liHref = estado.linkedin ? linkRede(estado.linkedin, "https://linkedin.com/in/") : null;
-  const waHref = estado.telefone ? linkWa(estado.telefone) : null;
+  // ============================================================
+  // A CONVERSA ABRE NO NÚMERO QUE FOI CONFIRMADO
+  //
+  // O link usava `telefone`. Só que a verificação testa as duas formas do celular
+  // brasileiro (com e sem o nono dígito) e grava em `wa_number` a que existe. Quando
+  // a ficha guarda 11 9506-4987 e quem tem WhatsApp é 11 99506-4987, abrir pelo
+  // `telefone` abre uma conversa com outra pessoa — o mesmo estrago do fixo que virou
+  // celular de estranho.
+  // ============================================================
+  const numeroDoWhats = estado.waNumero || estado.telefone;
+  const waHref = numeroDoWhats ? linkWa(numeroDoWhats) : null;
+  const soDig = (t?: string | null) => (t || "").replace(/\D/g, "");
+  const waDiferente =
+    !!estado.waNumero && !!estado.telefone && soDig(estado.waNumero) !== soDig(estado.telefone);
 
   const canais: Canal[] = [
     {
@@ -203,7 +216,8 @@ export default function AtualizarDadosContato({
       // passada.
       href: estado.waStatus === "valid" ? waHref : null,
       nota:
-        estado.waStatus === "valid" ? `tem WhatsApp${dia(estado.waCheckedAt) ? ` · ${dia(estado.waCheckedAt)}` : ""}`
+        estado.waStatus === "valid"
+          ? `tem WhatsApp${waDiferente ? ` no número ${estado.waNumero}` : ""}${dia(estado.waCheckedAt) ? ` · ${dia(estado.waCheckedAt)}` : ""}`
         : estado.waStatus === "invalid" ? "este número não tem WhatsApp"
         : estado.telefone ? "não verificado"
         : null,

@@ -275,6 +275,7 @@ export default async function ContatoDetalhe({
                 emailSeloOk: rotuloSelo((c as any).custom?.email_check)?.ok || false,
                 emailSeloAlerta: rotuloSelo((c as any).custom?.email_check)?.alerta || false,
                 telefone: c.phone || null,
+                waNumero: (c as any).wa_number || null,
                 waCheckedAt: (c as any).wa_checked_at || null,
                 instagram: (c as any).instagram || null,
                 linkedin: (c as any).linkedin || null,

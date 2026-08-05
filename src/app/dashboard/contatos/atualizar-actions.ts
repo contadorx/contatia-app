@@ -133,6 +133,7 @@ async function lerEstado(supabase: any, id: string): Promise<EstadoContato | nul
     emailSeloOk: rotuloSelo((c.custom as any)?.email_check)?.ok || false,
     emailSeloAlerta: rotuloSelo((c.custom as any)?.email_check)?.alerta || false,
     telefone: c.phone || null,
+    waNumero: c.wa_number || null,
     waCheckedAt: c.wa_checked_at || null,
     instagram: c.instagram || null,
     linkedin: c.linkedin || null,
