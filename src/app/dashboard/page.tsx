@@ -189,9 +189,12 @@ export default async function Today() {
     idsEngajou.length
       ? supabase
           .from("enrollments")
-          .select("contact_id, created_at, sequences(name)")
+          // `started_at`, não `created_at` — ver o comentário na ficha do contato.
+          // Aqui o estrago era mudo: a cadência "provável" do bloco Engajou nunca
+          // aparecia, e ninguém liga um espaço em branco a uma consulta recusada.
+          .select("contact_id, started_at, sequences(name)")
           .in("contact_id", idsEngajou)
-          .order("created_at", { ascending: false })
+          .order("started_at", { ascending: false })
       : Promise.resolve({ data: [] as any[] }),
   ]);
   const cadenciaDeReserva: Record<string, string> = {};

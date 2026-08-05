@@ -110,10 +110,25 @@ export default async function ContatoDetalhe({
     .maybeSingle();
   if (!contact) notFound();
 
-  const [{ data: sequences }, { data: enrollments }, { data: tasks }, { data: events }, { data: meetings }, { data: opps }, { data: irmaos }] =
+  // O `error` das consultas da ficha deixou de ser descartado. Foi assim que um
+  // `.order()` numa coluna inexistente virou "Nenhuma cadência ainda" para um contato
+  // com duas cadências — sem nada na tela indicando que houve falha.
+  const [{ data: sequences }, { data: enrollments, error: erroEnr }, { data: tasks }, { data: events }, { data: meetings }, { data: opps }, { data: irmaos }] =
     await Promise.all([
       supabase.from("sequences").select("id, name").eq("is_active", true),
-      supabase.from("enrollments").select("id, status, sequences(name)").eq("contact_id", params.id).order("created_at", { ascending: false }),
+      // ============================================================
+      // A COLUNA CHAMA started_at, E NÃO created_at
+      //
+      // Este `.order("created_at")` derrubava a consulta INTEIRA: o PostgREST responde
+      // 400 ("column enrollments.created_at does not exist"), `data` volta null, e o
+      // `error` era descartado. Resultado na tela: "Nenhuma cadência ainda" para um
+      // contato com DUAS cadências ativas. Nada de errado aparecia — o app
+      // simplesmente afirmava o contrário da verdade.
+      //
+      // A tabela nasceu na 0001 com `started_at`. Ninguém nunca renomeou; o código é
+      // que assumiu o nome mais comum.
+      // ============================================================
+      supabase.from("enrollments").select("id, status, started_at, sequences(name)").eq("contact_id", params.id).order("started_at", { ascending: false }),
       supabase.from("tasks").select("id, channel, title, due_date").eq("contact_id", params.id).eq("status", "pending").order("due_date", { ascending: true }),
       supabase.from("events").select("id, type, created_at, meta").eq("contact_id", params.id).order("created_at", { ascending: false }).limit(50),
       supabase.from("meetings").select("id, title, datetime, status").eq("contact_id", params.id).order("datetime", { ascending: false }),
@@ -443,7 +458,21 @@ export default async function ContatoDetalhe({
           <div>
             <h2 className="mb-3 font-display text-lg font-bold">Cadências</h2>
             <div className="card p-4">
-              <ContactCadences enrollments={enr} />
+              {erroEnr ? (
+                // "não tem cadência" e "não consegui ler as cadências" são coisas
+                // opostas. Confundir as duas é dizer ao operador que o trabalho dele
+                // sumiu.
+                <div className="rounded-lg border border-danger/30 bg-danger/5 p-3 text-sm">
+                  <p className="font-semibold text-danger">Não consegui carregar as cadências deste contato.</p>
+                  <p className="mt-1 text-subtle">
+                    Isto NÃO quer dizer que ele não tem nenhuma — quer dizer que a consulta falhou.
+                    Recarregue a página; se persistir, me mande a linha abaixo.
+                  </p>
+                  <p className="mt-2 font-mono text-[11px] text-subtle">{erroEnr.message}</p>
+                </div>
+              ) : (
+                <ContactCadences enrollments={enr} />
+              )}
             </div>
           </div>
 

@@ -26,9 +26,11 @@ import type { JornadaCadencia, PassoJornada } from "@/components/JornadaContato"
 export async function montarJornada(supabase: any, contactId: string): Promise<JornadaCadencia[]> {
   const { data: enrs } = await supabase
     .from("enrollments")
-    .select("id, status, created_at, sequence_id, sequences(name)")
+    // `started_at` é o nome real da coluna (0001). Pedir `created_at` faz o PostgREST
+    // recusar a consulta inteira, e a Jornada apareceria vazia para quem tem cadência.
+    .select("id, status, started_at, sequence_id, sequences(name)")
     .eq("contact_id", contactId)
-    .order("created_at", { ascending: false });
+    .order("started_at", { ascending: false });
 
   const lista = (enrs as any[]) || [];
   if (!lista.length) return [];
@@ -135,7 +137,7 @@ export async function montarJornada(supabase: any, contactId: string): Promise<J
       enrollmentId: e.id as string,
       cadencia: (e.sequences?.name as string) || "Cadência",
       status: (e.status as string) || "active",
-      desde: (e.created_at as string) || null,
+      desde: (e.started_at as string) || null,
       respondeuEm: e.status === "replied" ? respondeuEm : null,
       passos,
     };
