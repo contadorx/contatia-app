@@ -26,8 +26,10 @@ import { useRouter } from "next/navigation";
 import { verificarWhatsAppLote } from "@/app/dashboard/contatos/wa-actions";
 import { descobrirEmailsLote } from "@/app/dashboard/prospectar/actions";
 import { capturarRedesDoSite } from "@/app/dashboard/contatos/social-actions";
+import { enriquecerReceitaLote } from "@/app/dashboard/contatos/receita-lote-actions";
 
 const LOTE_WA = 60;
+const LOTE_RECEITA = 8;
 const LOTE_REDES = 8;
 const LOTE_EMAIL = 6;
 
@@ -37,6 +39,8 @@ export type AlvoCanal = {
   temTelefone: boolean;
   temRede: boolean;      // já tem instagram OU linkedin
   temDominio: boolean;   // sem site não há onde procurar rede/e-mail
+  temCnpj?: boolean;     // dá para consultar a Receita
+  enriquecido?: boolean; // já consultada
 };
 
 function tempo(ms: number) {
@@ -48,25 +52,40 @@ function tempo(ms: number) {
 export default function CompletarCanais({ alvos, onFim }: { alvos: AlvoCanal[]; onFim?: () => void }) {
   const router = useRouter();
   const [rodando, setRodando] = useState(false);
-  const [fase, setFase] = useState<"wa" | "redes" | "email" | null>(null);
+  const [fase, setFase] = useState<"receita" | "wa" | "redes" | "email" | null>(null);
   const [feitos, setFeitos] = useState(0);
   const [total, setTotal] = useState(0);
   const [inicio, setInicio] = useState(0);
   const [agora, setAgora] = useState(0);
-  const [placar, setPlacar] = useState({ comWa: 0, semWa: 0, ig: 0, li: 0, email: 0 });
+  const [placar, setPlacar] = useState({ comWa: 0, semWa: 0, ig: 0, li: 0, email: 0, receita: 0, dominios: 0 });
   const [erros, setErros] = useState<string[]>([]);
   const [fim, setFim] = useState<string | null>(null);
   const pararRef = useRef(false);
 
-  // Quem entra em cada fase. O número no botão é honesto: conta só quem PRECISA.
+  // ============================================================
+  // A RECEITA VEM PRIMEIRO — É ELA QUE DESTRAVA O RESTO
+  //
+  // O lote começava na verificação de WhatsApp e nunca consultava a Receita. Para um
+  // contato importado só com CNPJ — a maioria do que vem de planilha — isso quer
+  // dizer: sem domínio, logo sem site para ler, logo sem e-mail para descobrir. As
+  // fases seguintes rodavam e não achavam nada, e o operador lia "não tem dados
+  // publicados" sobre uma base que nunca tinha sido consultada na origem.
+  //
+  // A ordem agora é a MESMA do botão individual da ficha: Receita → site → e-mail →
+  // WhatsApp. Não por simetria: porque cada passo alimenta o seguinte.
+  // ============================================================
+  const paraReceita = alvos.filter((a) => a.temCnpj && !a.enriquecido);
   const paraWa = alvos.filter((a) => a.temTelefone);
-  const paraRedes = alvos.filter((a) => a.temDominio && !a.temRede);
+  // Depois da Receita, contato que estava sem domínio pode passar a ter. Por isso o
+  // alvo do site inclui quem VAI ser enriquecido, e não só quem já tem domínio hoje.
+  const paraRedes = alvos.filter((a) => (a.temDominio || (a.temCnpj && !a.enriquecido)) && !a.temRede);
   const paraEmail = alvos.filter((a) => !a.temEmail);
-  const totalPrevisto = paraWa.length + paraRedes.length + paraEmail.length;
+  const totalPrevisto = paraReceita.length + paraWa.length + paraRedes.length + paraEmail.length;
 
   const FASE_TXT: Record<string, string> = {
+    receita: "Consultando o CNPJ na base da Receita…",
     wa: "Verificando WhatsApp…",
-    redes: "Procurando Instagram e LinkedIn no site…",
+    redes: "Lendo o site (telefone, e-mail publicado, Instagram e LinkedIn)…",
     email: "Procurando e-mails no servidor de cada domínio…",
   };
 
@@ -78,18 +97,18 @@ export default function CompletarCanais({ alvos, onFim }: { alvos: AlvoCanal[]; 
     pararRef.current = false;
     setRodando(true); setErros([]); setFim(null); setFeitos(0);
     setTotal(totalPrevisto);
-    setPlacar({ comWa: 0, semWa: 0, ig: 0, li: 0, email: 0 });
+    setPlacar({ comWa: 0, semWa: 0, ig: 0, li: 0, email: 0, receita: 0, dominios: 0 });
     const t0 = Date.now();
     setInicio(t0); setAgora(t0);
     const relogio = setInterval(() => setAgora(Date.now()), 1000);
 
     let feito = 0;
-    const acc = { comWa: 0, semWa: 0, ig: 0, li: 0, email: 0 };
+    const acc = { comWa: 0, semWa: 0, ig: 0, li: 0, email: 0, receita: 0, dominios: 0 };
     const errs: string[] = [];
 
     // roda uma fase em lotes; devolve quantos itens foram processados
     async function faseLote<T>(
-      nome: "wa" | "redes" | "email",
+      nome: "receita" | "wa" | "redes" | "email",
       itens: AlvoCanal[],
       tamanho: number,
       exec: (ids: string[]) => Promise<any>,
@@ -123,7 +142,12 @@ export default function CompletarCanais({ alvos, onFim }: { alvos: AlvoCanal[]; 
     }
 
     try {
-      await faseLote("wa", paraWa, LOTE_WA, (ids) => verificarWhatsAppLote(ids), (r) => {
+      // 1) Receita: é o passo que pode CRIAR o domínio de quem só tinha CNPJ
+      await faseLote("receita", paraReceita, LOTE_RECEITA, (ids) => enriquecerReceitaLote(ids), (r) => {
+        acc.receita += r?.enriquecidos || 0;
+        acc.dominios += r?.ganhouDominio || 0;
+      });
+      if (!pararRef.current) await faseLote("wa", paraWa, LOTE_WA, (ids) => verificarWhatsAppLote(ids), (r) => {
         acc.comWa += r?.comWa || 0; acc.semWa += r?.semWa || 0;
       });
       if (!pararRef.current) {
@@ -141,6 +165,7 @@ export default function CompletarCanais({ alvos, onFim }: { alvos: AlvoCanal[]; 
       setRodando(false); setFase(null);
       setFim(
         `${pararRef.current ? "Parado" : "Pronto"} em ${tempo(Date.now() - t0)} · ` +
+        `${acc.receita} da Receita${acc.dominios ? ` (${acc.dominios} ganharam domínio)` : ""} · ` +
         `${acc.comWa} com WhatsApp · ${acc.email} e-mail(is) · ${acc.ig} Instagram · ${acc.li} LinkedIn.`
       );
       setErros([...errs]);

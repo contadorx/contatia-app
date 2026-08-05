@@ -1,6 +1,7 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { pauseEnrollment, resumeEnrollment, stopEnrollment } from "@/app/dashboard/cadencias/actions";
 
 type Enr = { id: string; status: string; sequences: { name: string } | null };
@@ -13,12 +14,41 @@ const STATUS: Record<string, { l: string; c: string }> = {
   stopped: { l: "Parada", c: "bg-muted text-subtle" },
 };
 
+// ============================================================
+// DESINSCREVER PRECISA PARECER UMA AÇÃO
+//
+// A saída existia: um link cinza de 12px escrito "remover", do lado de "pausar", com
+// o mesmo peso visual do resto. Quem inscreve na cadência errada procura por
+// "desinscrever" ou "cancelar" e não encontra nada — o verbo estava errado e a
+// aparência dizia "detalhe", não "botão".
+//
+// E o retorno das três ações era descartado (`void (await ...)`). Se o servidor
+// recusasse, a tela não mudava e nada era dito: o operador clicava de novo achando
+// que não tinha clicado.
+// ============================================================
 export default function ContactCadences({ enrollments }: { enrollments: Enr[] }) {
   const [pending, start] = useTransition();
+  const [erro, setErro] = useState<string | null>(null);
+  const router = useRouter();
+
+  function acao(fn: () => Promise<any>) {
+    setErro(null);
+    start(async () => {
+      try {
+        const r: any = await fn();
+        if (r?.error) { setErro(r.error); return; }
+        router.refresh();
+      } catch (e: any) {
+        setErro(e?.message || "Não consegui falar com o servidor.");
+      }
+    });
+  }
+
   if (!enrollments.length) return <p className="text-sm text-subtle">Nenhuma cadência ainda. Use &ldquo;Inscrever&rdquo; acima.</p>;
 
   return (
     <div className="space-y-2">
+      {erro && <p className="rounded-lg bg-danger/10 px-3 py-2 text-xs font-medium text-danger">{erro}</p>}
       {enrollments.map((e) => {
         const st = STATUS[e.status] || STATUS.stopped;
         return (
@@ -29,22 +59,35 @@ export default function ContactCadences({ enrollments }: { enrollments: Enr[] })
             </div>
             <div className="flex items-center gap-3">
               {e.status === "active" && (
-                <button className="text-xs text-subtle hover:text-warn" disabled={pending} onClick={() => start(async () => void (await pauseEnrollment(e.id)))}>
-                  pausar
+                <button
+                  className="rounded-lg border border-line bg-white px-2 py-1 text-xs font-medium hover:bg-muted"
+                  disabled={pending}
+                  onClick={() => acao(() => pauseEnrollment(e.id))}
+                >
+                  Pausar
                 </button>
               )}
               {e.status === "paused" && (
-                <button className="text-xs text-subtle hover:text-signal" disabled={pending} onClick={() => start(async () => void (await resumeEnrollment(e.id)))}>
-                  retomar
+                <button
+                  className="rounded-lg border border-line bg-white px-2 py-1 text-xs font-medium hover:bg-muted"
+                  disabled={pending}
+                  onClick={() => acao(() => resumeEnrollment(e.id))}
+                >
+                  Retomar
                 </button>
               )}
               {(e.status === "active" || e.status === "paused") && (
                 <button
-                  className="text-xs text-subtle hover:text-danger"
+                  className="rounded-lg border border-danger/40 bg-white px-2 py-1 text-xs font-medium text-danger hover:bg-danger/5"
                   disabled={pending}
-                  onClick={() => { if (confirm("Remover este contato da cadência? As tarefas pendentes serão canceladas.")) start(async () => void (await stopEnrollment(e.id))); }}
+                  title="Tira o contato desta cadência e cancela os toques que ainda não aconteceram. O histórico do que já foi enviado permanece."
+                  onClick={() => {
+                    if (confirm(`Desinscrever de "${e.sequences?.name || "esta cadência"}"?\n\nOs toques que ainda não aconteceram serão cancelados. O que já foi enviado continua no histórico.`)) {
+                      acao(() => stopEnrollment(e.id));
+                    }
+                  }}
                 >
-                  remover
+                  ✕ Desinscrever
                 </button>
               )}
             </div>

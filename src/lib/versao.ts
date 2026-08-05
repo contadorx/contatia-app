@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.05-41";
+export const VERSAO_APP = "2026.08.05-42";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "envio em massa explica por que nao saiu · Jornada na ficha: recebeu, abriu, clicou, passo a passo";
+export const VERSAO_NOTAS = "Desinscrever visivel na Jornada e nas Cadencias · lote passa a consultar a Receita primeiro, como o individual";

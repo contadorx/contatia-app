@@ -22,7 +22,12 @@
 // tela. Clique é sinal firme; abertura é piso.
 // ============================================================
 
+"use client";
+
 import Link from "next/link";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { stopEnrollment } from "@/app/dashboard/cadencias/actions";
 import { dataHora, dataDoDia } from "@/lib/datas";
 
 export type PassoJornada = {
@@ -70,6 +75,26 @@ function Marca({ ok, alerta, children }: { ok?: boolean; alerta?: boolean; child
 }
 
 export default function JornadaContato({ jornada }: { jornada: JornadaCadencia[] }) {
+  // A cadência errada é percebida AQUI — é este bloco que mostra o que está saindo.
+  // Obrigar a rolar até outro painel para desfazer é atrito no pior momento.
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [erro, setErro] = useState<string | null>(null);
+
+  function desinscrever(id: string, nome: string) {
+    if (!confirm(`Desinscrever de "${nome}"?\n\nOs toques que ainda não aconteceram serão cancelados. O que já foi enviado continua no histórico.`)) return;
+    setErro(null);
+    start(async () => {
+      try {
+        const r: any = await stopEnrollment(id);
+        if (r?.error) { setErro(r.error); return; }
+        router.refresh();
+      } catch (e: any) {
+        setErro(e?.message || "Não consegui falar com o servidor.");
+      }
+    });
+  }
+
   if (!jornada.length) {
     return (
       <div className="card mt-4 p-5">
@@ -89,6 +114,8 @@ export default function JornadaContato({ jornada }: { jornada: JornadaCadencia[]
         O que este contato recebeu e o que fez com cada mensagem, na ordem do processo.
       </p>
 
+      {erro && <p className="mt-2 rounded-lg bg-danger/10 px-3 py-2 text-xs font-medium text-danger">{erro}</p>}
+
       <div className="mt-4 space-y-5">
         {jornada.map((c) => {
           const selo = SELO_CADENCIA[c.status] || { txt: c.status, cls: "bg-muted text-subtle" };
@@ -101,6 +128,17 @@ export default function JornadaContato({ jornada }: { jornada: JornadaCadencia[]
                 <span className="text-sm font-semibold text-ink">{c.cadencia}</span>
                 <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${selo.cls}`}>{selo.txt}</span>
                 {c.desde && <span className="text-xs text-subtle">desde {dataDoDia(String(c.desde).slice(0, 10))}</span>}
+                {(c.status === "active" || c.status === "paused") && (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => desinscrever(c.enrollmentId, c.cadencia)}
+                    className="ml-auto rounded-lg border border-danger/40 bg-white px-2 py-0.5 text-[11px] font-medium text-danger hover:bg-danger/5 disabled:opacity-40"
+                    title="Tira o contato desta cadência e cancela os toques que ainda não aconteceram."
+                  >
+                    ✕ Desinscrever
+                  </button>
+                )}
               </div>
               {/* o resumo em números vem antes da lista: responde "vale a pena olhar?" */}
               <p className="mt-0.5 text-xs text-subtle">

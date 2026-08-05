@@ -39,6 +39,9 @@ type Contact = {
   instagram_conferido_at?: string | null;
   linkedin_conferido_at?: string | null;
   emailPendente?: boolean;
+  // usados pela fase da Receita no "Completar canais" (a lista já traz `*`)
+  cnpj?: string | null;
+  custom?: Record<string, any> | null;
   contact_tags?: { tag_id: string; tags: { id: string; name: string; color: string } | null }[];
 };
 
@@ -525,6 +528,11 @@ export default function ContactsTable({
               temTelefone: !!c.phone,
               temRede: !!(c.instagram || c.linkedin),
               temDominio: true,   // o servidor confere o domínio real e devolve "sem domínio"
+              // A fase da Receita precisa saber quem tem CNPJ e quem já foi consultado.
+              // `custom.enriched_at` é a mesma marca que o passo individual usa — sem
+              // ela, o lote repetiria consulta externa que já foi paga.
+              temCnpj: !!(c as any).cnpj,
+              enriquecido: !!((c as any).custom?.enriched_at),
             }))}
           />
 
