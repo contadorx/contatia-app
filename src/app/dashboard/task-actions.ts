@@ -497,7 +497,46 @@ export async function sendAllEmailTasks() {
     .order("due_date", { ascending: true })
     .limit(TETO_POR_CLIQUE);
   const ids = ((tasks as any[]) || []).map((t) => t.id);
-  if (!ids.length) return { ok: true, sent: 0, failed: 0, restantes: 0 };
+
+  // ============================================================
+  // "ENVIEI E NÃO SAIU NADA" PRECISA DE UMA RESPOSTA, NÃO DE UM ZERO
+  //
+  // Sem tarefa vencida, esta função devolvia `sent: 0` e a tela escrevia
+  // "✓ 0 e-mail(is) enviado(s)." — que é verdade e não informa nada. Quem clica quer
+  // saber POR QUE não saiu, e as causas são bem diferentes entre si:
+  //
+  //   · não há tarefa de e-mail nenhuma (ninguém foi inscrito em cadência de e-mail);
+  //   · há, mas vencem nos próximos dias — o motor agenda, não dispara antes da hora;
+  //   · há vencidas, mas os contatos não têm e-mail, ou estão suprimidos;
+  //   · as caixas bateram o limite do dia.
+  //
+  // As duas primeiras são respondidas aqui, ANTES de tentar enviar, porque nesses
+  // casos não há nem o que tentar.
+  // ============================================================
+  if (!ids.length) {
+    const { count: futuras } = await supabase
+      .from("tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("channel", "email")
+      .eq("status", "pending")
+      .gt("due_date", today);
+    const { data: proxima } = await supabase
+      .from("tasks")
+      .select("due_date")
+      .eq("channel", "email")
+      .eq("status", "pending")
+      .gt("due_date", today)
+      .order("due_date", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    const quando = (proxima as any)?.due_date ? String((proxima as any).due_date).split("-").reverse().join("/") : null;
+    return {
+      ok: true, sent: 0, failed: 0, restantes: 0,
+      diagnostico: (futuras ?? 0) > 0
+        ? `Nenhum e-mail vence hoje. Há ${futuras} agendado(s) para os próximos dias${quando ? ` — o primeiro em ${quando}` : ""}. A cadência dispara na data de cada passo; este botão só envia o que já venceu.`
+        : "Não há nenhuma tarefa de e-mail pendente. Inscreva contatos numa cadência que tenha passo de e-mail — ou confira se as tarefas foram concluídas/puladas.",
+    };
+  }
 
   const inicio = Date.now();
   let sent = 0;
@@ -505,6 +544,7 @@ export async function sendAllEmailTasks() {
   let limiteAtingido: string | null = null;
   let primeiroErro: string | null = null;
   const porCaixa: Record<string, number> = {};
+  const motivos: Record<string, number> = {};
   let i = 0;
 
   for (; i < ids.length; i++) {
@@ -517,6 +557,10 @@ export async function sendAllEmailTasks() {
     }
     failed++;
     if (!primeiroErro && res?.error) primeiroErro = res.error;
+    // Agrupar os motivos: com 40 tarefas de contatos sem e-mail, mostrar só o primeiro
+    // erro faz parecer caso isolado. O número ao lado do motivo é o que revela o
+    // padrão — e o padrão é o que se conserta.
+    if (res?.error) motivos[res.error] = (motivos[res.error] || 0) + 1;
     // Limite diário atingido: PARAR. Insistir só produz 200 falhas iguais e some com o
     // motivo no meio delas.
     if (res?.error && /[Ll]imite/.test(res.error)) { limiteAtingido = res.error; break; }
@@ -524,6 +568,13 @@ export async function sendAllEmailTasks() {
 
   const processados = i;
   const restantes = Math.max(0, ids.length - processados);
+
+  // Nada saiu mesmo tendo o que tentar: o motivo mais frequente é a resposta.
+  const maisComum = Object.entries(motivos).sort((a, b) => b[1] - a[1])[0];
+  const diagnostico =
+    sent === 0 && maisComum
+      ? `Nenhum e-mail saiu. Motivo mais comum (${maisComum[1]} de ${processados}): ${maisComum[0]}`
+      : null;
 
   revalidatePath("/dashboard");
   return {
@@ -534,6 +585,9 @@ export async function sendAllEmailTasks() {
     limiteAtingido,
     primeiroErro,
     porCaixa,
+    diagnostico,
+    // todos os motivos, do mais frequente para o menos
+    motivos: Object.entries(motivos).sort((a, b) => b[1] - a[1]).map(([m, n]) => `${n}× ${m}`),
     // total do dia por caixa, para a tela poder mostrar de onde saiu
     detalhe: Object.entries(porCaixa).map(([caixa, n]) => `${n} por ${caixa}`).join(", "),
   };

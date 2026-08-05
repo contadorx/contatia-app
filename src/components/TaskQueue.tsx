@@ -165,7 +165,8 @@ export default function TaskQueue({
     start(async () => {
       const res = (await sendAllEmailTasks()) as
         { sent?: number; failed?: number; restantes?: number; limiteAtingido?: string | null;
-          primeiroErro?: string | null; detalhe?: string; error?: string } | undefined;
+          primeiroErro?: string | null; detalhe?: string; error?: string;
+          diagnostico?: string | null; motivos?: string[] } | undefined;
 
       // resposta vazia = função morta por tempo. Antes isso não dizia nada, e a pessoa
       // clicava de novo — reenviando o que já tinha saído.
@@ -178,6 +179,9 @@ export default function TaskQueue({
       }
       if (res.error) { setErr(res.error); return; }
 
+      // Zero enviados com explicação NÃO é mensagem de sucesso: vai no lugar do erro,
+      // que é onde o operador olha quando algo não aconteceu.
+      if (!res.sent && res.diagnostico) { setErr(res.diagnostico); setBulkMsg(null); return; }
       const partes = [`✓ ${res.sent ?? 0} e-mail(is) enviado(s)`];
       if (res.detalhe) partes.push(res.detalhe);
       if (res.failed) partes.push(`${res.failed} falharam`);
@@ -186,6 +190,7 @@ export default function TaskQueue({
       // O limite é a informação mais importante do lote: sem destaque, ela some no meio
       // do resumo e a pessoa acha que enviou tudo.
       if (res.limiteAtingido) setErr(res.limiteAtingido);
+      else if (res.failed && res.motivos?.length) setErr(`Não saíram: ${res.motivos.slice(0, 3).join(" · ")}`);
       else if (res.failed && res.primeiroErro) setErr(`Primeira falha: ${res.primeiroErro}`);
     });
   }

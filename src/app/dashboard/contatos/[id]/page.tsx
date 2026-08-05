@@ -19,6 +19,8 @@ import RevisarContato from "@/components/RevisarContato";
 import AtualizarDadosContato from "@/components/AtualizarDadosContato";
 import RedesContato from "@/components/RedesContato";
 import PainelRecolhivel from "@/components/PainelRecolhivel";
+import JornadaContato from "@/components/JornadaContato";
+import { montarJornada } from "@/lib/jornada";
 import { EmailVerifyBadge } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
 import { produtosDoContato } from "@/lib/produtos";
@@ -132,6 +134,14 @@ export default async function ContatoDetalhe({
     ]);
 
   const produtos = await produtosDoContato(supabase, params.id);
+  // A jornada é montada no servidor a partir de tarefas + eventos + aberturas +
+  // cliques. Se qualquer peça faltar, ela vem menor — nunca derruba a ficha.
+  let jornada: any[] = [];
+  try {
+    jornada = await montarJornada(supabase, params.id);
+  } catch {
+    jornada = [];
+  }
 
   const c = contact as any;
   const score = c.score ?? 0;
@@ -495,8 +505,17 @@ export default async function ContatoDetalhe({
           </div>
         </div>
 
+        {/* ============================================================
+            A JORNADA VEM ANTES DA LINHA DO TEMPO
+            A linha do tempo é auditoria: tudo o que aconteceu, em ordem, misturado.
+            A jornada responde a pergunta que se faz ANTES de ligar — em que pé está
+            esta pessoa, o que ela recebeu, o que abriu, o que clicou, e o que ainda
+            vai receber. Quem lê a ficha para agir precisa dessa primeiro.
+            ============================================================ */}
+        <JornadaContato jornada={jornada} />
+
         {/* Linha do tempo */}
-        <div>
+        <div className="mt-6">
           <h2 className="mb-3 font-display text-lg font-bold">Linha do tempo</h2>
           <div className="card p-5">
             <NoteComposer contactId={c.id} />
