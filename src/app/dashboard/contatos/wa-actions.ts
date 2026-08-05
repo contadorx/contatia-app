@@ -119,7 +119,7 @@ export async function atualizarWhatsAppDoSite(
 
   const { data: c } = await supabase
     .from("contacts")
-    .select("id, phone, wa_status, company_domain, email, accounts(domain, website)")
+    .select("*, accounts(domain, website)")
     .eq("id", contactId)
     .eq("tenant_id", tenant_id)
     .maybeSingle();
@@ -134,9 +134,39 @@ export async function atualizarWhatsAppDoSite(
     return { titulo: "Sem site para visitar", detalhe: "Preencha o domínio da empresa em Editar dados." };
   }
 
-  const { findPublishedContact, ehFixoBr } = await import("@/lib/webPhone");
-  const r = await findPublishedContact(dominio);
-  const lidas = r.paginasLidas ?? 0;
+  // ============================================================
+  // JÁ QUE A PÁGINA ESTÁ ABERTA, LEIA TUDO
+  //
+  // Este botão abria o site só atrás do WhatsApp. As redes sociais e o e-mail
+  // publicado exigiam outros dois cliques, cada um baixando de novo as MESMAS
+  // páginas. Agora é uma leitura só: o que vier junto e ainda faltar na ficha é
+  // gravado e informado no recado. O botão continua se chamando "buscar WhatsApp"
+  // porque é isso que o operador quer; o resto é lucro.
+  // ============================================================
+  const { ehFixoBr } = await import("@/lib/webPhone");
+  const { varrerSite } = await import("@/lib/varrerSite");
+  const achados = await varrerSite(dominio);
+  const r = { whatsapp: achados.whatsapp, phone: achados.telefone };
+  const lidas = achados.paginasLidas;
+
+  // o que veio de brinde e ainda faltava na ficha
+  const extras: Record<string, any> = {};
+  const ganhos: string[] = [];
+  const agora = new Date().toISOString();
+  if (achados.email && !(c as any).email) { extras.email = achados.email; ganhos.push(`e-mail ${achados.email}`); }
+  if (achados.instagram && !(c as any).instagram) {
+    extras.instagram = achados.instagram; extras.instagram_origem = "site"; extras.instagram_conferido_at = agora;
+    ganhos.push("Instagram");
+  }
+  if (achados.linkedin && !(c as any).linkedin) {
+    extras.linkedin = achados.linkedin; extras.linkedin_origem = "site"; extras.linkedin_conferido_at = agora;
+    ganhos.push("LinkedIn");
+  }
+  const salvarExtras = async () => {
+    if (!Object.keys(extras).length) return;
+    await supabase.from("contacts").update(extras as any).eq("id", contactId).eq("tenant_id", tenant_id);
+  };
+  const deBrinde = ganhos.length ? ` De brinde, na mesma leitura: ${ganhos.join(", ")}.` : "";
 
   if (!lidas) {
     return {
@@ -146,9 +176,13 @@ export async function atualizarWhatsAppDoSite(
   }
 
   if (!r.whatsapp) {
+    // não achou WhatsApp, mas pode ter achado o resto — e isso tem de ser salvo
+    await salvarExtras();
+    if (Object.keys(extras).length) revalidatePath(`/dashboard/contatos/${contactId}`);
     return {
+      ok: ganhos.length > 0,
       titulo: "Li o site e não achei botão de WhatsApp",
-      detalhe: `${lidas} página(s) de ${dominio} lida(s). ${r.phone ? `Achei o telefone ${r.phone}, mas não um link de WhatsApp.` : "Nenhum telefone publicado."}`,
+      detalhe: `${lidas} página(s) de ${dominio} lida(s). ${r.phone ? `Achei o telefone ${r.phone}, mas não um link de WhatsApp.` : "Nenhum telefone publicado."}${deBrinde}`,
       numero: r.phone ?? null,
     };
   }
@@ -162,7 +196,7 @@ export async function atualizarWhatsAppDoSite(
   const substitui = !atual || ehFixoBr(atual);
   if (substitui) patch.phone = r.whatsapp;
 
-  const { error } = await supabase.from("contacts").update(patch as any).eq("id", contactId).eq("tenant_id", tenant_id);
+  const { error } = await supabase.from("contacts").update({ ...patch, ...extras } as any).eq("id", contactId).eq("tenant_id", tenant_id);
   if (error) return { titulo: "Achei, mas não consegui salvar", detalhe: error.message };
 
   revalidatePath(`/dashboard/contatos/${contactId}`);
@@ -170,8 +204,8 @@ export async function atualizarWhatsAppDoSite(
     ok: true,
     titulo: `WhatsApp encontrado: ${r.whatsapp}`,
     detalhe: substitui
-      ? (atual ? `Substituí o fixo ${atual} — fixo não tem WhatsApp.` : "Era o único número; virou o telefone do contato.")
-      : `Guardei como WhatsApp. O telefone ${atual} continua como está, porque também é celular.`,
+      ? (atual ? `Substituí o fixo ${atual} — fixo não tem WhatsApp.${deBrinde}` : `Era o único número; virou o telefone do contato.${deBrinde}`)
+      : `Guardei como WhatsApp. O telefone ${atual} continua como está, porque também é celular.${deBrinde}`,
     numero: r.whatsapp,
   };
 }

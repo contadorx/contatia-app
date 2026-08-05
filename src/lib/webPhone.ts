@@ -52,7 +52,7 @@ function normBr(raw: string): string | null {
 // baixamos e não há como capturar sem rodar um navegador — o que sai caro e é frágil.
 // Nesse caso o número simplesmente não aparece, e isso não é conserto de regex.
 // ============================================================
-function extractWhatsApp(html: string): string[] {
+export function extractWhatsApp(html: string): string[] {
   const out = new Set<string>();
 
   const guarda = (bruto: string) => {
@@ -82,7 +82,7 @@ function extractWhatsApp(html: string): string[] {
   return Array.from(out);
 }
 
-function extractPhones(html: string): string[] {
+export function extractPhones(html: string): string[] {
   const out = new Set<string>();
   // tel: (declarado)
   for (const m of html.matchAll(/tel:(\+?[\d\s().-]{8,20})/gi)) {

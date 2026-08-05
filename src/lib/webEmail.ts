@@ -17,7 +17,7 @@ const PATHS = ["", "/contato", "/contact", "/fale-conosco", "/faleconosco", "/so
 const PREFERRED = ["contato", "comercial", "vendas", "atendimento", "faleconosco", "contact", "sales", "hello", "oi"];
 const REJECT = ["example.com", "sentry", "wixpress", "godaddy", ".png", ".jpg", ".gif", "domain.com", "email.com", "seudominio"];
 
-function extractEmails(html: string, domain: string): string[] {
+export function extractEmails(html: string, domain: string): string[] {
   const found = new Set<string>();
 
   // mailto:
@@ -42,7 +42,7 @@ function extractEmails(html: string, domain: string): string[] {
   });
 }
 
-function rank(emails: string[]): string | null {
+export function rank(emails: string[]): string | null {
   if (!emails.length) return null;
   for (const p of PREFERRED) {
     const hit = emails.find((e) => e.startsWith(p + "@"));
