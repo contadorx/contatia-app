@@ -17,6 +17,7 @@ import ExportarCsv from "@/components/ExportarCsv";
 import { useExclusaoLote } from "@/components/useExclusaoLote";
 import CompletarCanais from "@/components/CompletarCanais";
 import FilaAssistida from "@/components/FilaAssistida";
+import { ehCaixaDeBalcao, pareceEmailDaPessoa } from "@/lib/emailFinder";
 
 type Contact = {
   id: string;
@@ -533,6 +534,10 @@ export default function ContactsTable({
               // ela, o lote repetiria consulta externa que já foi paga.
               temCnpj: !!(c as any).cnpj,
               enriquecido: !!((c as any).custom?.enriched_at),
+              // Mesmos testes do passo individual — importados, não reescritos.
+              emailSuspeito:
+                !!c.email &&
+                (ehCaixaDeBalcao(c.email) || !pareceEmailDaPessoa(c.email, c.name)),
             }))}
           />
 

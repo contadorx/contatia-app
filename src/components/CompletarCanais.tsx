@@ -41,6 +41,8 @@ export type AlvoCanal = {
   temDominio: boolean;   // sem site não há onde procurar rede/e-mail
   temCnpj?: boolean;     // dá para consultar a Receita
   enriquecido?: boolean; // já consultada
+  // tem e-mail, mas provavelmente NÃO é o da pessoa (balcão, outro domínio, outro nome)
+  emailSuspeito?: boolean;
 };
 
 function tempo(ms: number) {
@@ -79,7 +81,15 @@ export default function CompletarCanais({ alvos, onFim }: { alvos: AlvoCanal[]; 
   // Depois da Receita, contato que estava sem domínio pode passar a ter. Por isso o
   // alvo do site inclui quem VAI ser enriquecido, e não só quem já tem domínio hoje.
   const paraRedes = alvos.filter((a) => (a.temDominio || (a.temCnpj && !a.enriquecido)) && !a.temRede);
-  const paraEmail = alvos.filter((a) => !a.temEmail);
+  // ============================================================
+  // A CONTA DE "QUEM PRECISA DE E-MAIL" É A MESMA DO INDIVIDUAL
+  //
+  // Era `!a.temEmail`. Quem já tinha `contato@empresa` nem era mandado para o
+  // servidor — o lote pulava antes de perguntar. Agora entra também quem tem caixa
+  // de balcão, e-mail de outro domínio ou endereço que não parece ser da pessoa. O
+  // servidor confere de novo (é ele que decide), mas o cliente precisa MANDAR.
+  // ============================================================
+  const paraEmail = alvos.filter((a) => !a.temEmail || a.emailSuspeito);
   const totalPrevisto = paraReceita.length + paraWa.length + paraRedes.length + paraEmail.length;
 
   const FASE_TXT: Record<string, string> = {

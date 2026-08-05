@@ -17,7 +17,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { msgErro } from "@/lib/erros";
-import { dominioDe, discoverEmailParallel, workerConfigurado } from "@/lib/emailFinder";
+import { dominioDe, discoverEmailParallel, workerConfigurado, ehCaixaDeBalcao, pareceEmailDaPessoa, dominioCorporativo } from "@/lib/emailFinder";
 import { findPublishedEmail } from "@/lib/webEmail";
 
 // SMTP é o gargalo: 6 por chamada cabe folgado no limite de 60s da função.
@@ -59,14 +59,43 @@ export async function descobrirEmailsLote(contactIds: string[]): Promise<{
     .in("id", ids.slice(0, 300));
   if (error) return { error: msgErro(error) };
 
-  // só quem AINDA não tem e-mail e tem domínio corporativo para testar
+  // ============================================================
+  // TER E-MAIL NÃO É TER O E-MAIL DO DECISOR
+  //
+  // O filtro era `!c.email`: quem já tinha QUALQUER endereço era pulado. Caso real —
+  // Adriana Sampaio Cervi, com `contato@grupocervi.com.br` no cadastro. O lote passou
+  // direto; aberta a ficha, o botão individual achou `adriana@grupocervi.com.br` na
+  // hora, porque o passo individual sabe que caixa compartilhada NÃO é o endereço da
+  // pessoa.
+  //
+  // Era a mesma regra existindo em dois lugares com critérios diferentes. Agora o lote
+  // usa exatamente os testes do individual:
+  //
+  //   · sem e-mail                    → procura
+  //   · caixa de balcão (contato@…)   → procura o da pessoa
+  //   · domínio diferente do da empresa → herança de cadastro antigo, procura
+  //   · começo do endereço sem nenhum pedaço do nome → é de outra pessoa, procura
+  //
+  // Em todos esses casos a troca continua condicionada à CONFIRMAÇÃO do servidor: se
+  // ninguém confirmar nada, o endereço antigo fica onde está.
+  // ============================================================
+  const precisaProcurar = (c: any, dominio: string) => {
+    const email = String(c.email || "").trim();
+    if (!email) return true;
+    if (ehCaixaDeBalcao(email)) return true;
+    const doEmail = dominioDe(email) || "";
+    if (doEmail && dominio && doEmail !== dominio) return true;
+    if (!pareceEmailDaPessoa(email, c.name)) return true;
+    return false;
+  };
+
   const alvos = ((rows as any[]) || [])
-    .filter((c) => !c.email)
     .map((c) => ({
       id: c.id,
       name: c.name as string,
       account_id: (c.account_id as string) || null,
-      dominio: dominioDe(c.company_domain || c.accounts?.domain || null),
+      email: (c.email as string) || null,
+      dominio: dominioDe(c.company_domain || c.accounts?.domain || dominioCorporativo(c.email) || null),
     }));
 
   // ============================================================
@@ -99,8 +128,10 @@ export async function descobrirEmailsLote(contactIds: string[]): Promise<{
     }
   }
 
-  const comDominio = alvos.filter((c) => c.dominio);
-  const semDominio = alvos.length - comDominio.length;
+  // O filtro do "precisa procurar" vem DEPOIS de resolver o domínio: a comparação
+  // "e-mail de outro domínio" precisa saber qual é o domínio da empresa.
+  const comDominio = alvos.filter((c) => c.dominio && precisaProcurar(c, c.dominio as string));
+  const semDominio = alvos.filter((c) => !c.dominio).length;
 
   const lote = comDominio.slice(0, LOTE_EMAIL);
   const restantes = comDominio.length - lote.length;
@@ -127,9 +158,17 @@ export async function descobrirEmailsLote(contactIds: string[]): Promise<{
         testouSmtp = r.status !== "error";
         statusSmtp = r.status;
         if (r.status === "valid" && r.email) {
+          // O selo vem junto: sem ele, o endereço que o servidor ACABOU de confirmar
+          // apareceria na ficha como "não conferido", e alguém clicaria em verificar
+          // para ouvir o que o sistema já sabia. Mesma gravação do caminho individual.
+          const { data: atual } = await supabase.from("contacts").select("custom").eq("id", c.id).maybeSingle();
+          const { comSelo, seloConfirmado } = await import("@/lib/seloEmail");
           await supabase
             .from("contacts")
-            .update({ email: r.email, email_status: "ok", email_discovery: "valid", email_discovered_at: nowIso } as any)
+            .update({
+              email: r.email, email_status: "ok", email_discovery: "valid",
+              email_discovered_at: nowIso, custom: comSelo((atual as any)?.custom, seloConfirmado()),
+            } as any)
             .eq("id", c.id).eq("tenant_id", tenant_id);
           achou++;
           gravou = true;
@@ -145,7 +184,16 @@ export async function descobrirEmailsLote(contactIds: string[]): Promise<{
       }
     }
 
-    if (!gravou) {
+    // ============================================================
+    // O E-MAIL PUBLICADO NÃO SUBSTITUI O QUE JÁ EXISTE
+    //
+    // Endereço genérico do site (contato@, faleconosco@) é quase sempre PIOR que o
+    // que já está na ficha. Com o lote passando a processar quem JÁ tem e-mail, esta
+    // etapa poderia rebaixar `rogerio@empresa` para `contato@empresa` — trocar um
+    // endereço de gente por uma caixa de balcão. O caminho individual já tinha essa
+    // regra; aqui ela faltava porque, antes, só entrava quem não tinha nada.
+    // ============================================================
+    if (!gravou && !c.email) {
       try {
         const pub = await findPublishedEmail(dominio);
         if (pub) {
