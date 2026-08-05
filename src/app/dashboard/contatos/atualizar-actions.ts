@@ -38,6 +38,7 @@ import { dominioCorporativo, ehCaixaDeBalcao, dominioDe, pareceEmailDaPessoa } f
 // Tipos e a regra dos passos vivem em @/lib/passosContato: arquivo "use server" só pode
 // exportar funções async, e `passosPendentes` é síncrona (e usada também pela tela).
 import type { PassoId, Tom, EstadoContato, ResultadoPasso } from "@/lib/passosContato";
+import { rotuloSelo } from "@/lib/seloEmail";
 
 // Teste barato de existência: só pergunta ao DNS se o nome resolve. Não baixa página,
 // não segue redirecionamento — a pergunta é "este endereço existe?", não "o que tem
@@ -128,6 +129,9 @@ async function lerEstado(supabase: any, id: string): Promise<EstadoContato | nul
     email: c.email || null,
     emailConferido: (c.custom as any)?.email_check?.valid === true,
     emailConferidoEm: (c.custom as any)?.email_check?.checked_at || null,
+    emailSelo: rotuloSelo((c.custom as any)?.email_check)?.texto || null,
+    emailSeloOk: rotuloSelo((c.custom as any)?.email_check)?.ok || false,
+    emailSeloAlerta: rotuloSelo((c.custom as any)?.email_check)?.alerta || false,
     telefone: c.phone || null,
     waCheckedAt: c.wa_checked_at || null,
     instagram: c.instagram || null,

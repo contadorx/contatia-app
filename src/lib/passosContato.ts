@@ -44,6 +44,12 @@ export type EstadoContato = {
   email?: string | null;
   emailConferido?: boolean;      // servidor do domínio confirmou (selo SMTP)
   emailConferidoEm?: string | null;
+  // Rótulo pronto da procedência: "SMTP validado · 04/08", "publicado no site · 04/08"
+  // ou "servidor recusou". Vem montado do servidor porque a regra de qual texto usar
+  // é a mesma em todas as telas — duplicá-la é pedir para elas divergirem.
+  emailSelo?: string | null;
+  emailSeloOk?: boolean;
+  emailSeloAlerta?: boolean;
   telefone?: string | null;
   waCheckedAt?: string | null;
   instagram?: string | null;

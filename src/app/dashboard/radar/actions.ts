@@ -748,7 +748,12 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
         // ESTEIRA AUTOMÁTICA: telefone da Receita (só no 1º) → fila de verificação de
         // WhatsApp; domínio corporativo (em todos) → fila de captura no site do sócio.
         wa_status: primeiro && e.telefone ? "queued" : null,
-        web_capture: dominio ? "queued" : null,
+        // Só o PRIMEIRO sócio entra na fila de captura do site. O site é da empresa:
+        // enfileirar os quatro fazia o cron ler a mesma página quatro vezes e gravar o
+        // MESMO telefone nos quatro — e uma cadência de WhatsApp depois disso manda
+        // quatro mensagens iguais para o mesmo número. (O cron também agrupa por
+        // domínio, para cobrir a fila que já está cheia; aqui é a origem.)
+        web_capture: primeiro && dominio ? "queued" : null,
       }).select("id").single();
       if (!errC && novoContato) {
         criouAlgum = true;

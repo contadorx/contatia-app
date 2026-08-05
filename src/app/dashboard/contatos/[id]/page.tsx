@@ -24,6 +24,7 @@ import { channelLabel, type Channel } from "@/lib/cadence";
 import { produtosDoContato } from "@/lib/produtos";
 import { dominioCorporativo, ehCaixaDeBalcao, pareceEmailDaPessoa } from "@/lib/emailFinder";
 import { dataHora } from "@/lib/datas";
+import { rotuloSelo } from "@/lib/seloEmail";
 
 export const dynamic = "force-dynamic";
 // A busca/verificação de e-mail conversa com o servidor SMTP do destino, que pode
@@ -270,6 +271,9 @@ export default async function ContatoDetalhe({
                 email: c.email || null,
                 emailConferido: (c as any).custom?.email_check?.valid === true,
                 emailConferidoEm: (c as any).custom?.email_check?.checked_at || null,
+                emailSelo: rotuloSelo((c as any).custom?.email_check)?.texto || null,
+                emailSeloOk: rotuloSelo((c as any).custom?.email_check)?.ok || false,
+                emailSeloAlerta: rotuloSelo((c as any).custom?.email_check)?.alerta || false,
                 telefone: c.phone || null,
                 waCheckedAt: (c as any).wa_checked_at || null,
                 instagram: (c as any).instagram || null,

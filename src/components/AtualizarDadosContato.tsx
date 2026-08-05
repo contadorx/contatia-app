@@ -187,8 +187,10 @@ export default function AtualizarDadosContato({
         : estado.emailForaDoDominio ? "domínio diferente do da empresa"
         : estado.emailDeBalcao ? "caixa compartilhada"
         : estado.emailDeOutraPessoa ? "não parece ser desta pessoa"
-        : estado.emailConferido ? `SMTP validado${dia(estado.emailConferidoEm) ? ` · ${dia(estado.emailConferidoEm)}` : ""}`
-        : "não conferido",
+        // o rótulo vem pronto do servidor: distingue "SMTP validado" de "publicado no
+        // site" de "servidor recusou". Antes tudo que não fosse SMTP virava "não
+        // conferido", inclusive um e-mail que a própria empresa publica no site.
+        : estado.emailSelo || "não conferido",
       ok: !!estado.email && !estado.emailDeBalcao && !estado.emailForaDoDominio && !estado.emailDeOutraPessoa && !!estado.emailConferido,
       alerta: !!estado.email && !!(estado.emailDeBalcao || estado.emailForaDoDominio || estado.emailDeOutraPessoa),
     },

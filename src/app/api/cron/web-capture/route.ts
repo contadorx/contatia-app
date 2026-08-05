@@ -45,7 +45,8 @@ export async function GET(req: Request) {
     .select("*, accounts(domain, website)")
     .eq("web_capture", "queued")
     // `limit` sem `order by` repete e PULA linhas: um contato pode ficar na fila para
-    // sempre sem nunca ser sorteado.
+    // sempre sem nunca ser sorteado. A ordem por criação também define quem é o
+    // "principal" de cada empresa no agrupamento abaixo.
     .order("created_at", { ascending: true })
     .limit(BATCH);
   if (erroFila) return NextResponse.json({ error: (erroFila as any).message }, { status: 500 });
@@ -58,6 +59,7 @@ export async function GET(req: Request) {
     wa_status: (c.wa_status as string | null) || null,
     instagram: (c.instagram as string | null) || null,
     linkedin: (c.linkedin as string | null) || null,
+    account_id: (c.account_id as string | null) || null,
     domain: dominioDe(c.company_domain || c.accounts?.domain || c.accounts?.website || null),
   }));
   if (!list.length) return NextResponse.json({ ok: true, capturados: 0 });
@@ -67,16 +69,51 @@ export async function GET(req: Request) {
   await Promise.all(semDom.map((c) => admin.from("contacts").update({ web_capture: "notfound" }).eq("id", c.id)));
 
   const comDom = list.filter((c) => c.domain);
+
+  // ============================================================
+  // UM SITE, UMA LEITURA — MESMO COM QUATRO SÓCIOS
+  //
+  // A importação do Radar enfileira a captura para CADA sócio da empresa. Como todos
+  // compartilham o domínio, o cron lia o mesmo site 4 vezes e gravava o MESMO telefone
+  // nos 4 contatos. Uma cadência de WhatsApp depois disso gera 4 tarefas para o mesmo
+  // número: 4 mensagens idênticas, do mesmo remetente, para a mesma pessoa. É pedido
+  // de bloqueio.
+  //
+  // A regra vem de a QUEM o dado pertence:
+  //
+  //   DA EMPRESA (telefone, WhatsApp, e-mail publicado, Instagram, LinkedIn da página)
+  //     → é um só. Vai para a EMPRESA e para UM contato — o mais antigo do grupo, que
+  //       é o que a importação tratou como principal. Os irmãos ficam sem, de
+  //       propósito: quem quiser falar pelo canal da empresa fala pela empresa.
+  //
+  //   DA PESSOA (e-mail nome@dominio confirmado no servidor)
+  //     → esse sim é individual, e continua sendo descoberto um a um pela fila SMTP,
+  //       que é outra etapa.
+  //
+  // Agrupar aqui, e não na importação, conserta também a fila que JÁ está cheia de
+  // sócios enfileirados — sem migration e sem reimportar nada.
+  // ============================================================
+  const porDominio = new Map<string, typeof comDom>();
+  for (const c of comDom) {
+    const k = c.domain!;
+    if (!porDominio.has(k)) porDominio.set(k, []);
+    porDominio.get(k)!.push(c);
+  }
+  // dentro de cada empresa, o mais antigo primeiro (é ele que recebe os dados)
+  const grupos = Array.from(porDominio.values()).map((g) => g.slice());
+
   const prazo = Date.now() + 45_000;
-  let achou = 0, whats = 0, emails = 0, redes = 0, inacessivel = 0, adiados = 0;
+  let achou = 0, whats = 0, emails = 0, redes = 0, inacessivel = 0, adiados = 0, irmaosPoupados = 0;
 
   let i = 0;
   const trabalhador = async () => {
-    while (i < comDom.length) {
+    while (i < grupos.length) {
       // Estourou o tempo? O contato fica 'queued' e volta na próxima rodada — nunca
       // marcamos como "procurei e não achei" algo que não chegamos a procurar.
       if (Date.now() > prazo) { adiados++; i++; continue; }
-      const c = comDom[i++];
+      const grupo = grupos[i++];
+      const c = grupo[0];                 // o principal: recebe os dados da empresa
+      const irmaos = grupo.slice(1);      // os demais sócios do mesmo site
 
       // O que ainda falta neste contato. Pedir só o que falta encurta a varredura:
       // com tudo preenchido, ela nem sai da home.
@@ -85,8 +122,17 @@ export async function GET(req: Request) {
       if (!c.email) quero.push("email");
       if (!c.instagram) quero.push("instagram");
       if (!c.linkedin) quero.push("linkedin");
+      // Os irmãos saem da fila agora: o site é o mesmo, e o que ele publica pertence à
+      // empresa. Marcar aqui evita que a próxima rodada os leia de novo.
+      const tirarIrmaosDaFila = async () => {
+        if (!irmaos.length) return;
+        irmaosPoupados += irmaos.length;
+        await Promise.all(irmaos.map((x) => admin.from("contacts").update({ web_capture: "done" }).eq("id", x.id)));
+      };
+
       if (!quero.length) {
         await admin.from("contacts").update({ web_capture: "done" }).eq("id", c.id);
+        await tirarIrmaosDaFila();
         continue;
       }
 
@@ -101,6 +147,10 @@ export async function GET(req: Request) {
       if (r.siteInacessivel) {
         inacessivel++;
         await admin.from("contacts").update({ web_capture: "notfound" }).eq("id", c.id);
+        if (irmaos.length) {
+          irmaosPoupados += irmaos.length;
+          await Promise.all(irmaos.map((x) => admin.from("contacts").update({ web_capture: "notfound" }).eq("id", x.id)));
+        }
         continue;
       }
 
@@ -131,10 +181,35 @@ export async function GET(req: Request) {
       const { error } = await admin.from("contacts").update(upd).eq("id", c.id);
       // A escrita é conferida: sem isto, uma recusa do banco deixava o contato como
       // "capturado" sem nada gravado, e ninguém ficava sabendo.
-      if (error) await admin.from("contacts").update({ web_capture: "queued" }).eq("id", c.id);
+      if (error) { await admin.from("contacts").update({ web_capture: "queued" }).eq("id", c.id); continue; }
+
+      await tirarIrmaosDaFila();
+
+      // O que é da EMPRESA vai para a empresa: é ali que ele serve a todos os sócios
+      // sem duplicar canal de envio.
+      const contaId = (c as any).account_id;
+      if (contaId) {
+        const daEmpresa: Record<string, unknown> = {};
+        if (r.telefone) daEmpresa.phone = r.telefone;
+        if (r.email) daEmpresa.email = r.email;
+        if (r.instagram) daEmpresa.instagram = r.instagram;
+        if (r.linkedin) daEmpresa.linkedin = r.linkedin;
+        if (Object.keys(daEmpresa).length) {
+          // update simples: não sobrescreve o que já existe porque o PostgREST só
+          // grava as colunas enviadas, e estas só entram quando o site respondeu.
+          await admin.from("accounts").update(daEmpresa).eq("id", contaId);
+        }
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(PARALELO, comDom.length) }, trabalhador));
 
-  return NextResponse.json({ ok: true, capturados: comDom.length, achou, whats, emails, redes, inacessivel, adiados });
+  return NextResponse.json({
+    ok: true,
+    empresas: grupos.length, contatos: comDom.length,
+    achou, whats, emails, redes, inacessivel, adiados,
+    // quantos sócios deixaram de ser lidos por já terem sido cobertos pelo irmão —
+    // é o número que mostra o tamanho do desperdício que existia
+    irmaosPoupados,
+  });
 }

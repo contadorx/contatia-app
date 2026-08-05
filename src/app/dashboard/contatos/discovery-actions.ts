@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { dominioDe, discoverEmailParallel, workerConfigurado } from "@/lib/emailFinder";
+import { dominioDe, discoverEmailParallel, workerConfigurado, verifyEmail } from "@/lib/emailFinder";
 import { findPublishedEmail } from "@/lib/webEmail";
+import { comSelo, seloConfirmado, seloPublicado, seloRecusado } from "@/lib/seloEmail";
 
 // ============================================================
 // BUSCA DO E-MAIL DO DECISOR — AGORA NA HORA.
@@ -197,15 +198,7 @@ export async function buscarEmailAgora(contactId: string, siteOuDominio: string,
       // campo.
       // ============================================================
       const { data: atual } = await supabase.from("contacts").select("custom").eq("id", contactId).maybeSingle();
-      const customNovo = {
-        ...(((atual as any)?.custom) || {}),
-        email_check: {
-          valid: true,
-          reason: "confirmado pelo servidor do domínio (SMTP)",
-          checked_at: new Date().toISOString(),
-          origem: "descoberta",
-        },
-      };
+      const customNovo = comSelo((atual as any)?.custom, seloConfirmado());
       await supabase
         .from("contacts")
         .update({ email: r.email, email_status: "ok", email_discovery: "valid", email_discovered_at: new Date().toISOString(), custom: customNovo } as any)
@@ -251,9 +244,37 @@ export async function buscarEmailAgora(contactId: string, siteOuDominio: string,
     };
   }
   if (pub) {
+    // ============================================================
+    // O E-MAIL PUBLICADO TAMBÉM MERECE PROCEDÊNCIA
+    //
+    // Este caminho gravava só o endereço. Como a ficha lê `custom.email_check`, o
+    // e-mail recém-achado aparecia como "não conferido" — a pessoa acabava de rodar a
+    // busca, via o endereço chegar, e a tela dizia que ninguém tinha conferido nada.
+    //
+    // Antes de gravar, pergunto ao servidor do domínio se a caixa existe. Se
+    // confirmar, o selo é o mesmo da descoberta ("SMTP validado"); se não der para
+    // confirmar, fica registrado que foi a PRÓPRIA EMPRESA que publicou aquele
+    // endereço — que não é prova técnica, mas é informação, e é bem diferente de
+    // "ninguém sabe".
+    // ============================================================
+    let selo = seloPublicado(pub.source);
+    if (workerConfigurado()) {
+      try {
+        const v = await verifyEmail(pub.email);
+        if (v.status === "valid") selo = seloConfirmado();
+        else if (v.status === "invalid") selo = seloRecusado(v.reason);
+      } catch { /* sem resposta do worker: fica o selo de publicado */ }
+    }
+    const { data: atualPub } = await supabase.from("contacts").select("custom").eq("id", contactId).maybeSingle();
     await supabase
       .from("contacts")
-      .update({ email: pub.email, email_status: "ok", email_discovery: "published", email_discovered_at: new Date().toISOString() } as any)
+      .update({
+        email: pub.email,
+        email_status: selo.valid === false ? "invalid" : "ok",
+        email_discovery: "published",
+        email_discovered_at: new Date().toISOString(),
+        custom: comSelo((atualPub as any)?.custom, selo),
+      } as any)
       .eq("id", contactId);
     await supabase.from("events").insert({
       tenant_id, contact_id: contactId, type: "note",
