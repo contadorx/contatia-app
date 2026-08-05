@@ -15,6 +15,7 @@
 // ============================================================
 
 import { useState } from "react";
+import TestarCaixa from "@/components/TestarCaixa";
 import { useRouter } from "next/navigation";
 import { rodarPasso } from "@/app/dashboard/contatos/atualizar-actions";
 import { atualizarWhatsAppDoSite } from "@/app/dashboard/contatos/wa-actions";
@@ -256,6 +257,13 @@ export default function AtualizarDadosContato({
                 {c.ok && !c.alerta ? "✓ " : c.alerta ? "⚠ " : ""}
                 {c.nota}
               </p>
+            )}
+            {/* Presa ao cartão do E-MAIL, e não num painel à parte: a pergunta "será
+                que existe fiscal@?" nasce olhando o endereço que está lá. Antes esta
+                caixa só existia enquanto o contato NÃO tinha e-mail — sumia
+                exatamente quando passava a ser útil. */}
+            {c.rotulo === "E-mail" && (
+              <TestarCaixa contactId={contactId} dominio={estado.dominio || null} emailAtual={estado.email || null} />
             )}
           </div>
         ))}

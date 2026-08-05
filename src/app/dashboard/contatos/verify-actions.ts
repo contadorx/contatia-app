@@ -92,15 +92,66 @@ export async function testarEmailAvulso(email: string) {
 export async function aplicarEmailContato(contactId: string, email: string) {
   const { supabase } = await ctx();
   const addr = (email || "").trim().toLowerCase();
-  if (!addr.includes("@")) return { error: "E-mail inválido." };
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) return { error: "E-mail inválido." };
 
-  const { verifyEmail } = await import("@/lib/emailverify");
-  const result = await verifyEmail(addr);
+  // ============================================================
+  // EXISTEM DUAS FUNÇÕES CHAMADAS verifyEmail, E ELAS NÃO PROVAM A MESMA COISA
+  //
+  //   @/lib/emailverify   → sintaxe + o domínio tem MX. `valid: true` aqui significa
+  //                         apenas "este domínio recebe e-mail". Nada sobre a caixa.
+  //   @/lib/emailFinder   → pergunta ao servidor do domínio, por SMTP, se AQUELA caixa
+  //                         existe. É a prova de verdade.
+  //
+  // Esta função usava a primeira e gravava `email_check.valid = true` — e a ficha
+  // exibia "SMTP validado" para um endereço que ninguém confirmou. Selo falso é pior
+  // que selo nenhum: leva a mandar e-mail para caixa inexistente, que é o que queima
+  // domínio.
+  //
+  // Agora a prova vem do worker quando ele existe, e o selo diz exatamente o que foi
+  // apurado — inclusive quando a resposta é "só sei que o domínio recebe e-mail".
+  // ============================================================
+  const { comSelo, seloConfirmado, seloRecusado } = await import("@/lib/seloEmail");
+  const { workerConfigurado, verifyEmail: workerVerify } = await import("@/lib/emailFinder");
+
+  let selo: any;
+  let status = "mx_ok";
+  if (workerConfigurado()) {
+    const r: any = await workerVerify(addr);
+    status = r?.status || "error";
+    if (status === "valid") selo = seloConfirmado();
+    else if (status === "invalid") selo = seloRecusado(r?.reason);
+    else {
+      selo = {
+        valid: null,
+        reason:
+          status === "uncertain" ? "o domínio aceita qualquer endereço (catch-all) — não dá para confirmar a caixa"
+          : status === "blocked" ? "o provedor bloqueia a verificação da caixa"
+          : "não foi possível confirmar a caixa no servidor",
+        checked_at: new Date().toISOString(),
+        origem: "manual",
+      };
+    }
+  } else {
+    const { verifyEmail } = await import("@/lib/emailverify");
+    const r = await verifyEmail(addr);
+    status = r.hasMx ? "mx_ok" : "invalid";
+    selo = r.hasMx
+      ? { valid: null, reason: "o domínio recebe e-mail; a caixa não foi testada (worker desligado)", checked_at: new Date().toISOString(), origem: "manual" }
+      : seloRecusado("o domínio não recebe e-mail (sem MX)");
+  }
+
+  // Endereço que o servidor RECUSOU não vira o e-mail do contato: gravar seria
+  // programar um bounce.
+  if (selo.valid === false) {
+    return { error: `Não gravei: ${selo.reason}.` };
+  }
 
   const { data: c } = await supabase.from("contacts").select("custom").eq("id", contactId).maybeSingle();
-  const custom = { ...(((c as any)?.custom) || {}), email_check: { ...result, checked_at: new Date().toISOString() } };
-  const { error } = await supabase.from("contacts").update({ email: addr, custom }).eq("id", contactId);
+  const { error } = await supabase
+    .from("contacts")
+    .update({ email: addr, email_status: "ok", custom: comSelo((c as any)?.custom, selo) })
+    .eq("id", contactId);
   if (error) return { error: msgErro(error) };
   revalidatePath(`/dashboard/contatos/${contactId}`);
-  return { ok: true, result };
+  return { ok: true, status, selo };
 }

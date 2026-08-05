@@ -26,16 +26,68 @@ import "server-only";
 // quando tudo o que foi pedido já foi encontrado.
 // ============================================================
 
-import { extractWhatsApp, extractPhones } from "@/lib/webPhone";
+import { extractWhatsApp, extractPhones, ehFixoBr } from "@/lib/webPhone";
 import { extractEmails, rank } from "@/lib/webEmail";
 import { extrairInstagram, extrairLinkedin, extrairFacebook } from "@/lib/webSocial";
 import { baixarPagina } from "@/lib/baixarPagina";
 
-// União das três listas, da mais provável para a menos.
+// União das três listas, da mais provável para a menos. Continuam existindo porque
+// acertam na maioria dos sites e não custam nada quando acertam.
 const CAMINHOS = [
   "", "/contato", "/contact", "/fale-conosco", "/faleconosco",
   "/sobre", "/quem-somos", "/contato.html",
 ];
+
+// ============================================================
+// ADIVINHAR CAMINHO NÃO ESCALA — O SITE JÁ DIZ ONDE FICA
+//
+// Caso real: a fiscoimbra publica a página de contato em `/site/contato/`. Nenhum
+// palpite da lista acima chega lá, então a varredura lia só a home, não achava o
+// botão de WhatsApp e concluía "o site não publica". De novo o mesmo erro de leitura:
+// "não achei" quando o certo era "não fui lá".
+//
+// Dá para continuar empilhando palpites (/site/contato, /pt/contato,
+// /institucional/contato, /contato-2…) e ficar sempre um site atrás. Ou ler o MENU da
+// home, que é onde o próprio site diz onde as coisas estão. É o que esta parte faz.
+//
+// Só links do MESMO host, e no máximo alguns — o objetivo é achar a página de
+// contato, não varrer o site inteiro.
+// ============================================================
+const PISTA_CONTATO = /(contato|contact|fale[-\s_]?conosco|faleconosco|atendimento|onde[-\s_]?estamos|localiza)/i;
+const PISTA_SOBRE = /(sobre|quem[-\s_]?somos|institucional|a[-\s_]empresa|nossa[-\s_]historia)/i;
+const IGNORAR = /\.(pdf|jpe?g|png|gif|svg|zip|docx?|xlsx?|mp4|webp)(\?|$)|^mailto:|^tel:|^javascript:|^#/i;
+
+function linksInternos(html: string, host: string): { url: string; peso: number }[] {
+  const achados = new Map<string, number>();
+  // captura href + o texto do link, porque muito menu usa href="/p/12" com o texto
+  // "Contato" — só o endereço não entregaria.
+  const re = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]{0,120}?)<\/a>/gi;
+  for (const m of html.matchAll(re)) {
+    const href = (m[1] || "").trim();
+    const texto = (m[2] || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    if (!href || IGNORAR.test(href)) continue;
+    let u: URL;
+    try {
+      u = new URL(href, `https://${host}/`);
+    } catch { continue; }
+    // só o mesmo site (com ou sem www) — não seguimos para fora
+    const mesmo = u.hostname.replace(/^www\./, "") === host.replace(/^www\./, "");
+    if (!mesmo || (u.protocol !== "https:" && u.protocol !== "http:")) continue;
+    const alvo = `${u.pathname}${u.search}`;
+    if (alvo === "/" || alvo === "") continue;
+    if (alvo.length > 120) continue;
+
+    const casa = `${alvo} ${texto}`;
+    const peso = PISTA_CONTATO.test(casa) ? 2 : PISTA_SOBRE.test(casa) ? 1 : 0;
+    if (!peso) continue;
+    const jaTem = achados.get(alvo) || 0;
+    if (peso > jaTem) achados.set(alvo, peso);
+  }
+  return Array.from(achados.entries())
+    .map(([url, peso]) => ({ url, peso }))
+    .sort((a, b) => b.peso - a.peso)
+    .slice(0, 4);
+}
 
 export type CampoSite = "instagram" | "linkedin" | "facebook" | "email" | "telefone" | "whatsapp";
 
@@ -78,7 +130,7 @@ export async function varrerSite(
 
   const quero = new Set<CampoSite>(opts?.quero?.length ? opts.quero : ["instagram", "linkedin", "facebook", "email", "telefone", "whatsapp"]);
 
-  const achados: AchadosSite = { ...vazio, fonte: {}, paginasTentadas: CAMINHOS.length };
+  const achados: AchadosSite = { ...vazio, fonte: {}, paginasTentadas: 0 };
   const emails = new Set<string>();
   const telefones = new Set<string>();
 
@@ -105,7 +157,20 @@ export async function varrerSite(
     }
   }
 
-  for (const caminho of CAMINHOS) {
+  // A home vem primeiro e é ela que revela o resto do caminho.
+  const roteiro: string[] = [""];
+  {
+    const home = await baixarPagina(`https://${host}`);
+    if (home) {
+      for (const l of linksInternos(home.html, host)) {
+        if (!roteiro.includes(l.url)) roteiro.push(l.url);
+      }
+    }
+  }
+  for (const p of CAMINHOS) if (!roteiro.includes(p)) roteiro.push(p);
+  achados.paginasTentadas = roteiro.length;
+
+  for (const caminho of roteiro) {
     // Só https. O http foi retirado de propósito: dobrava as requisições para cobrir
     // um caso que praticamente não existe mais, e o `redirect: "follow"` já resolve
     // site que só responde em http e redireciona.
@@ -151,7 +216,17 @@ export async function varrerSite(
     if (melhor) guardar("email", melhor, achados.fonte.email || `https://${host}`);
   }
   if (!achados.telefone && telefones.size) {
-    guardar("telefone", Array.from(telefones)[0], `https://${host}`);
+    // ============================================================
+    // ENTRE OS NÚMEROS DA PÁGINA, O CELULAR VALE MAIS
+    //
+    // A regra era "o primeiro que apareceu" — e o primeiro é quase sempre o fixo do
+    // cabeçalho, que existe em toda página. O celular, que é o único que pode ter
+    // WhatsApp, ficava para trás mesmo estando publicado na mesma tela. Depois o
+    // WhatsApp "não vinha", e a causa parecia ser a captura.
+    // ============================================================
+    const lista = Array.from(telefones);
+    const celular = lista.find((t) => !ehFixoBr(t));
+    guardar("telefone", celular || lista[0], `https://${host}`);
   }
 
   return achados;

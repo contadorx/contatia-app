@@ -19,7 +19,7 @@ import RevisarContato from "@/components/RevisarContato";
 import AtualizarDadosContato from "@/components/AtualizarDadosContato";
 import RedesContato from "@/components/RedesContato";
 import PainelRecolhivel from "@/components/PainelRecolhivel";
-import { EmailVerifyBadge, TestEmailBox } from "@/components/EmailVerify";
+import { EmailVerifyBadge } from "@/components/EmailVerify";
 import { channelLabel, type Channel } from "@/lib/cadence";
 import { produtosDoContato } from "@/lib/produtos";
 import { dominioCorporativo, ehCaixaDeBalcao, pareceEmailDaPessoa } from "@/lib/emailFinder";
@@ -305,9 +305,11 @@ export default async function ContatoDetalhe({
                     companyDomain={dominioContato || null}
                     discovery={(c as any).email_discovery || null}
                   />
-                  {/* "Testar um e-mail que já tenho": para endereços por função
-                      (contato@, contabil@) que não seguem o nome da pessoa. */}
-                  <TestEmailBox contactId={c.id} />
+                  {/* A caixa de testar endereço saiu daqui: virou fixa, logo abaixo
+                      do e-mail em uso (componente TestarCaixa). Aqui ela só existia
+                      enquanto o contato NÃO tinha e-mail — sumia exatamente quando
+                      passava a ser útil, que é para procurar fiscal@/dp@ depois de o
+                      app ter achado societario@. */}
                 </>
               )}
 
