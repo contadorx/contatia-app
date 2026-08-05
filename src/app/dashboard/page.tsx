@@ -65,7 +65,7 @@ export default async function Today() {
       .eq("status", "pending")
       .lte("due_date", in3),
     supabase.from("contacts").select("id", { count: "estimated", head: true }),
-    supabase.from("email_accounts").select("daily_cap, warmup_stage, created_at").eq("is_active", true),
+    supabase.from("email_accounts").select("*").eq("is_active", true),
   ]);
 
   // Envio Seguro: soma o que as caixas conseguem enviar HOJE (com aquecimento) — evita a
@@ -73,11 +73,20 @@ export default async function Today() {
   const activeBoxes = (boxes as any[]) || [];
   let sendCapToday = 0;
   let anyWarming = false;
+  // Por caixa: o número E o motivo. "Ontem 10, hoje 10" é uma pergunta legítima, e a
+  // tela precisa responder — pode ser a rampa (sobe amanhã) ou o limite configurado
+  // da caixa (não sobe nunca, até alguém mudar). São situações opostas.
+  const detalheCaixas: { rotulo: string; cap: number; motivo: string }[] = [];
   for (const a of activeBoxes) {
     const warmupOn = (a.warmup_stage ?? 0) !== -1;
-    const { cap, warming } = effectiveDailyCap(a.created_at, a.daily_cap ?? 40, warmupOn);
-    sendCapToday += cap;
-    if (warming) anyWarming = true;
+    const r = effectiveDailyCap(a.created_at, a.daily_cap ?? 40, warmupOn);
+    sendCapToday += r.cap;
+    if (r.warming) anyWarming = true;
+    detalheCaixas.push({
+      rotulo: (a as any).from_email || (a as any).smtp_user || (a as any).name || "caixa",
+      cap: r.cap,
+      motivo: r.motivo,
+    });
   }
 
   const allTasks = (rawTasks as any[]) || [];
@@ -287,6 +296,15 @@ export default async function Today() {
           <span className="text-subtle">hoje suas caixas enviam até <b className="text-ink">{sendCapToday} e-mails</b> no total
             {anyWarming ? " — em aquecimento, o limite sobe sozinho a cada dia. O que passar disso entra na fila e sai amanhã." : ". O que passar disso entra na fila e sai no dia seguinte."}
           </span>
+          {/* Um total sem a conta por trás não deixa ninguém decidir nada. Aqui está
+              de onde ele vem, caixa por caixa. */}
+          <ul className="mt-1.5 space-y-0.5">
+            {detalheCaixas.map((c, i) => (
+              <li key={i} className="text-xs text-subtle">
+                <b className="font-medium text-ink">{c.cap}</b> · {c.rotulo} <span className="text-subtle">— {c.motivo}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

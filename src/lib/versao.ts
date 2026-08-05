@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.05-37";
+export const VERSAO_APP = "2026.08.05-38";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "WhatsApp abre no numero CONFIRMADO (wa_number), nao no telefone da ficha";
+export const VERSAO_NOTAS = "aquecimento anda por dia de calendario (Brasilia) e a tela diz por que o limite e aquele";
