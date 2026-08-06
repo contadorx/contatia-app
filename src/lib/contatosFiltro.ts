@@ -40,7 +40,11 @@ export type FiltroContatos = {
   cadencia?: string[];
   frio?: string;                 // "15" | "30" | "nunca"
   responsavel?: string[];        // ids de profiles; "__sem__" = sem dono
-  email?: string;                // veredito: bate | caixa | outro | sem
+  // VEREDITO DO E-MAIL — lista, igual às outras caixas.
+  // Nasceu como valor único e destoava: as demais facetas são multi + busca, e a
+  // pergunta real quase sempre é "o que ainda dá trabalho", que são DOIS vereditos
+  // (caixa geral e outro nome). Dentro da caixa é OU, como nas outras.
+  email?: string[];
   // ---- FILTRO NEGATIVO (ver o bloco "O QUE NÃO TEM" mais abaixo) ----
   // Em cada faceta de vínculo, `true` inverte: em vez de "tem alguma destas", vira
   // "não tem nenhuma destas". O valor especial SEM_VINCULO ("__sem__") dentro da lista
@@ -101,9 +105,12 @@ export function normalizarFiltro(f: any): FiltroContatos {
     produtoNao: !!f?.produtoNao,
     cadenciaNao: !!f?.cadenciaNao,
     email: (() => {
-      const bruto = typeof f?.email === "string" ? f.email.trim() : "";
-      if (!bruto) return "";
-      return (VEREDITOS_EMAIL as string[]).includes(bruto) ? bruto : EMAIL_INVALIDO;
+      const pedidos = comoLista(f?.email);
+      if (!pedidos.length) return [];
+      const bons = pedidos.filter((v) => (VEREDITOS_EMAIL as string[]).includes(v));
+      // pediu e nada sobreviveu = NENHUM contato, nunca "todos" (mesma regra do
+      // responsável e do CNAE do Radar)
+      return bons.length ? bons : [EMAIL_INVALIDO];
     })(),
   };
 }
@@ -115,7 +122,7 @@ export function normalizarFiltro(f: any): FiltroContatos {
 export function filtroVazio(bruto: any): boolean {
   const f = normalizarFiltro(bruto);
   return (
-    !buscaEfetiva(f.q) && !f.view && !f.frio && !f.email &&
+    !buscaEfetiva(f.q) && !f.view && !f.frio && !f.email?.length &&
     !f.tag?.length && !f.produto?.length && !f.cadencia?.length &&
     !f.responsavel?.length
   );
@@ -126,8 +133,9 @@ export function filtroVazio(bruto: any): boolean {
 // acento removido e abreviação (jsilva) reconhecida. Não existe SQL equivalente, então
 // esses três passam pela peneira de varrerContatos().
 export function precisaPeneira(filtro: any): boolean {
-  const e = normalizarFiltro(filtro).email;
-  return e === "bate" || e === "caixa" || e === "outro";
+  const e = normalizarFiltro(filtro).email || [];
+  // "sem e-mail" o banco resolve sozinho; os outros três dependem do JavaScript.
+  return e.some((v) => v === "bate" || v === "caixa" || v === "outro");
 }
 
 // ============================================================
@@ -382,8 +390,9 @@ export async function consultaContatos(
   }
 
   // ---- veredito do e-mail: o que o banco resolve sozinho ----
-  if (f.email === EMAIL_INVALIDO) q = q.in("id", [NENHUM]);
-  else if (f.email === "sem") q = q.or("email.is.null,email.eq.");
+  const vereditos = f.email || [];
+  if (vereditos.includes(EMAIL_INVALIDO)) q = q.in("id", [NENHUM]);
+  else if (vereditos.length === 1 && vereditos[0] === "sem") q = q.or("email.is.null,email.eq.");
 
   const qSafe = buscaEfetiva(f.q);
   if (qSafe) q = q.or(`name.ilike.%${qSafe}%,email.ilike.%${qSafe}%,company.ilike.%${qSafe}%`);
@@ -454,8 +463,11 @@ async function peneirar(
   ctx: Contexto,
   pre: Preparo
 ): Promise<{ acertos: Acerto[]; examinados: number; truncado: boolean }> {
-  const alvo = f.email;
-  const julgaEmail = alvo === "bate" || alvo === "caixa" || alvo === "outro";
+  const alvos = new Set(f.email || []);
+  const julgaEmail = alvos.size > 0;
+  // com "sem e-mail" na seleção, quem não tem endereço PRECISA entrar na varredura —
+  // podar esses seria justamente esconder o que foi pedido
+  const querSemEmail = alvos.has("sem");
 
   // O que não coube na URL vira conjunto em memória. O que couber continua no banco —
   // filtrar lá é sempre melhor, porque encurta a varredura.
@@ -481,7 +493,7 @@ async function peneirar(
     // exatamente o que está sendo feito, e é feita logo abaixo.
     const { query } = await consultaContatos(
       supabase,
-      { ...f, email: "" },
+      { ...f, email: [] },
       ctx,
       { select: "id, name, email, score, created_at", ordenar: false },
       paraOBanco
@@ -491,7 +503,7 @@ async function peneirar(
     // encurta a varredura sem mudar o resultado. Só que essa poda vale SÓ para o
     // veredito: numa peneira que existe por causa do tamanho das listas, cortar quem
     // não tem e-mail esconderia contato legítimo.
-    if (julgaEmail) q = q.not("email", "is", null).neq("email", "");
+    if (julgaEmail && !querSemEmail) q = q.not("email", "is", null).neq("email", "");
     const { data, error } = await q
       .order("id", { ascending: true })
       .range(inicio, inicio + PAGINA_PENEIRA - 1);
@@ -502,7 +514,7 @@ async function peneirar(
     for (const c of linhas) {
       if (incluir && !incluir.has(c.id)) continue;
       if (excluir && excluir.has(c.id)) continue;
-      if (julgaEmail && vereditoEmail(c.email, c.name) !== alvo) continue;
+      if (julgaEmail && !alvos.has(vereditoEmail(c.email, c.name))) continue;
       acertos.push({ id: c.id, score: c.score ?? null, created_at: c.created_at ?? null });
     }
     if (linhas.length < PAGINA_PENEIRA) break;

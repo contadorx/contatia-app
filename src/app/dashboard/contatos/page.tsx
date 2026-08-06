@@ -24,7 +24,7 @@ export default async function Contatos({
     responsavel?: string | string[];
     semcontato?: string;
     view?: string;
-    email?: string;
+    email?: string | string[];
     // filtro negativo: ?tag_nao=1 inverte a caixa de tags, e assim por diante
     tag_nao?: string;
     produto_nao?: string;
@@ -41,8 +41,8 @@ export default async function Contatos({
   // visão rápida: completar | prontos | resgatar | quentes (vazio = todos). semcontato=1 vira "completar".
   const view = searchParams.view || (searchParams.semcontato === "1" ? "completar" : "");
   const q = (searchParams.q || "").trim();
-  // veredito do e-mail: bate | caixa | outro | sem
-  const emailFiltro = (searchParams.email || "").trim();
+  // veredito do e-mail: bate | caixa | outro | sem (multi, como as outras caixas)
+  const emailFiltro = comoLista(searchParams.email);
   // "1" = a caixa vira negativa ("não tem nenhuma destas")
   const tagNao = searchParams.tag_nao === "1";
   const produtoNao = searchParams.produto_nao === "1";

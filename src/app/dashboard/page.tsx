@@ -8,7 +8,7 @@ import OnboardingChecklist from "@/components/OnboardingChecklist";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import { effectiveDailyCap } from "@/lib/warmup";
 import { Termo } from "@/components/Termo";
-import { diaISO, diaISOmais } from "@/lib/datas";
+import { diaISO, diaISOmais, dataDoDia } from "@/lib/datas";
 import { temSessao } from "@/lib/waModo";
 
 export const dynamic = "force-dynamic";
@@ -62,19 +62,49 @@ export default async function Today() {
   // A segunda contagem (score >= HOT_THRESHOLD) foi REMOVIDA: era consultada e nunca
   // usada em lugar nenhum da página — uma varredura completa de 78 mil linhas por
   // carregamento, à toa.
-  const [{ data: rawTasks }, contactsCount, { data: boxes }, { data: equipe }] = await Promise.all([
-    supabase
+  // ============================================================
+  // A FILA NÃO PODE PARAR NO MILÉSIMO — e parava, calada
+  //
+  // Esta consulta não tinha `.limit()`, e é justamente aí que mora a armadilha: o
+  // PostgREST devolve NO MÁXIMO 1.000 linhas por consulta. Sem `order by`, quais 1.000
+  // vinham era indeterminado — e com centenas de contatos inscritos em cadências de 7
+  // passos, a fila do dia passou desse teto. Consequências, todas silenciosas:
+  //   · toques de hoje que simplesmente não apareciam na tela;
+  //   · e o bloco "Engajou agora" declarando "sem próximo passo" para quem TEM tarefa
+  //     agendada — porque a lista de "quem tem tarefa" saía dessa consulta cortada.
+  //
+  // Agora é paginado, com ordem ESTÁVEL (due_date + id: sem o segundo critério o
+  // `range` do Postgres repete e pula linhas), e o teto é explícito. Se ele for
+  // atingido, a tela diz — em vez de mostrar uma fila incompleta com cara de completa.
+  // ============================================================
+  const PAGINA_FILA = 1000;
+  const MAX_PAGINAS_FILA = 6;      // 6.000 toques em 4 dias é folga larga
+  const filaBruta: any[] = [];
+  let filaCortada = false;
+  for (let pagina = 0; pagina < MAX_PAGINAS_FILA; pagina++) {
+    const { data: pag } = await supabase
       .from("tasks")
       // O embed de contatos traz `*`: `instagram`/`linkedin` nascem na 0110 e, pedidas
       // pelo nome, derrubariam a FILA INTEIRA enquanto a migration não estivesse
       // aplicada — a tela mais importante do app ficaria vazia sem dizer por quê.
       .select("id, channel, title, generated_content, due_date, contact_id, enrollment_id, assigned_to, contacts(*)")
       .eq("status", "pending")
-      .lte("due_date", in3),
+      .lte("due_date", in3)
+      .order("due_date", { ascending: true })
+      .order("id", { ascending: true })
+      .range(pagina * PAGINA_FILA, pagina * PAGINA_FILA + PAGINA_FILA - 1);
+    const linhas = ((pag as any[]) || []);
+    filaBruta.push(...linhas);
+    if (linhas.length < PAGINA_FILA) break;
+    if (pagina + 1 >= MAX_PAGINAS_FILA) filaCortada = true;
+  }
+
+  const [contactsCount, { data: boxes }, { data: equipe }] = await Promise.all([
     supabase.from("contacts").select("id", { count: "estimated", head: true }),
     supabase.from("email_accounts").select("daily_cap, warmup_stage, created_at").eq("is_active", true),
     supabase.from("profiles").select("id, full_name, email").eq("is_active", true),
   ]);
+  const rawTasks = filaBruta;
 
   // Envio Seguro: soma o que as caixas conseguem enviar HOJE (com aquecimento) — evita a
   // surpresa "inscrevi 100 e saíram 10". Reusa a curva de warmup do envio.
@@ -215,13 +245,29 @@ export default async function Today() {
     if (pagina + 1 >= MAX_PAGINAS_EVENTOS) varreduraCortada = true;
   }
 
-  const comTarefa = new Set(contactIds as string[]);
   const TETO_ENGAJOU = 60;
   const todosIds = Object.keys(engajou48);
   const totalEngajou = todosIds.length;
   const idsEngajou = todosIds.slice(0, TETO_ENGAJOU);
   const engajouTruncado = totalEngajou > TETO_ENGAJOU;
-  const [{ data: ctsEngajou }, { data: enrEngajou }] = await Promise.all([
+  // ============================================================
+  // "SEM PRÓXIMO PASSO" TEM DE SIGNIFICAR ISSO — e não significava
+  //
+  // A separação usava o conjunto de contatos da FILA, que só carrega tarefas até 3 dias
+  // à frente (e, antes do conserto acima, cortadas no milésimo). Quem tinha o próximo
+  // toque agendado para daqui a uma semana — ou quem ficou fora do corte — caía em
+  // "deram sinal e a cadência acabou (ou nunca existiu)". Falso nos dois casos: a
+  // cadência estava ATIVA e com sete passos agendados.
+  //
+  // O erro é do tipo caro: o bloco convida a "Inscrever em cadência" quem já está
+  // inscrito. Duas inscrições na mesma cadência viram duas filas de toques para a mesma
+  // pessoa — o oposto do que a tela está tentando evitar.
+  //
+  // Agora a pergunta é feita direto, e para os 60 contatos da lista: existe ALGUMA
+  // tarefa pendente, em qualquer data? A data da mais próxima também vem, porque
+  // "encaminhado" sem dizer para quando ainda deixa a pessoa abrindo a ficha.
+  // ============================================================
+  const [{ data: ctsEngajou }, { data: enrEngajou }, { data: tarefasEngajou }] = await Promise.all([
     idsEngajou.length
       ? supabase.from("contacts").select("id, name, company, score").in("id", idsEngajou)
       : Promise.resolve({ data: [] as any[] }),
@@ -239,7 +285,23 @@ export default async function Today() {
           .in("contact_id", idsEngajou)
           .order("started_at", { ascending: false })
       : Promise.resolve({ data: [] as any[] }),
+    idsEngajou.length
+      ? supabase
+          .from("tasks")
+          .select("contact_id, due_date, channel")
+          .in("contact_id", idsEngajou)
+          .eq("status", "pending")
+          .order("due_date", { ascending: true })
+      : Promise.resolve({ data: [] as any[] }),
   ]);
+
+  // primeira tarefa pendente de cada contato (a consulta já vem por data crescente)
+  const proximoToque: Record<string, { due_date: string; channel: string }> = {};
+  for (const t of ((tarefasEngajou as any[]) || [])) {
+    if (t.contact_id && !proximoToque[t.contact_id]) {
+      proximoToque[t.contact_id] = { due_date: t.due_date, channel: t.channel };
+    }
+  }
   const cadenciaDeReserva: Record<string, string> = {};
   for (const e of (enrEngajou as any[]) || []) {
     const nome = (e as any)?.sequences?.name;
@@ -270,8 +332,11 @@ export default async function Today() {
       cadenciaExata: !!meta.cadencia,
       passo: typeof meta.passo === "number" ? (meta.passo as number) : null,
       // quem já tem tarefa está encaminhado; quem não tem é decisão pendente. A lista
-      // mostra os dois, mas nessa ordem.
-      temTarefa: comTarefa.has(c.id),
+      // mostra os dois, mas nessa ordem. `comTarefa` (a fila de 3 dias) NÃO serve para
+      // isso — ver o bloco acima.
+      temTarefa: !!proximoToque[c.id],
+      proximoToque: proximoToque[c.id]?.due_date || null,
+      proximoCanal: proximoToque[c.id]?.channel || null,
       };
     })
     .sort((a, b) => {
@@ -404,6 +469,14 @@ export default async function Today() {
       />
 
       <h2 className="mb-3 mt-8 font-display text-lg font-bold">Fila de hoje</h2>
+      {/* teto da varredura atingido: a fila abaixo NÃO é o conjunto inteiro. Dizer isso
+          é o mínimo — foi a versão calada disso que sumiu com toques do dia. */}
+      {filaCortada && (
+        <p className="mb-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
+          Parei de carregar a fila em 6.000 toques: o que está abaixo é parte do que vence até {dataDoDia(in3)}.
+          Filtre por canal ou responsável para trabalhar por partes.
+        </p>
+      )}
       <TaskQueue tasks={tasks} hotThreshold={HOT_THRESHOLD} lastActivity={lastActivity} allTags={(allTags as any[]) || []} waMode={waMode} />
     </div>
   );

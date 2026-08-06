@@ -22,6 +22,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import EnrollButton from "@/components/EnrollButton";
 import NewOpportunityForContact from "@/components/NewOpportunityForContact";
+import { dataDoDia } from "@/lib/datas";
 
 const ROTULO: Record<string, { txt: string; cls: string }> = {
   replied: { txt: "respondeu", cls: "bg-signal/15 text-signal" },
@@ -52,6 +53,10 @@ export type LinhaEngajou = {
   tipo: string;
   quando: string;
   temTarefa: boolean;
+  // data e canal do PRÓXIMO toque agendado (quando existe). "Encaminhado" sem dizer
+  // para quando ainda obriga a abrir a ficha para saber.
+  proximoToque?: string | null;
+  proximoCanal?: string | null;
   assunto?: string | null;
   url?: string | null;
   cadencia?: string | null;
@@ -110,6 +115,14 @@ function Linha({ l, sequences, acoes }: { l: LinhaEngajou; sequences: { id: stri
         <Selo tipo={l.tipo} />
         <span className="text-xs text-subtle">{quandoTxt(l.quando)}</span>
         {l.score >= 25 && <span className="text-xs font-semibold text-warn">score {l.score}</span>}
+        {/* quando o próximo toque já está agendado, DIZER a data evita a dúvida que
+            fazia abrir a ficha só para conferir se a cadência ainda anda */}
+        {l.proximoToque && (
+          <span className="rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-medium text-brand-dark">
+            próximo {l.proximoCanal === "email" ? "e-mail" : l.proximoCanal === "whatsapp" ? "WhatsApp" : "toque"} em{" "}
+            {dataDoDia(l.proximoToque)}
+          </span>
+        )}
         <span className="ml-auto flex items-center gap-2">
           {acoes && <EnrollButton contactId={l.id} sequences={sequences} />}
           {acoes && <NewOpportunityForContact contactId={l.id} defaultTitle={`Oportunidade — ${l.name}`} compacto />}
@@ -225,9 +238,9 @@ export default function EngajouAgora({
           {comPasso.length > 0 && (
             <>
               <p className="mt-4 text-sm font-semibold text-ink">
-                Já têm tarefa na fila{" "}
+                Já têm próximo toque agendado{" "}
                 <span className="font-normal text-subtle">
-                  — estão lá embaixo com o 🔥, mas aqui você vê quem são sem procurar.
+                  — a cadência deles segue; aqui você vê quem são sem procurar.
                 </span>
               </p>
               <div className="mt-2 space-y-1.5">

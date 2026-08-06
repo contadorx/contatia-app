@@ -28,7 +28,7 @@ export default function ContactsFilterBar({
   // tag/produto/cadencia/responsavel são MULTI (arrays); frio e e-mail seguem single
   // (um contato tem UM veredito de e-mail; marcar dois não quer dizer nada).
   view: string; q: string; tag: string[]; produto: string[]; cadencia: string[]; frio: string;
-  responsavel: string[]; email: string;
+  responsavel: string[]; email: string[];
   tagNao?: boolean; produtoNao?: boolean; cadenciaNao?: boolean;
   tags: Opt[]; produtos: Opt[]; cadencias: Opt[]; membros: Opt[];
 }) {
@@ -173,16 +173,18 @@ export default function ContactsFilterBar({
             </div>
           </Field>
           {/* O VEREDITO DO E-MAIL — o mesmo rótulo que a lista mostra embaixo do nome.
-              É o filtro que separa "já está bom, é só aceitar" de "ainda dá trabalho",
-              que é a decisão que se toma varrendo a lista. */}
+              É o filtro que separa "já está bom, é só aceitar" de "ainda dá trabalho".
+              MULTI como as outras caixas: a pergunta de trabalho quase sempre são DOIS
+              vereditos ao mesmo tempo (caixa geral + outro nome), e uma caixa que só
+              aceita um valor obriga a filtrar duas vezes para ver a mesma fila. */}
           <Field label="E-mail">
-            <div className="w-[190px]">
+            <div className="w-[200px]">
               <SmartSelect
-                clearable
+                multiple
                 placeholder="Todos"
                 className="py-1.5 text-sm"
-                value={email}
-                onValueChange={(v) => go({ email: v })}
+                values={email}
+                onValuesChange={(v) => go({ email: paraUrl(v) })}
                 options={[
                   { value: "bate", label: "Bate com o nome" },
                   { value: "caixa", label: "Caixa geral" },
@@ -210,7 +212,7 @@ export default function ContactsFilterBar({
           </Field>
           <p className="w-full text-[11px] text-subtle">
             Marcar vários numa mesma caixa é <b>ou</b> (tag A ou B); caixas diferentes se somam (<b>e</b>).
-            {email && email !== "sem" && " O filtro de e-mail lê endereço por endereço — em base grande a lista demora alguns segundos."}
+            {email.some((v) => v !== "sem") && " O filtro de e-mail lê endereço por endereço — em base grande a lista demora alguns segundos."}
           </p>
           {detailedCount > 0 && (
             <button type="button" className="pb-1.5 text-xs text-subtle hover:text-danger" onClick={() => go({ tag: "", produto: "", cadencia: "", frio: "", responsavel: "", email: "", tag_nao: "", produto_nao: "", cadencia_nao: "" })}>

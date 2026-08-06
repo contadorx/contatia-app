@@ -123,7 +123,7 @@ export default function ContactsTable({
   tags?: Tag[];
   products?: Record<string, { id: string; name: string }[]>;
   // filtro ATUAL da tela — é ele que a exclusão em massa refaz no servidor
-  filtro?: { q?: string; view?: string; tag?: string[]; produto?: string[]; cadencia?: string[]; frio?: string; responsavel?: string[]; email?: string; tagNao?: boolean; produtoNao?: boolean; cadenciaNao?: boolean };
+  filtro?: { q?: string; view?: string; tag?: string[]; produto?: string[]; cadencia?: string[]; frio?: string; responsavel?: string[]; email?: string[]; tagNao?: boolean; produtoNao?: boolean; cadenciaNao?: boolean };
 }) {
   const router = useRouter();
   // ============================================================

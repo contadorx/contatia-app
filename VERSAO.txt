@@ -1,21 +1,17 @@
 Contatia — versão deste pacote
 ==============================
-v2026.08.06-59
+v2026.08.06-61
 
-⚠ DUAS MIGRATIONS PENDENTES (entregues à parte, aplicar no SQL Editor):
-   0111_variacoes_mensagem.sql       → várias redações por passo
-   0112_texto_editado_na_tarefa.sql  → marca a tarefa editada à mão
-   Sem a 0112, a reaplicação de texto não distingue o que você editou — a tela avisa.
+Migrations: nenhuma nova (0111 e 0112 já aplicadas).
 
 O que entrou agora:
-· Em Cadências, por cadência: "Atualizar toques pendentes".
-  Simula primeiro (quantas mudam + 3 exemplos ANTES → DEPOIS com dados reais) e só
-  então oferece o botão que escreve.
-· Só mexe em tarefa PENDENTE. O que já foi enviado fica intacto.
-· Tarefa editada à mão na fila é preservada (body_editado, 0112).
-· Reescolhe a variação da mensagem pela mesma regra determinística da inscrição.
-· Fica registrado em Resultados → Registro (quantas, quantas preservadas).
+· O filtro de E-mail (veredito) virou MULTI com busca, igual a Tag/Produto/Cadência.
+  Dá para marcar "Caixa geral" + "Outro nome" de uma vez — que é a pergunta real de
+  trabalho ("o que ainda dá trabalho"), antes só possível filtrando duas vezes.
+· Dentro da caixa é OU, como nas outras; entre caixas continua sendo E.
+· "Sem e-mail" sozinho continua resolvido pelo banco (rápido); junto com os outros,
+  entra na peneira sem podar quem não tem endereço.
 
-Inclui tudo de 49 a 58.
+Inclui o conserto de v60 (fila cortada no milésimo e "sem próximo passo").
 
-COMO CONFERIR: rodapé do menu = "v2026.08.06-59" + 7 do commit.
+COMO CONFERIR: rodapé do menu = "v2026.08.06-61" + 7 do commit.
