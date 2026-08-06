@@ -5,7 +5,7 @@ import ContactsFilterBar from "@/components/ContactsFilterBar";
 import { isManager } from "@/lib/permissions";
 import { produtosPorContatos } from "@/lib/produtos";
 import { comoLista } from "@/lib/filtros";
-import { varrerContatos, precisaPeneira } from "@/lib/contatosFiltro";
+import { varrerContatos } from "@/lib/contatosFiltro";
 import { msgErro } from "@/lib/erros";
 
 export const dynamic = "force-dynamic";
@@ -154,11 +154,13 @@ export default async function Contatos({
 
       {/* O TAMANHO REAL DO CONJUNTO.
           Filtrar, ver 200 linhas e concluir que a base tem 200 é o erro que este aviso
-          existe para impedir — a peneira já contou tudo, então o número é dito. */}
-      {precisaPeneira(filtro) && !erroContatos && (
+          existe para impedir — quando a peneira roda ela já contou tudo, então o número
+          é dito. Ela roda por dois motivos: veredito de e-mail (regra em JS) ou lista de
+          ids grande demais para caber na URL (o caso do "Prontos p/ cadência"). */}
+      {totalPeneira !== null && !erroContatos && (
         <p className="mt-3 rounded-lg bg-muted px-3 py-2 text-xs text-subtle">
-          <b>{totalPeneira ?? 0}</b> {totalPeneira === 1 ? "contato bate" : "contatos batem"} com este filtro de e-mail
-          {totalPeneira && totalPeneira > contacts.length ? ` — mostrando os ${contacts.length} de maior score.` : "."}
+          <b>{totalPeneira}</b> {totalPeneira === 1 ? "contato bate" : "contatos batem"} com este filtro
+          {totalPeneira > contacts.length ? ` — mostrando os ${contacts.length} de maior score.` : "."}
           {peneiraTruncada && " Paramos em 60.000 contatos examinados: pode haver mais."}
         </p>
       )}

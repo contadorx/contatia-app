@@ -106,6 +106,31 @@ export function precisaPeneira(filtro: any): boolean {
   return e === "bate" || e === "caixa" || e === "outro";
 }
 
+// ============================================================
+// LISTA DE IDS NÃO CABE NUMA URL — e o banco responde "Bad Request"
+//
+// Tag, produto e cadência viram uma lista de ids que entrava na consulta como
+// `id=in.(uuid,uuid,…)`; "Prontos p/ cadência" e "Frios a resgatar" fazem o inverso,
+// `id=not.in.(…)` com TODO MUNDO que está em cadência ativa. Enquanto a base era
+// pequena, passava. Depois de umas matrículas em lote, a lista chegou aos milhares:
+// cada uuid ocupa 37 caracteres na URL, então 1.000 já passam de 37 KB e o servidor
+// recusa a requisição inteira — a tela mostrava "a consulta de contatos falhou" com um
+// "Bad Request" que não dizia nada, e o filtro simplesmente parava de existir.
+//
+// Repare que o erro NÃO estava na lista: ela é buscada certinha, paginada, completa. O
+// erro era insistir em mandá-la pela URL. Acima deste teto a restrição passa a ser
+// aplicada em memória, na peneira — mais lento, e correto.
+//
+// O teto é conservador de propósito: 250 uuids ≈ 9 KB, e ainda sobra espaço para o
+// resto do filtro (busca, responsável, datas) na mesma URL. A exclusão em massa já
+// usava 200 pelo mesmo motivo, medido.
+// ============================================================
+const TETO_IDS_NA_URL = 250;
+
+export function listasGrandes(pre: Preparo): boolean {
+  return (pre.idsFacetas?.length ?? 0) > TETO_IDS_NA_URL || pre.emCadencia.length > TETO_IDS_NA_URL;
+}
+
 type Contexto = { gerente: boolean; userId?: string | null; tenantId?: string | null };
 
 // O que é caro e não muda entre as páginas de uma mesma varredura.
@@ -206,13 +231,19 @@ export async function consultaContatos(
   // que estava recortando os endereços bons. É a lição do CNAE que virava "o estado
   // inteiro". Quem precisa desse filtro chama varrerContatos()/contarContatos().
   // ============================================================
+  const preparo = pre || (await prepararFiltro(supabase, f));
   if (precisaPeneira(f)) {
     throw new Error(
       "O filtro de e-mail (bate/caixa/outro) precisa da peneira: use varrerContatos() ou contarContatos() em vez de consultaContatos()."
     );
   }
+  if (listasGrandes(preparo)) {
+    throw new Error(
+      "As listas de ids deste filtro não cabem numa URL: use varrerContatos() ou contarContatos(), que aplicam a restrição em memória."
+    );
+  }
 
-  const { idsFacetas, emCadencia } = pre || (await prepararFiltro(supabase, f));
+  const { idsFacetas, emCadencia } = preparo;
 
   let q = supabase
     .from("contacts")
@@ -325,24 +356,40 @@ async function peneirar(
   pre: Preparo
 ): Promise<{ acertos: Acerto[]; examinados: number; truncado: boolean }> {
   const alvo = f.email;
+  const julgaEmail = alvo === "bate" || alvo === "caixa" || alvo === "outro";
+
+  // O que não coube na URL vira conjunto em memória. O que couber continua no banco —
+  // filtrar lá é sempre melhor, porque encurta a varredura.
+  const facetasGrandes = (pre.idsFacetas?.length ?? 0) > TETO_IDS_NA_URL;
+  const cadenciaGrande = pre.emCadencia.length > TETO_IDS_NA_URL;
+  const incluir = facetasGrandes ? new Set(pre.idsFacetas as string[]) : null;
+  const excluir = cadenciaGrande ? new Set(pre.emCadencia) : null;
+  const paraOBanco: Preparo = {
+    idsFacetas: facetasGrandes ? null : pre.idsFacetas,
+    emCadencia: cadenciaGrande ? [] : pre.emCadencia,
+  };
+
   const acertos: Acerto[] = [];
   let examinados = 0;
   let truncado = false;
 
   for (let inicio = 0; inicio < TETO_PENEIRA; inicio += PAGINA_PENEIRA) {
-    // `email: ""` desarma a guarda: aqui a peneira é exatamente o que está sendo feito.
+    // `email: ""` + listas neutralizadas desarmam a guarda: aqui a peneira é
+    // exatamente o que está sendo feito, e é feita logo abaixo.
     const { query } = await consultaContatos(
       supabase,
       { ...f, email: "" },
       ctx,
       { select: "id, name, email, score, created_at", ordenar: false },
-      pre
+      paraOBanco
     );
-    const { data, error } = await query
-      // quem não tem e-mail nunca vira "bate"/"caixa"/"outro" — tirar do caminho
-      // encurta a varredura sem mudar o resultado
-      .not("email", "is", null)
-      .neq("email", "")
+    let q = query;
+    // quem não tem e-mail nunca vira "bate"/"caixa"/"outro" — tirar do caminho
+    // encurta a varredura sem mudar o resultado. Só que essa poda vale SÓ para o
+    // veredito: numa peneira que existe por causa do tamanho das listas, cortar quem
+    // não tem e-mail esconderia contato legítimo.
+    if (julgaEmail) q = q.not("email", "is", null).neq("email", "");
+    const { data, error } = await q
       .order("id", { ascending: true })
       .range(inicio, inicio + PAGINA_PENEIRA - 1);
     if (error) throw error;
@@ -350,9 +397,10 @@ async function peneirar(
     const linhas = ((data as any[]) || []);
     examinados += linhas.length;
     for (const c of linhas) {
-      if (vereditoEmail(c.email, c.name) === alvo) {
-        acertos.push({ id: c.id, score: c.score ?? null, created_at: c.created_at ?? null });
-      }
+      if (incluir && !incluir.has(c.id)) continue;
+      if (excluir && excluir.has(c.id)) continue;
+      if (julgaEmail && vereditoEmail(c.email, c.name) !== alvo) continue;
+      acertos.push({ id: c.id, score: c.score ?? null, created_at: c.created_at ?? null });
     }
     if (linhas.length < PAGINA_PENEIRA) break;
     if (inicio + PAGINA_PENEIRA >= TETO_PENEIRA) truncado = true;
@@ -391,20 +439,21 @@ export async function varrerContatos(
   opts: { select: string; quantidade: number; ordenar?: boolean }
 ): Promise<Varredura> {
   const f = normalizarFiltro(filtro);
+  const pre = await prepararFiltro(supabase, f);
 
-  if (!precisaPeneira(f)) {
-    const { query } = await consultaContatos(supabase, f, ctx, {
-      select: opts.select,
-      limit: opts.quantidade,
-      ordenar: opts.ordenar,
-    });
+  // caminho normal: o banco dá conta de tudo numa consulta só
+  if (!precisaPeneira(f) && !listasGrandes(pre)) {
+    const { query } = await consultaContatos(
+      supabase, f, ctx,
+      { select: opts.select, limit: opts.quantidade, ordenar: opts.ordenar },
+      pre
+    );
     const { data, error } = await query;
     if (error) throw error;
     const linhas = ((data as any[]) || []);
     return { linhas, total: null, examinados: linhas.length, truncado: false };
   }
 
-  const pre = await prepararFiltro(supabase, f);
   const { acertos, examinados, truncado } = await peneirar(supabase, f, ctx, pre);
 
   if (opts.ordenar !== false) {
@@ -429,20 +478,19 @@ export async function contarContatos(
   ctx: Contexto
 ): Promise<{ total: number; aproximado: boolean }> {
   const f = normalizarFiltro(filtro);
+  const pre = await prepararFiltro(supabase, f);
 
-  if (!precisaPeneira(f)) {
-    const { query } = await consultaContatos(supabase, f, ctx, {
-      select: "id",
-      count: "exact",
-      head: true,
-      ordenar: false,
-    });
+  if (!precisaPeneira(f) && !listasGrandes(pre)) {
+    const { query } = await consultaContatos(
+      supabase, f, ctx,
+      { select: "id", count: "exact", head: true, ordenar: false },
+      pre
+    );
     const { count, error } = await query;
     if (error) throw error;
     return { total: count ?? 0, aproximado: false };
   }
 
-  const pre = await prepararFiltro(supabase, f);
   const { acertos, truncado } = await peneirar(supabase, f, ctx, pre);
   return { total: acertos.length, aproximado: truncado };
 }

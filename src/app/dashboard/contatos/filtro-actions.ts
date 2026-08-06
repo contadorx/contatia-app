@@ -23,7 +23,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { msgErro } from "@/lib/erros";
 import { isManager } from "@/lib/permissions";
-import { consultaContatos, normalizarFiltro, filtroVazio, precisaPeneira, varrerContatos, contarContatos, type FiltroContatos } from "@/lib/contatosFiltro";
+import { consultaContatos, normalizarFiltro, filtroVazio, precisaPeneira, listasGrandes, prepararFiltro, varrerContatos, contarContatos, type FiltroContatos } from "@/lib/contatosFiltro";
 import { logAction, recortarItens } from "@/lib/actionLog";
 import { apagarLote } from "@/lib/apagarLote";
 
@@ -221,6 +221,9 @@ export async function exportarContatosPorFiltro(
 
   const linhas: any[] = [];
   let truncado = false;
+  // o teto vale por caminho: pela peneira as linhas vêm de 200 em 200 e o CSV precisa
+  // caber no orçamento de tempo da função
+  let tetoUsado = TETO_EXPORT;
 
   try {
     if (selecao.length) {
@@ -231,10 +234,11 @@ export async function exportarContatosPorFiltro(
         if (error) return { error: msgErro(error) };
         linhas.push(...(((data as any[]) || [])));
       }
-    } else if (precisaPeneira(f)) {
-      // Com filtro de e-mail o conjunto não existe no banco: quem o define é a peneira.
-      // Teto menor de propósito — cada 200 linhas é uma ida ao banco, e o CSV precisa
-      // caber no orçamento de tempo da função. O `truncado` avisa quando cortou.
+    } else if (precisaPeneira(f) || listasGrandes(await prepararFiltro(supabase, f))) {
+      // Aqui o conjunto não existe pronto no banco: quem o define é a peneira — seja
+      // pelo veredito do e-mail, seja porque a lista de ids não cabia na URL.
+      // O `truncado` avisa quando cortou.
+      tetoUsado = TETO_EXPORT_PENEIRA;
       const { linhas: L, truncado: tr } = await varrerContatos(
         supabase, f, { gerente, userId: user_id, tenantId: tenant_id },
         { select: SELECT, quantidade: TETO_EXPORT_PENEIRA }
@@ -266,7 +270,7 @@ export async function exportarContatosPorFiltro(
   const csv = montarCsv(
     ["Nome", "E-mail", "Telefone", "Empresa", "Origem", "CNPJ", "Cargo", "Situação", "Score",
      "WhatsApp", "Número WhatsApp", "Domínio", "Tags", "Responsável", "Último toque", "Criado em"],
-    linhas.slice(0, TETO_EXPORT).map((c) => [
+    linhas.slice(0, tetoUsado).map((c) => [
       c.name, c.email, c.phone, c.company, c.origin, c.cnpj, c.role_title, c.status, c.score,
       WA[c.wa_status as string] || "", c.wa_number, c.company_domain,
       ((c.contact_tags as any[]) || []).map((t) => t?.tags?.name).filter(Boolean).join(", "),
@@ -275,6 +279,5 @@ export async function exportarContatosPorFiltro(
     ])
   );
 
-  const teto = precisaPeneira(f) && !selecao.length ? TETO_EXPORT_PENEIRA : TETO_EXPORT;
-  return { csv, linhas: Math.min(linhas.length, teto), truncado, teto };
+  return { csv, linhas: Math.min(linhas.length, tetoUsado), truncado, teto: tetoUsado };
 }
