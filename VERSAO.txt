@@ -1,21 +1,17 @@
 Contatia — versão deste pacote
 ==============================
-v2026.08.06-54
+v2026.08.06-55
 
-O que entrou:
-· "Este número não tem WhatsApp" deixa de ser só mensagem: marca o contato
-  (wa_status=invalid), grava nota no histórico e cria fila de revisão.
-· Nova visão em Contatos: "Sem WhatsApp".
-· Fila de hoje: os toques travados ganham selo + "Procurar no site", "Abrir ficha"
-  e "Pular"; e um botão no topo mostra quantos são.
-· Inscrição em cadência não cria mais passo de WhatsApp para quem já se provou
-  que não tem (individual e em lote), e o relatório do lote diz quantos foram.
-· Score visível na fila de hoje, ao lado do nome.
+O que entrou agora:
+· "Engajou agora" não trava mais em 60. O cartão passa a contar PESSOAS na janela
+  de 48h; a lista continua mostrando as 60 mais recentes e diz isso.
+· Os eventos são lidos em páginas (ordem estável), no lugar do teto de 1.000 —
+  uma pessoa gera vários eventos, então 1.000 eventos podiam ser 40 pessoas.
 
-Inclui também o que estava em 49–53 (peneira do filtro, capacidade do e-mail,
-conexão SMTP/IMAP reaproveitada no lote, fila drenando sozinha, commit no rodapé).
+Inclui tudo de 49 a 54 (peneira do filtro de contatos, capacidade do e-mail,
+conexão SMTP/IMAP reaproveitada no lote, fila drenando sozinha, número sem
+WhatsApp virando fila de revisão, score na fila e commit no rodapé).
 
 COMO CONFERIR SE ISTO ESTÁ NO AR
 1. Publique e abra o app; olhe o rodapé do menu lateral.
-2. Tem de aparecer "v2026.08.06-54" seguido dos 7 primeiros caracteres do commit.
-3. Se o número for menor, o que está no ar não é este pacote.
+2. Tem de aparecer "v2026.08.06-55" seguido dos 7 primeiros caracteres do commit.

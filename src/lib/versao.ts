@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.06-54";
+export const VERSAO_APP = "2026.08.06-55";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "numero sem WhatsApp vira marca e fila de revisao (visao Sem WhatsApp, acoes na fila de hoje) + score visivel na fila";
+export const VERSAO_NOTAS = "Engajou agora deixa de travar em 60: o cartao conta PESSOAS e os eventos sao lidos em paginas";

@@ -130,10 +130,16 @@ export default function EngajouAgora({
   linhas,
   sequences,
   truncado,
+  total,
+  varreduraCortada,
 }: {
   linhas: LinhaEngajou[];
   sequences: { id: string; name: string }[];
   truncado?: boolean;
+  // total de PESSOAS na janela — pode ser maior que `linhas`, que é cortada em 60
+  total?: number;
+  // a leitura de eventos bateu no teto de páginas: pode haver mais gente ainda
+  varreduraCortada?: boolean;
 }) {
   // Começa aberto e só fecha depois de ler a escolha guardada: ler durante a
   // renderização do servidor daria um HTML diferente do que o navegador desenha, e o
@@ -173,11 +179,14 @@ export default function EngajouAgora({
         <div className="min-w-0">
           <p className="font-display font-bold text-ink">
             🔥 Engajou nas últimas 48h{" "}
-            <span className="rounded-full bg-warn px-2 py-0.5 text-xs font-bold text-white">{linhas.length}</span>
+            {/* o número é de PESSOAS na janela; a lista abaixo é cortada em 60. Mostrar
+                o tamanho da lista aqui foi o que fez o cartão "travar em 60". */}
+            <span className="rounded-full bg-warn px-2 py-0.5 text-xs font-bold text-white">{total ?? linhas.length}</span>
           </p>
           <p className="mt-0.5 text-xs text-subtle">
             respondeu, abriu o e-mail, abriu a proposta ou clicou num link
-            {truncado ? " · mostrando os mais recentes" : ""}
+            {truncado && total ? ` · ${total} pessoas na janela, mostrando as ${linhas.length} mais recentes` : ""}
+            {varreduraCortada ? " · paramos de ler eventos no teto da varredura: pode haver mais" : ""}
           </p>
         </div>
         <button

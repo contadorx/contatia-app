@@ -164,28 +164,63 @@ export default async function Today() {
   // tela avisa em vez de fingir que é tudo.
   // ============================================================
   const desde48 = new Date(now48).toISOString();
-  const { data: evsLivres } = await supabase
-    .from("events")
-    // `meta` traz o CONTEÚDO do sinal: a URL do clique, o assunto da resposta e — a
-    // partir da 0108 + do enriquecimento no pixel/redirect — o assunto do e-mail e a
-    // cadência de onde ele saiu. Sem isso a tela diz "abriu o e-mail" e ponto, o que
-    // não é suficiente nem para responder nem para saber que cadência funciona.
-    .select("contact_id, type, created_at, meta")
-    .in("type", ["replied", "doc_opened", "email_opened", "link_clicked"])
-    .gte("created_at", desde48)
-    .order("created_at", { ascending: false })
-    .limit(1000);
+
+  // ============================================================
+  // O NÚMERO É DE PESSOAS, A CONSULTA É DE EVENTOS — e um teto misturava os dois
+  //
+  // O cartão vinha do TAMANHO DA LISTA, e a lista era cortada em 60. Ou seja: a partir
+  // de 60 pessoas engajadas, o cartão marcava 60 para sempre. Parecia número estável;
+  // era régua batendo no fim.
+  //
+  // E havia um segundo teto embaixo desse: a consulta trazia no máximo 1.000 eventos.
+  // Como uma pessoa gera VÁRIOS eventos (abriu três vezes, clicou dois links), 1.000
+  // eventos podem ser 200 pessoas — ou 40. Quem ficasse além do milésimo evento sumia
+  // da conta sem aviso nenhum. Os dois tetos juntos faziam o número parar de responder
+  // à realidade justamente quando a operação cresceu, que é quando ele importa.
+  //
+  // Agora: os eventos são lidos em PÁGINAS (ordem estável por created_at + id, senão o
+  // `range` do Postgres repete e pula linhas), contando PESSOAS distintas; o cartão
+  // mostra o total de pessoas; a lista continua com as 60 mais recentes, e diz isso.
+  // Se a varredura bater no teto de páginas, a tela avisa em vez de arredondar.
+  // ============================================================
+  const PAGINA_EVENTOS = 1000;
+  const MAX_PAGINAS_EVENTOS = 8;      // 8.000 eventos de 48h — folgado para a operação atual
+  const TIPOS_ENGAJOU = ["replied", "doc_opened", "email_opened", "link_clicked"];
+
+  const engajou48: Record<string, { type: string; created_at: string; meta: any }> = {};
+  let eventosLidos = 0;
+  let varreduraCortada = false;
+  for (let pagina = 0; pagina < MAX_PAGINAS_EVENTOS; pagina++) {
+    const { data: pag } = await supabase
+      .from("events")
+      // `meta` traz o CONTEÚDO do sinal: a URL do clique, o assunto da resposta e — a
+      // partir da 0108 + do enriquecimento no pixel/redirect — o assunto do e-mail e a
+      // cadência de onde ele saiu. Sem isso a tela diz "abriu o e-mail" e ponto, o que
+      // não é suficiente nem para responder nem para saber que cadência funciona.
+      .select("id, contact_id, type, created_at, meta")
+      .in("type", TIPOS_ENGAJOU)
+      .gte("created_at", desde48)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(pagina * PAGINA_EVENTOS, pagina * PAGINA_EVENTOS + PAGINA_EVENTOS - 1);
+
+    const linhas = ((pag as any[]) || []);
+    eventosLidos += linhas.length;
+    for (const e of linhas) {
+      // o primeiro que aparece é o MAIS RECENTE daquele contato (ordem desc)
+      if (!e.contact_id || engajou48[e.contact_id]) continue;
+      engajou48[e.contact_id] = { type: e.type, created_at: e.created_at, meta: e.meta || {} };
+    }
+    if (linhas.length < PAGINA_EVENTOS) break;
+    if (pagina + 1 >= MAX_PAGINAS_EVENTOS) varreduraCortada = true;
+  }
 
   const comTarefa = new Set(contactIds as string[]);
-  const engajou48: Record<string, { type: string; created_at: string; meta: any }> = {};
-  for (const e of (evsLivres as any[]) || []) {
-    if (!e.contact_id || engajou48[e.contact_id]) continue;
-    engajou48[e.contact_id] = { type: e.type, created_at: e.created_at, meta: e.meta || {} };
-  }
   const TETO_ENGAJOU = 60;
   const todosIds = Object.keys(engajou48);
+  const totalEngajou = todosIds.length;
   const idsEngajou = todosIds.slice(0, TETO_ENGAJOU);
-  const engajouTruncado = todosIds.length > TETO_ENGAJOU;
+  const engajouTruncado = totalEngajou > TETO_ENGAJOU;
   const [{ data: ctsEngajou }, { data: enrEngajou }] = await Promise.all([
     idsEngajou.length
       ? supabase.from("contacts").select("id, name, company, score").in("id", idsEngajou)
@@ -291,7 +326,8 @@ export default async function Today() {
     { label: "Toques de hoje", value: todayCount, live: true },
     // era `hotNowCount` (só quem tem tarefa). Agora é o tamanho da lista logo abaixo —
     // clicar no cartão leva até ela.
-    { label: "Engajou agora", value: engajaram.length, fire: true, ancora: "engajou" },
+    // o total de PESSOAS, não o tamanho da lista: a lista é cortada em 60 de propósito
+    { label: "Engajou agora", value: totalEngajou, fire: true, ancora: "engajou" },
     { label: "Contatos", value: contactsCount.count ?? 0 },
   ];
 
@@ -359,7 +395,13 @@ export default async function Today() {
         <EnviosHoje dados={envios} gestor={souGestor} />
       </div>
 
-      <EngajouAgora linhas={engajaram} sequences={seqsAtivas} truncado={engajouTruncado} />
+      <EngajouAgora
+        linhas={engajaram}
+        sequences={seqsAtivas}
+        truncado={engajouTruncado}
+        total={totalEngajou}
+        varreduraCortada={varreduraCortada}
+      />
 
       <h2 className="mb-3 mt-8 font-display text-lg font-bold">Fila de hoje</h2>
       <TaskQueue tasks={tasks} hotThreshold={HOT_THRESHOLD} lastActivity={lastActivity} allTags={(allTags as any[]) || []} waMode={waMode} />
