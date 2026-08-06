@@ -15,9 +15,14 @@ import "server-only";
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import { contatoIdsPorProduto } from "@/lib/produtos";
 import { comoLista, SEM_DONO } from "@/lib/filtros";
+import { vereditoEmail, VEREDITOS_EMAIL } from "@/lib/emailVeredito";
 
 const NENHUM = "00000000-0000-0000-0000-000000000000";
 export { SEM_DONO };
+// Valor pedido que não é veredito nenhum. Vira "nenhum contato", nunca "todos" —
+// mesma regra do responsável: faceta descartada em silêncio ALARGA a consulta, e esta
+// consulta também alimenta a exclusão em massa.
+const EMAIL_INVALIDO = "__invalido__";
 const VIEWS_VALIDAS = ["completar", "quentes", "com_wa", "prontos", "resgatar"];
 const FRIOS_VALIDOS = ["nunca", "15", "30"];
 // Páginas de 1.000 ao varrer as tabelas de vínculo. O PostgREST corta em 1.000 por
@@ -35,6 +40,7 @@ export type FiltroContatos = {
   cadencia?: string[];
   frio?: string;                 // "15" | "30" | "nunca"
   responsavel?: string[];        // ids de profiles; "__sem__" = sem dono
+  email?: string;                // veredito: bate | caixa | outro | sem
 };
 
 
@@ -70,6 +76,11 @@ export function normalizarFiltro(f: any): FiltroContatos {
       const bons = pedidos.filter((x) => x === SEM_DONO || /^[0-9a-f-]{36}$/i.test(x));
       return bons.length ? bons : [NENHUM];
     })(),
+    email: (() => {
+      const bruto = typeof f?.email === "string" ? f.email.trim() : "";
+      if (!bruto) return "";
+      return (VEREDITOS_EMAIL as string[]).includes(bruto) ? bruto : EMAIL_INVALIDO;
+    })(),
   };
 }
 
@@ -80,13 +91,41 @@ export function normalizarFiltro(f: any): FiltroContatos {
 export function filtroVazio(bruto: any): boolean {
   const f = normalizarFiltro(bruto);
   return (
-    !buscaEfetiva(f.q) && !f.view && !f.frio &&
+    !buscaEfetiva(f.q) && !f.view && !f.frio && !f.email &&
     !f.tag?.length && !f.produto?.length && !f.cadencia?.length &&
     !f.responsavel?.length
   );
 }
 
+// O veredito "sem" (não tem e-mail) o banco resolve sozinho. "bate", "caixa" e "outro"
+// dependem de comparar o endereço com o NOME da pessoa — regra em JavaScript, com
+// acento removido e abreviação (jsilva) reconhecida. Não existe SQL equivalente, então
+// esses três passam pela peneira de varrerContatos().
+export function precisaPeneira(filtro: any): boolean {
+  const e = normalizarFiltro(filtro).email;
+  return e === "bate" || e === "caixa" || e === "outro";
+}
+
 type Contexto = { gerente: boolean; userId?: string | null; tenantId?: string | null };
+
+// O que é caro e não muda entre as páginas de uma mesma varredura.
+export type Preparo = { idsFacetas: string[] | null; emCadencia: string[] };
+
+export async function prepararFiltro(supabase: any, filtro: FiltroContatos): Promise<Preparo> {
+  const f = normalizarFiltro(filtro);
+  const idsFacetas = await idsDasFacetas(supabase, f);
+  // "prontos" e "resgatar" excluem quem já está em cadência ativa. Paginado pelo mesmo
+  // motivo das facetas: com mais de 1.000 matrículas ativas, a tela excluiria um
+  // conjunto e a exclusão outro.
+  let emCadencia: string[] = [];
+  if (f.view === "prontos" || f.view === "resgatar") {
+    emCadencia = Array.from(new Set(await todosOsVinculos(
+      (de, ate) => supabase.from("enrollments").select("contact_id").in("status", ["active", "paused"]).order("contact_id", { ascending: true }).range(de, ate),
+      "contact_id"
+    )));
+  }
+  return { idsFacetas, emCadencia };
+}
 
 // Lê TODAS as páginas de uma tabela de vínculo. Sem isto o PostgREST devolve só as
 // primeiras 1.000 linhas e o filtro passa a mentir silenciosamente.
@@ -145,25 +184,35 @@ async function idsDasFacetas(supabase: any, f: FiltroContatos): Promise<string[]
 // devolvê-lo de uma função async faz o JavaScript executá-lo na hora (o await adota a
 // promise). Resultado: a consulta saía do Promise.all da página e perdia o paralelismo,
 // e o erro escapava do try. Embrulhado num objeto, quem chama decide QUANDO executar.
+//
+// `pre` existe para a peneira do e-mail: ela chama esta função uma vez POR PÁGINA da
+// varredura, e sem isso as facetas (tag/produto/cadência) seriam reconsultadas em
+// todas — dezenas de idas ao banco para chegar sempre ao mesmo conjunto.
 export async function consultaContatos(
   supabase: any,
   filtro: FiltroContatos,
   ctx: Contexto,
-  opts: { select: string; count?: "exact"; head?: boolean; limit?: number; ordenar?: boolean }
+  opts: { select: string; count?: "exact"; head?: boolean; limit?: number; ordenar?: boolean },
+  pre?: Preparo
 ): Promise<{ query: any }> {
   const f = normalizarFiltro(filtro);
-  const idsFacetas = await idsDasFacetas(supabase, f);
 
-  // "prontos" e "resgatar" excluem quem já está em cadência ativa
-  let emCadencia: string[] = [];
-  if (f.view === "prontos" || f.view === "resgatar") {
-    // paginado pelo mesmo motivo das facetas: com mais de 1.000 matrículas ativas, a
-    // tela excluiria um conjunto e a exclusão outro.
-    emCadencia = Array.from(new Set(await todosOsVinculos(
-      (de, ate) => supabase.from("enrollments").select("contact_id").in("status", ["active", "paused"]).order("contact_id", { ascending: true }).range(de, ate),
-      "contact_id"
-    )));
+  // ============================================================
+  // A GUARDA: filtro que esta função NÃO sabe aplicar vira ERRO, não consulta ampla.
+  //
+  // "bate com o nome" só existe em JavaScript. Se alguém chamar consultaContatos com
+  // ele e a condição simplesmente não entrar, a consulta devolve TODO MUNDO — e como
+  // este mesmo código alimenta a exclusão em massa, o operador apagaria a base achando
+  // que estava recortando os endereços bons. É a lição do CNAE que virava "o estado
+  // inteiro". Quem precisa desse filtro chama varrerContatos()/contarContatos().
+  // ============================================================
+  if (precisaPeneira(f)) {
+    throw new Error(
+      "O filtro de e-mail (bate/caixa/outro) precisa da peneira: use varrerContatos() ou contarContatos() em vez de consultaContatos()."
+    );
   }
+
+  const { idsFacetas, emCadencia } = pre || (await prepararFiltro(supabase, f));
 
   let q = supabase
     .from("contacts")
@@ -206,6 +255,10 @@ export async function consultaContatos(
     }
   }
 
+  // ---- veredito do e-mail: o que o banco resolve sozinho ----
+  if (f.email === EMAIL_INVALIDO) q = q.in("id", [NENHUM]);
+  else if (f.email === "sem") q = q.or("email.is.null,email.eq.");
+
   const qSafe = buscaEfetiva(f.q);
   if (qSafe) q = q.or(`name.ilike.%${qSafe}%,email.ilike.%${qSafe}%,company.ilike.%${qSafe}%`);
 
@@ -234,4 +287,162 @@ export async function consultaContatos(
   }
 
   return { query: q };
+}
+
+// ============================================================
+// A PENEIRA — filtrar por algo que o banco não sabe julgar
+//
+// "bate com o nome" compara o começo do endereço com o nome da pessoa, sem acento e
+// aceitando abreviação (jsilva, joaos). Isso é uma função JavaScript; não há coluna
+// nem índice equivalentes no Postgres, e reescrevê-la em SQL criaria uma segunda
+// opinião que um dia diverge da primeira — justo no ponto em que a lista diria "bate"
+// e o filtro "bate" não traria a linha.
+//
+// Então a varredura é honesta e explícita:
+//   1. lê o conjunto do filtro em páginas de 1.000, em ordem ESTÁVEL (por id — sem
+//      ordem estável o `range` do Postgres repete e PULA linhas);
+//   2. julga cada endereço em JS, guardando só id/score/created_at (leve: 60 mil
+//      contatos cabem sem susto);
+//   3. ordena como a tela ordena e busca as linhas completas só da fatia pedida.
+//
+// O TOTAL sai de graça no passo 2 — e é o que impede a queixa clássica: filtrar,
+// ver 200 e concluir que a base tem 200. Quando a varredura bate no teto, quem chama
+// recebe `truncado` e a tela DIZ isso, em vez de mostrar um número menor calado.
+//
+// CUSTO: uma varredura completa da base filtrada por carregamento (22 mil contatos ≈
+// 22 idas ao banco, alguns segundos). É o preço de um filtro exato; por isso ele só
+// roda quando o operador escolhe um veredito.
+// ============================================================
+const PAGINA_PENEIRA = 1000;
+const TETO_PENEIRA = 60000;
+
+type Acerto = { id: string; score: number | null; created_at: string | null };
+
+async function peneirar(
+  supabase: any,
+  f: FiltroContatos,
+  ctx: Contexto,
+  pre: Preparo
+): Promise<{ acertos: Acerto[]; examinados: number; truncado: boolean }> {
+  const alvo = f.email;
+  const acertos: Acerto[] = [];
+  let examinados = 0;
+  let truncado = false;
+
+  for (let inicio = 0; inicio < TETO_PENEIRA; inicio += PAGINA_PENEIRA) {
+    // `email: ""` desarma a guarda: aqui a peneira é exatamente o que está sendo feito.
+    const { query } = await consultaContatos(
+      supabase,
+      { ...f, email: "" },
+      ctx,
+      { select: "id, name, email, score, created_at", ordenar: false },
+      pre
+    );
+    const { data, error } = await query
+      // quem não tem e-mail nunca vira "bate"/"caixa"/"outro" — tirar do caminho
+      // encurta a varredura sem mudar o resultado
+      .not("email", "is", null)
+      .neq("email", "")
+      .order("id", { ascending: true })
+      .range(inicio, inicio + PAGINA_PENEIRA - 1);
+    if (error) throw error;
+
+    const linhas = ((data as any[]) || []);
+    examinados += linhas.length;
+    for (const c of linhas) {
+      if (vereditoEmail(c.email, c.name) === alvo) {
+        acertos.push({ id: c.id, score: c.score ?? null, created_at: c.created_at ?? null });
+      }
+    }
+    if (linhas.length < PAGINA_PENEIRA) break;
+    if (inicio + PAGINA_PENEIRA >= TETO_PENEIRA) truncado = true;
+  }
+
+  return { acertos, examinados, truncado };
+}
+
+// Busca as linhas completas de uma lista de ids, em fatias de 200 (1.000 uuids numa
+// URL do PostgREST passam de 37 KB e o servidor recusa — já medido na exclusão).
+// Devolve NA ORDEM dos ids recebidos.
+async function linhasPorIds(supabase: any, ctx: Contexto, select: string, ids: string[]): Promise<any[]> {
+  const out: any[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    let q = supabase.from("contacts").select(select).in("id", ids.slice(i, i + 200));
+    if (ctx.tenantId) q = q.eq("tenant_id", ctx.tenantId);
+    if (!ctx.gerente) q = q.eq("assigned_to", ctx.userId ?? "");
+    const { data, error } = await q;
+    if (error) throw error;
+    out.push(...((data as any[]) || []));
+  }
+  const pos = new Map(ids.map((id, i) => [id, i]));
+  return out.sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0));
+}
+
+export type Varredura = { linhas: any[]; total: number | null; examinados: number; truncado: boolean };
+
+// A porta de entrada para "me dá N contatos que batem com o filtro". Sem veredito de
+// e-mail é a consulta de sempre (uma ida ao banco); com veredito, passa pela peneira.
+// Quem chama não precisa saber a diferença — só ler `total`/`truncado` quando quiser
+// mostrar o tamanho real do conjunto.
+export async function varrerContatos(
+  supabase: any,
+  filtro: FiltroContatos,
+  ctx: Contexto,
+  opts: { select: string; quantidade: number; ordenar?: boolean }
+): Promise<Varredura> {
+  const f = normalizarFiltro(filtro);
+
+  if (!precisaPeneira(f)) {
+    const { query } = await consultaContatos(supabase, f, ctx, {
+      select: opts.select,
+      limit: opts.quantidade,
+      ordenar: opts.ordenar,
+    });
+    const { data, error } = await query;
+    if (error) throw error;
+    const linhas = ((data as any[]) || []);
+    return { linhas, total: null, examinados: linhas.length, truncado: false };
+  }
+
+  const pre = await prepararFiltro(supabase, f);
+  const { acertos, examinados, truncado } = await peneirar(supabase, f, ctx, pre);
+
+  if (opts.ordenar !== false) {
+    // a MESMA ordem da consulta normal: score desc, depois mais novo primeiro
+    acertos.sort(
+      (a, b) =>
+        (Number(b.score) || 0) - (Number(a.score) || 0) ||
+        String(b.created_at || "").localeCompare(String(a.created_at || ""))
+    );
+  }
+
+  const ids = acertos.slice(0, Math.max(0, opts.quantidade)).map((a) => a.id);
+  const linhas = ids.length ? await linhasPorIds(supabase, ctx, opts.select, ids) : [];
+  return { linhas, total: acertos.length, examinados, truncado };
+}
+
+// Quantos batem com o filtro DE VERDADE. `aproximado` só fica true quando a varredura
+// bateu no teto — e aí quem mostra o número precisa dizer "pelo menos".
+export async function contarContatos(
+  supabase: any,
+  filtro: FiltroContatos,
+  ctx: Contexto
+): Promise<{ total: number; aproximado: boolean }> {
+  const f = normalizarFiltro(filtro);
+
+  if (!precisaPeneira(f)) {
+    const { query } = await consultaContatos(supabase, f, ctx, {
+      select: "id",
+      count: "exact",
+      head: true,
+      ordenar: false,
+    });
+    const { count, error } = await query;
+    if (error) throw error;
+    return { total: count ?? 0, aproximado: false };
+  }
+
+  const pre = await prepararFiltro(supabase, f);
+  const { acertos, truncado } = await peneirar(supabase, f, ctx, pre);
+  return { total: acertos.length, aproximado: truncado };
 }

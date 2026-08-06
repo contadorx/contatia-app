@@ -17,7 +17,7 @@ import ExportarCsv from "@/components/ExportarCsv";
 import { useExclusaoLote } from "@/components/useExclusaoLote";
 import CompletarCanais from "@/components/CompletarCanais";
 import FilaAssistida from "@/components/FilaAssistida";
-import { ehCaixaDeBalcao, pareceEmailDaPessoa } from "@/lib/emailFinder";
+import { vereditoEmail, ROTULO_VEREDITO } from "@/lib/emailVeredito";
 
 type Contact = {
   id: string;
@@ -90,28 +90,9 @@ function precisaRevisar(c: Contact): Revisao {
 // Sem e-mail não ganha linha: o alerta forte disso já está na coluna Contato, e repetir
 // só tiraria peso do que precisa de olho.
 // ============================================================
-type SinalEmail = { texto: string; cls: string; title: string };
-function sinalEmail(c: Contact): SinalEmail | null {
-  const email = String(c.email || "").trim();
-  if (!email) return null;
-  if (ehCaixaDeBalcao(email))
-    return {
-      texto: "caixa geral",
-      cls: "text-amber-700",
-      title: "Endereço compartilhado da empresa (contato@, financeiro@…). Chega em alguém, mas não no decisor — vale procurar o pessoal.",
-    };
-  if (!pareceEmailDaPessoa(email, c.name))
-    return {
-      texto: "outro nome",
-      cls: "text-amber-700",
-      title: "O endereço não parece ser desta pessoa. Pode ser de outro sócio ou ter sobrado de um cadastro antigo — confira antes de escrever.",
-    };
-  return {
-    texto: "bate com o nome",
-    cls: "text-emerald-700",
-    title: "O endereço combina com o nome do contato. Nada a fazer aqui — é só aceitar.",
-  };
-}
+// O julgamento em si mora em @/lib/emailVeredito — o MESMO que a peneira do filtro
+// usa. Duas cópias divergiriam, e a lista diria "bate com o nome" numa linha que o
+// filtro "bate com o nome" não traz.
 
 // Estágio da esteira do Radar, derivado dos campos existentes (sem query extra por linha).
 // Ordem: raspando o site → descobrindo e-mail → verificando WhatsApp → pronto → sem canal.
@@ -142,7 +123,7 @@ export default function ContactsTable({
   tags?: Tag[];
   products?: Record<string, { id: string; name: string }[]>;
   // filtro ATUAL da tela — é ele que a exclusão em massa refaz no servidor
-  filtro?: { q?: string; view?: string; tag?: string[]; produto?: string[]; cadencia?: string[]; frio?: string };
+  filtro?: { q?: string; view?: string; tag?: string[]; produto?: string[]; cadencia?: string[]; frio?: string; responsavel?: string[]; email?: string };
 }) {
   const router = useRouter();
   // ============================================================
@@ -160,6 +141,12 @@ export default function ContactsTable({
   const qsAtual = searchParams?.toString() || "";
   const hrefFicha = (id: string, hash = "") =>
     `/dashboard/contatos/${id}${qsAtual ? `?de=${encodeURIComponent(qsAtual)}` : ""}${hash}`;
+  // "quero ver todos os que estão assim": mantém o filtro atual e troca só o veredito.
+  const hrefVeredito = (v: string) => {
+    const p = new URLSearchParams(qsAtual);
+    p.set("email", v);
+    return `/dashboard/contatos?${p.toString()}`;
+  };
 
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [seq, setSeq] = useState("");
@@ -573,10 +560,9 @@ export default function ContactsTable({
               // ela, o lote repetiria consulta externa que já foi paga.
               temCnpj: !!(c as any).cnpj,
               enriquecido: !!((c as any).custom?.enriched_at),
-              // Mesmos testes do passo individual — importados, não reescritos.
-              emailSuspeito:
-                !!c.email &&
-                (ehCaixaDeBalcao(c.email) || !pareceEmailDaPessoa(c.email, c.name)),
+              // Mesmo veredito do rótulo da lista e da peneira do filtro: qualquer coisa
+              // que não seja "bate com o nome" ainda pede trabalho.
+              emailSuspeito: !!c.email && vereditoEmail(c.email, c.name) !== "bate",
             }))}
           />
 
@@ -749,14 +735,17 @@ export default function ContactsTable({
                       );
                     })()}
                     {(() => {
-                      const sinal = sinalEmail(c);
-                      if (!sinal) return null;
+                      if (!c.email) return null;
+                      const v = vereditoEmail(c.email, c.name);
+                      const r = ROTULO_VEREDITO[v];
                       return (
                         <div className="mt-0.5 flex items-baseline gap-1.5 text-[11px] font-normal leading-tight">
-                          <span className="min-w-0 truncate text-subtle" title={c.email || ""}>{c.email}</span>
-                          <span className={`shrink-0 ${sinal.cls}`} title={sinal.title}>
-                            · {sinal.texto}
-                          </span>
+                          <span className="min-w-0 truncate text-subtle" title={c.email}>{c.email}</span>
+                          {/* clicar no veredito FILTRA a lista por ele — é a ponte entre
+                              "vi que este está bom" e "quero ver todos assim" */}
+                          <Link href={hrefVeredito(v)} className={`shrink-0 hover:underline ${r.cls}`} title={`${r.ajuda} Clique para ver só estes.`}>
+                            · {r.curto}
+                          </Link>
                         </div>
                       );
                     })()}

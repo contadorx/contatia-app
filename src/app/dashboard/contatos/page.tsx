@@ -5,7 +5,8 @@ import ContactsFilterBar from "@/components/ContactsFilterBar";
 import { isManager } from "@/lib/permissions";
 import { produtosPorContatos } from "@/lib/produtos";
 import { comoLista } from "@/lib/filtros";
-import { consultaContatos } from "@/lib/contatosFiltro";
+import { varrerContatos, precisaPeneira } from "@/lib/contatosFiltro";
+import { msgErro } from "@/lib/erros";
 
 export const dynamic = "force-dynamic";
 // A captura no site raspa vários domínios por ação (HTTP); 60s cobre o lote inline.
@@ -23,6 +24,7 @@ export default async function Contatos({
     responsavel?: string | string[];
     semcontato?: string;
     view?: string;
+    email?: string;
   };
 }) {
   const supabase = createClient();
@@ -35,6 +37,8 @@ export default async function Contatos({
   // visão rápida: completar | prontos | resgatar | quentes (vazio = todos). semcontato=1 vira "completar".
   const view = searchParams.view || (searchParams.semcontato === "1" ? "completar" : "");
   const q = (searchParams.q || "").trim();
+  // veredito do e-mail: bate | caixa | outro | sem
+  const emailFiltro = (searchParams.email || "").trim();
 
   const { data: { user } } = await supabase.auth.getUser();
   const { data: me } = await supabase.from("profiles").select("role, team_role").eq("id", user?.id ?? "").maybeSingle();
@@ -46,32 +50,38 @@ export default async function Contatos({
   // O filtro é montado por consultaContatos (@/lib/contatosFiltro) — o MESMO código que
   // a exclusão em massa usa. Antes essa lógica vivia só aqui; se a ação em lote a
   // recriasse "parecida", uma diferença sutil apagaria contatos fora do filtro.
-  const filtro = { q, view, tag: tagFilter, produto: produtoFilter, cadencia: cadenciaFilter, frio, responsavel: responsavelFilter };
-  // `.query` (e não a consulta já executada): o builder do postgrest executa sozinho
-  // se for devolvido de uma função async, e aí ele sairia do Promise.all abaixo —
-  // uma ida a mais ao banco, em série, logo na consulta mais pesada da página.
-  const { query: contactsQuery } = await consultaContatos(
-    supabase,
-    filtro,
-    { gerente, userId: user?.id },
-    {
-      select:
-        // `*` porque instagram/linkedin nascem na 0110: nomeadas, derrubariam a LISTA
-        // inteira antes da migration.
-        "*, contact_tags(tag_id, tags(id, name, color))",
-      limit: 200,
-    }
-  );
+  const filtro = { q, view, tag: tagFilter, produto: produtoFilter, cadencia: cadenciaFilter, frio, responsavel: responsavelFilter, email: emailFiltro };
 
-  // NÃO ignore o `error` daqui. Quando a consulta estoura o tempo limite do Postgres,
+  // varrerContatos é a porta única: sem filtro de e-mail é a consulta de sempre; com
+  // ele, passa pela peneira em JS e devolve TAMBÉM o total real do conjunto.
+  //
+  // NÃO ignore o erro daqui. Quando a consulta estoura o tempo limite do Postgres,
   // `data` vem null e a tela mostrava "nenhum contato" — igualzinho a uma base vazia.
   // Isso já custou um susto de "os contatos sumiram": eram 22 mil, intactos.
-  const [{ data: contacts, error: erroContatos }, { data: sequences }, { data: members }, { data: produtos }] = await Promise.all([
-    contactsQuery,
+  const [varredura, { data: sequences }, { data: members }, { data: produtos }] = await Promise.all([
+    varrerContatos(
+      supabase,
+      filtro,
+      { gerente, userId: user?.id },
+      {
+        select:
+          // `*` porque instagram/linkedin nascem na 0110: nomeadas, derrubariam a LISTA
+          // inteira antes da migration.
+          "*, contact_tags(tag_id, tags(id, name, color))",
+        quantidade: 200,
+      }
+    )
+      .then((v) => ({ v, erro: null as string | null }))
+      .catch((e: any) => ({ v: null, erro: msgErro(e) })),
     supabase.from("sequences").select("id, name").eq("is_active", true).order("created_at", { ascending: false }),
     supabase.from("profiles").select("id, full_name, email").eq("is_active", true),
     supabase.from("products").select("id, name").eq("active", true).order("name", { ascending: true }),
   ]);
+
+  const contacts = varredura.v?.linhas || [];
+  const erroContatos = varredura.erro;
+  const totalPeneira = varredura.v?.total ?? null;
+  const peneiraTruncada = !!varredura.v?.truncado;
 
   const seqs = (sequences as { id: string; name: string }[]) || [];
   const memberList = (members as { id: string; full_name: string | null; email: string }[]) || [];
@@ -123,6 +133,7 @@ export default async function Contatos({
         cadencia={cadenciaFilter}
         frio={frio}
         responsavel={responsavelFilter}
+        email={emailFiltro}
         tags={tagList}
         produtos={produtoList}
         cadencias={seqs}
@@ -137,8 +148,19 @@ export default async function Contatos({
             do banco. Recarregue; se persistir, tire um filtro ou confira o número real em{" "}
             <a href="/dashboard/config" className="text-brand-dark underline">Configurações → Negócio</a>.
           </p>
-          <p className="mt-2 font-mono text-[11px] text-subtle">{erroContatos.message}</p>
+          <p className="mt-2 font-mono text-[11px] text-subtle">{erroContatos}</p>
         </div>
+      )}
+
+      {/* O TAMANHO REAL DO CONJUNTO.
+          Filtrar, ver 200 linhas e concluir que a base tem 200 é o erro que este aviso
+          existe para impedir — a peneira já contou tudo, então o número é dito. */}
+      {precisaPeneira(filtro) && !erroContatos && (
+        <p className="mt-3 rounded-lg bg-muted px-3 py-2 text-xs text-subtle">
+          <b>{totalPeneira ?? 0}</b> {totalPeneira === 1 ? "contato bate" : "contatos batem"} com este filtro de e-mail
+          {totalPeneira && totalPeneira > contacts.length ? ` — mostrando os ${contacts.length} de maior score.` : "."}
+          {peneiraTruncada && " Paramos em 60.000 contatos examinados: pode haver mais."}
+        </p>
       )}
 
       <div className="mt-4">

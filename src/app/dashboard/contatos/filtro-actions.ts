@@ -23,7 +23,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { msgErro } from "@/lib/erros";
 import { isManager } from "@/lib/permissions";
-import { consultaContatos, normalizarFiltro, filtroVazio, type FiltroContatos } from "@/lib/contatosFiltro";
+import { consultaContatos, normalizarFiltro, filtroVazio, precisaPeneira, varrerContatos, contarContatos, type FiltroContatos } from "@/lib/contatosFiltro";
 import { logAction, recortarItens } from "@/lib/actionLog";
 import { apagarLote } from "@/lib/apagarLote";
 
@@ -62,15 +62,12 @@ export async function contarPorFiltro(filtro: FiltroContatos): Promise<{ total?:
   const { supabase, tenant_id, user_id, gerente } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   try {
-    const { query } = await consultaContatos(
-      supabase,
-      normalizarFiltro(filtro),
-      { gerente, userId: user_id, tenantId: tenant_id },
-      { select: "id", count: "exact", head: true, ordenar: false }
-    );
-    const { count, error } = await query;
-    if (error) return { error: msgErro(error) };
-    return { total: count ?? 0, semFiltro: filtroVazio(filtro) };
+    // contarContatos escolhe sozinho entre o count do banco e a peneira de e-mail —
+    // é a MESMA função que a lista usa, então o número confere com o que está na tela.
+    const { total } = await contarContatos(supabase, normalizarFiltro(filtro), {
+      gerente, userId: user_id, tenantId: tenant_id,
+    });
+    return { total, semFiltro: filtroVazio(filtro) };
   } catch (e: any) {
     return { error: msgErro(e) };
   }
@@ -93,13 +90,8 @@ export async function excluirPorFiltro(
   }
 
   const contar = async (): Promise<number> => {
-    const { query } = await consultaContatos(
-      supabase, f, { gerente, userId: user_id, tenantId: tenant_id },
-      { select: "id", count: "exact", head: true, ordenar: false }
-    );
-    const { count, error } = await query;
-    if (error) throw error;
-    return count ?? 0;
+    const { total } = await contarContatos(supabase, f, { gerente, userId: user_id, tenantId: tenant_id });
+    return total;
   };
 
   let totalAgora = 0;
@@ -136,14 +128,15 @@ export async function excluirPorFiltro(
       if (Date.now() - inicio > ORCAMENTO_MS) { tempoEsgotado = true; break; }
 
       const restanteNoTeto = limiteAbsoluto - excluidos;
-      const { query } = await consultaContatos(
+      // varrerContatos, e não consultaContatos: com filtro de e-mail a peneira precisa
+      // rodar aqui também. Se a exclusão usasse a consulta crua, ela apagaria o
+      // conjunto SEM o recorte que o operador viu — mais gente do que ele conferiu.
+      // (A cada onda a varredura recomeça do zero, o que está certo: quem já saiu
+      // sumiu do conjunto.)
+      const { linhas } = await varrerContatos(
         supabase, f, { gerente, userId: user_id, tenantId: tenant_id },
-        { select: "id, name, company, email", limit: Math.min(ONDA_BUSCA, restanteNoTeto), ordenar: false }
+        { select: "id, name, company, email", quantidade: Math.min(ONDA_BUSCA, restanteNoTeto), ordenar: false }
       );
-      const { data, error } = await query;
-      if (error) { falha = msgErro(error); break; }
-
-      const linhas = ((data as any[]) || []);
       if (!linhas.length) break;
 
       for (const c of linhas) {
@@ -206,6 +199,9 @@ export async function excluirPorFiltro(
 // sistema sem edição nenhuma.
 // ============================================================
 const TETO_EXPORT = 20000;
+// Pela peneira de e-mail as linhas vêm de 200 em 200 (limite de tamanho da URL), então
+// o teto é menor para o CSV não estourar o tempo da função.
+const TETO_EXPORT_PENEIRA = 3000;
 
 export async function exportarContatosPorFiltro(
   filtro: FiltroContatos,
@@ -235,6 +231,16 @@ export async function exportarContatosPorFiltro(
         if (error) return { error: msgErro(error) };
         linhas.push(...(((data as any[]) || [])));
       }
+    } else if (precisaPeneira(f)) {
+      // Com filtro de e-mail o conjunto não existe no banco: quem o define é a peneira.
+      // Teto menor de propósito — cada 200 linhas é uma ida ao banco, e o CSV precisa
+      // caber no orçamento de tempo da função. O `truncado` avisa quando cortou.
+      const { linhas: L, truncado: tr } = await varrerContatos(
+        supabase, f, { gerente, userId: user_id, tenantId: tenant_id },
+        { select: SELECT, quantidade: TETO_EXPORT_PENEIRA }
+      );
+      linhas.push(...L);
+      truncado = tr || L.length >= TETO_EXPORT_PENEIRA;
     } else {
       // exportar TUDO que bate com o filtro, em páginas (o PostgREST corta em 1.000)
       for (let pagina = 0; pagina * 1000 < TETO_EXPORT; pagina++) {
@@ -269,5 +275,6 @@ export async function exportarContatosPorFiltro(
     ])
   );
 
-  return { csv, linhas: Math.min(linhas.length, TETO_EXPORT), truncado, teto: TETO_EXPORT };
+  const teto = precisaPeneira(f) && !selecao.length ? TETO_EXPORT_PENEIRA : TETO_EXPORT;
+  return { csv, linhas: Math.min(linhas.length, teto), truncado, teto };
 }

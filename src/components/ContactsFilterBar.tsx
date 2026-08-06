@@ -18,13 +18,13 @@ const VIEWS: { v: string; label: string; tone?: "danger" | "warn" }[] = [
 ];
 
 export default function ContactsFilterBar({
-  view, q, tag, produto, cadencia, frio, responsavel,
+  view, q, tag, produto, cadencia, frio, responsavel, email,
   tags, produtos, cadencias, membros,
 }: {
-  // tag/produto/cadencia/responsavel são MULTI (arrays); frio segue single (faixas
-  // aninhadas: "+30d" já contém "+15d", marcar as duas não quer dizer nada).
+  // tag/produto/cadencia/responsavel são MULTI (arrays); frio e e-mail seguem single
+  // (um contato tem UM veredito de e-mail; marcar dois não quer dizer nada).
   view: string; q: string; tag: string[]; produto: string[]; cadencia: string[]; frio: string;
-  responsavel: string[];
+  responsavel: string[]; email: string;
   tags: Opt[]; produtos: Opt[]; cadencias: Opt[]; membros: Opt[];
 }) {
   const router = useRouter();
@@ -32,7 +32,7 @@ export default function ContactsFilterBar({
   const [busca, setBusca] = useState(q);
   // responsavel entra na contagem: sem isso o "Filtros (2)" mentiria e o operador
   // não veria que há um filtro de dono ativo dentro do painel recolhido.
-  const detailedCount = contarFacetas(tag, produto, cadencia, frio, responsavel);
+  const detailedCount = contarFacetas(tag, produto, cadencia, frio, responsavel, email);
   const [open, setOpen] = useState(detailedCount > 0);
 
   // Escreve a URL com listas separadas por vírgula (?tag=a,b) — a página lê com
@@ -142,6 +142,26 @@ export default function ContactsFilterBar({
               />
             </div>
           </Field>
+          {/* O VEREDITO DO E-MAIL — o mesmo rótulo que a lista mostra embaixo do nome.
+              É o filtro que separa "já está bom, é só aceitar" de "ainda dá trabalho",
+              que é a decisão que se toma varrendo a lista. */}
+          <Field label="E-mail">
+            <div className="w-[190px]">
+              <SmartSelect
+                clearable
+                placeholder="Todos"
+                className="py-1.5 text-sm"
+                value={email}
+                onValueChange={(v) => go({ email: v })}
+                options={[
+                  { value: "bate", label: "Bate com o nome" },
+                  { value: "caixa", label: "Caixa geral" },
+                  { value: "outro", label: "Outro nome" },
+                  { value: "sem", label: "Sem e-mail" },
+                ]}
+              />
+            </div>
+          </Field>
           <Field label="Último toque">
             <div className="w-[160px]">
               <SmartSelect
@@ -160,9 +180,10 @@ export default function ContactsFilterBar({
           </Field>
           <p className="w-full text-[11px] text-subtle">
             Marcar vários numa mesma caixa é <b>ou</b> (tag A ou B); caixas diferentes se somam (<b>e</b>).
+            {email && email !== "sem" && " O filtro de e-mail lê endereço por endereço — em base grande a lista demora alguns segundos."}
           </p>
           {detailedCount > 0 && (
-            <button type="button" className="pb-1.5 text-xs text-subtle hover:text-danger" onClick={() => go({ tag: "", produto: "", cadencia: "", frio: "" })}>
+            <button type="button" className="pb-1.5 text-xs text-subtle hover:text-danger" onClick={() => go({ tag: "", produto: "", cadencia: "", frio: "", responsavel: "", email: "" })}>
               limpar filtros
             </button>
           )}
