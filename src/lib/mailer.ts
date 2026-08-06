@@ -19,13 +19,29 @@ export type EmailAccount = {
   save_to_sent?: boolean | null;
 };
 
-function buildTransport(a: EmailAccount) {
+// ============================================================
+// UMA CONEXÃO POR LOTE — o que fazia "enviar todos" render 10 e-mails
+//
+// Cada envio abria uma conexão SMTP NOVA: TCP, TLS, EHLO, AUTH, mensagem, QUIT. Num
+// servidor comum isso é 1 a 3 segundos ANTES de a mensagem começar a andar. Com o
+// orçamento de 40 segundos do envio em lote, davam ~10 e-mails por clique — e a conta
+// não tinha nada a ver com o limite diário da caixa (80), que é onde eu tinha
+// apostado. O gargalo era o aperto de mão, repetido 200 vezes.
+//
+// `pool: true` mantém a conexão aberta e manda as mensagens em sequência por ela, que
+// é exatamente o que qualquer cliente de e-mail faz. `maxConnections: 1` é de
+// propósito: paralelizar envio pela mesma caixa é a forma mais rápida de o provedor
+// tratar você como robô. Ganho de tempo sim, ganho de agressividade não.
+// ============================================================
+function buildTransport(a: EmailAccount, lote = false) {
+  const opcoesLote = lote ? { pool: true, maxConnections: 1, maxMessages: 500 } : {};
   if (a.provider === "gmail" && a.oauth_refresh_token) {
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
       throw new Error("Faltam GOOGLE_CLIENT_ID/SECRET no ambiente para enviar via Gmail.");
     }
     return nodemailer.createTransport({
       service: "gmail",
+      ...opcoesLote,
       auth: {
         type: "OAuth2",
         user: a.from_email,
@@ -41,8 +57,14 @@ function buildTransport(a: EmailAccount) {
     host: a.smtp_host,
     port: a.smtp_port || 587,
     secure: !!a.smtp_secure, // true = 465; false = 587/STARTTLS
+    ...opcoesLote,
     auth: { user: a.smtp_user, pass: a.smtp_pass || "" },
   });
+}
+
+// Conexão reaproveitável para um lote. Quem cria é responsável por fechar (close()).
+export function transporteDeLote(a: EmailAccount) {
+  return buildTransport(a, true);
 }
 
 export async function sendEmail(
@@ -61,9 +83,16 @@ export async function sendEmail(
   // DENTRO da janela entre "o e-mail saiu" e "o envio foi registrado". Se a função
   // morresse ali, o e-mail estava na rua e não havia registro nenhum dele — o contador
   // do dia não subia e o limite ficava cego.
-  opts?: { adiarCopia?: boolean }
+  opts?: {
+    adiarCopia?: boolean;
+    transport?: any;
+    // no lote, a sessão de "Enviados" também é reaproveitada: sem isto cada cópia
+    // reabre o IMAP e relista todas as pastas (2 a 4 segundos por mensagem)
+    gravarEnviados?: (raw: Buffer) => Promise<{ ok?: boolean; error?: string }>;
+  }
 ): Promise<{ copiaEmEnviados?: boolean; erroCopia?: string; copiar?: () => Promise<{ copiaEmEnviados?: boolean; erroCopia?: string }> }> {
-  const transport = buildTransport(account);
+  // no lote, a conexão vem pronta de fora e é reaproveitada entre as mensagens
+  const transport = opts?.transport || buildTransport(account);
   const from = account.display_name
     ? `${account.display_name} <${account.from_email}>`
     : account.from_email;
@@ -102,13 +131,20 @@ export async function sendEmail(
   try {
     const MailComposer = (await import("nodemailer/lib/mail-composer")).default as any;
     const raw: Buffer = await new MailComposer(opcoes).compile().build();
-    const { salvarEmEnviados } = await import("@/lib/imap");
 
     // TETO DE TEMPO: o envio é de 1 clique e a pessoa está olhando. Um IMAP que não
-    // responde não pode segurar a tela — 8s e seguimos sem a cópia.
+    // responde não pode segurar a tela. No lote o teto é menor porque a conexão já
+    // está aberta — se um APPEND leva mais que isso, o problema é do servidor e o
+    // custo de esperar multiplica por 200.
+    const noLote = !!opts?.gravarEnviados;
+    const teto = noLote ? 4000 : 8000;
+    const gravar = opts?.gravarEnviados
+      ? opts.gravarEnviados(raw)
+      : import("@/lib/imap").then(({ salvarEmEnviados }) => salvarEmEnviados(account as any, raw));
+
     const r = await Promise.race([
-      salvarEmEnviados(account as any, raw),
-      new Promise<{ error: string }>((res) => setTimeout(() => res({ error: "IMAP não respondeu em 8s" }), 8000)),
+      gravar,
+      new Promise<{ error: string }>((res) => setTimeout(() => res({ error: `IMAP não respondeu em ${teto / 1000}s` }), teto)),
     ]);
     if ((r as any)?.ok) return { copiaEmEnviados: true };
     return { copiaEmEnviados: false, erroCopia: (r as any)?.error || "falha desconhecida" };

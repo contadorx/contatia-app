@@ -12,6 +12,10 @@ import { diaISO, diaISOmais } from "@/lib/datas";
 import { temSessao } from "@/lib/waModo";
 
 export const dynamic = "force-dynamic";
+// O "enviar todos os e-mails" roda como server action DESTA rota — sem `maxDuration`
+// explícito ele herda o padrão da plataforma, que é bem menor que o orçamento de 40s
+// do lote. Declarado, o teto é conhecido dos dois lados.
+export const maxDuration = 60;
 
 export default async function Today() {
   const supabase = createClient();

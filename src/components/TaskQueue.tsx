@@ -178,6 +178,25 @@ export default function TaskQueue({
     });
   }
 
+  // ============================================================
+  // UM CLIQUE DRENA A FILA
+  //
+  // O envio de um lote é limitado pelo tempo da função (uns 40 segundos úteis), não
+  // pelo tamanho da fila. Com 200 tarefas isso virava "clique de novo" vinte vezes — e
+  // a queixa, três vezes seguidas, foi a mesma: "não envia em massa". Enviava; só
+  // exigia que a pessoa fosse o laço de repetição.
+  //
+  // Agora a tela repete sozinha, e para pelos motivos certos:
+  //   · acabou a fila;
+  //   · bateu o limite diário (insistir hoje não muda nada);
+  //   · uma volta inteira não enviou NADA (erro que se repetiria em todas);
+  //   · teto de voltas, para nunca virar laço infinito numa aba esquecida aberta.
+  //
+  // O progresso aparece a cada volta: a pessoa vê o número andando em vez de olhar
+  // para um botão travado sem saber se ainda está vivo.
+  // ============================================================
+  const MAX_VOLTAS = 15;
+
   function sendAll() {
     setErr(null);
     setBulkMsg(null);
@@ -185,40 +204,68 @@ export default function TaskQueue({
     // tipo de discordância que faz a pessoa desconfiar do número que aparece depois.
     const escolhidas = allTasks.filter((t) => sel.has(t.id) && t.channel === "email").map((t) => t.id);
     start(async () => {
-      const res = (await sendAllEmailTasks(escolhidas.length ? escolhidas : undefined)) as
-        { sent?: number; failed?: number; restantes?: number; limiteAtingido?: string | null;
-          primeiroErro?: string | null; detalhe?: string; error?: string;
-          diagnostico?: string | null; motivos?: string[];
-          paradoPorLimite?: boolean; capacidadeHoje?: number; usadosHoje?: number; folgaHoje?: number;
-          resumoCapacidade?: string; comoAumentar?: string;
-          descartadasDaSelecao?: number; tetoPorClique?: number | null } | undefined;
+      let totalEnviados = 0;
+      let totalFalhas = 0;
+      const caixas: Record<string, number> = {};
+      let ultima: any = null;
 
-      // resposta vazia = função morta por tempo. Antes isso não dizia nada, e a pessoa
-      // clicava de novo — reenviando o que já tinha saído.
-      if (!res) {
-        setErr(
-          "O envio em lote não retornou resposta (tempo esgotado). Parte pode ter saído — " +
-          "confira o painel \"Seus envios de hoje\" ANTES de clicar de novo."
+      for (let volta = 0; volta < MAX_VOLTAS; volta++) {
+        const res = (await sendAllEmailTasks(escolhidas.length ? escolhidas : undefined)) as
+          { sent?: number; failed?: number; restantes?: number; limiteAtingido?: string | null;
+            primeiroErro?: string | null; detalhe?: string; error?: string;
+            diagnostico?: string | null; motivos?: string[];
+            paradoPorLimite?: boolean; paradoPorTempo?: boolean; duracaoMs?: number; msPorEmail?: number | null;
+            tempos?: { banco: number; smtp: number; copia: number };
+            capacidadeHoje?: number; usadosHoje?: number; folgaHoje?: number;
+            resumoCapacidade?: string; comoAumentar?: string;
+            descartadasDaSelecao?: number; tetoPorClique?: number | null;
+            porCaixa?: Record<string, number> } | undefined;
+
+        // resposta vazia = função morta por tempo. Antes isso não dizia nada, e a
+        // pessoa clicava de novo — reenviando o que já tinha saído.
+        if (!res) {
+          setErr(
+            "O envio em lote não retornou resposta (tempo esgotado). Parte pode ter saído — " +
+            "confira o painel \"Seus envios de hoje\" ANTES de clicar de novo."
+          );
+          break;
+        }
+        if (res.error) { setErr(res.error); break; }
+
+        ultima = res;
+        totalEnviados += res.sent ?? 0;
+        totalFalhas += res.failed ?? 0;
+        for (const [c, n] of Object.entries(res.porCaixa || {})) caixas[c] = (caixas[c] || 0) + n;
+
+        // progresso enquanto as voltas acontecem
+        setBulkMsg(
+          `Enviando… ${totalEnviados} até agora` +
+          (res.restantes ? ` · ${res.restantes} na fila` : "") +
+          (res.msPorEmail ? ` · ${(res.msPorEmail / 1000).toFixed(1)}s por e-mail` : "")
         );
-        return;
+
+        // motivos para NÃO dar outra volta
+        if (!res.restantes) break;
+        if (res.paradoPorLimite) break;
+        if (!res.sent) break;    // volta inteira sem enviar nada: a próxima repetiria
       }
-      if (res.error) { setErr(res.error); return; }
+
+      router.refresh();
+
+      const res = ultima;
+      if (!res) return;
 
       // Zero enviados com explicação NÃO é mensagem de sucesso: vai no lugar do erro,
       // que é onde o operador olha quando algo não aconteceu.
-      if (!res.sent && res.diagnostico) { setErr(res.diagnostico); setBulkMsg(null); return; }
-      const partes = [`✓ ${res.sent ?? 0} e-mail(is) enviado(s)`];
-      if (res.detalhe) partes.push(res.detalhe);
-      if (res.failed) partes.push(`${res.failed} falharam`);
+      if (!totalEnviados && res.diagnostico) { setErr(res.diagnostico); setBulkMsg(null); return; }
+
+      const detalhe = Object.entries(caixas).map(([c, n]) => `${n} por ${c}`).join(", ");
+      const partes = [`✓ ${totalEnviados} e-mail(is) enviado(s)`];
+      if (detalhe) partes.push(detalhe);
+      if (totalFalhas) partes.push(`${totalFalhas} falharam`);
       if (res.restantes) {
-        // ============================================================
-        // "CLIQUE DE NOVO" SÓ QUANDO CLICAR DE NOVO ADIANTA
-        //
-        // Quando o lote para por LIMITE DO DIA, clicar de novo envia zero. A mensagem
-        // antiga convidava exatamente para isso — o operador clicava contra um teto que
-        // ninguém tinha dito qual era. Agora as duas paradas são ditas pelo nome: falta
-        // de tempo (dá para continuar agora) e falta de limite (só amanhã).
-        // ============================================================
+        // "clique de novo" só quando clicar de novo adianta: parada por limite do dia
+        // significa que hoje acabou, e insistir devolveria zero.
         partes.push(
           res.paradoPorLimite
             ? `${res.restantes} continuam na fila e saem nos próximos dias`
@@ -228,8 +275,17 @@ export default function TaskQueue({
       if (res.descartadasDaSelecao) {
         partes.push(`${res.descartadasDaSelecao} da sua seleção ficaram de fora (não são e-mail, já saíram, ou vencem depois de hoje)`);
       }
-      if (res.tetoPorClique) partes.push(`esta volta pegou ${res.tetoPorClique} por vez`);
+      // O CUSTO POR MENSAGEM, e onde ele foi. Sem isto, "por que só saíram 10?" só
+      // podia ser respondido com palpite — e foi, duas vezes.
+      if (res.msPorEmail) {
+        const t = res.tempos;
+        const reparte = t
+          ? ` (envio ${(t.smtp / 1000).toFixed(0)}s · cópia ${(t.copia / 1000).toFixed(0)}s · banco ${(t.banco / 1000).toFixed(0)}s na última volta)`
+          : "";
+        partes.push(`${(res.msPorEmail / 1000).toFixed(1)}s por e-mail${reparte}`);
+      }
       setBulkMsg(partes.join(" · ") + ".");
+
       // O limite é a informação mais importante do lote: sem destaque, ela some no meio
       // do resumo e a pessoa acha que enviou tudo. E vem com a conta do dia + o que
       // fazer, porque "tente amanhã" sozinho não diz se o freio é aquecimento, limite
@@ -241,10 +297,11 @@ export default function TaskQueue({
             .join(" ")
         );
       }
-      else if (res.failed && res.motivos?.length) setErr(`Não saíram: ${res.motivos.slice(0, 3).join(" · ")}`);
-      else if (res.failed && res.primeiroErro) setErr(`Primeira falha: ${res.primeiroErro}`);
+      else if (totalFalhas && res.motivos?.length) setErr(`Não saíram: ${res.motivos.slice(0, 3).join(" · ")}`);
+      else if (totalFalhas && res.primeiroErro) setErr(`Primeira falha: ${res.primeiroErro}`);
     });
   }
+
   // conclui todos os toques visíveis (fila sequencial por tipo)
   function completeVisible() {
     setErr(null);

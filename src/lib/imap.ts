@@ -215,3 +215,71 @@ export async function salvarEmEnviados(
     return { error: e?.message || "Falha ao gravar em Enviados." };
   }
 }
+
+// ============================================================
+// UMA SESSÃO DE "ENVIADOS" PARA O LOTE INTEIRO
+//
+// `salvarEmEnviados` faz, PARA CADA E-MAIL: conecta (TCP+TLS+LOGIN), lista TODAS as
+// pastas da caixa para descobrir qual é a de enviados, faz o APPEND e desconecta. Isso
+// é correto para um envio avulso e é ruína para um lote: são 2 a 4 segundos por
+// mensagem, gastos quase todos em descobrir de novo uma resposta que não muda.
+//
+// Somados ao aperto de mão do SMTP (consertado em mailer.ts), eram esses segundos que
+// faziam "enviar todos" render 10 e-mails dentro do orçamento de 40s da função.
+//
+// Aqui a conexão abre uma vez, a pasta é resolvida uma vez, e cada cópia é só o APPEND.
+// Quem abre é responsável por fechar.
+// ============================================================
+export type SessaoEnviados = {
+  append: (raw: Buffer | string) => Promise<{ ok?: boolean; pasta?: string; error?: string }>;
+  fechar: () => Promise<void>;
+  pasta: string;
+};
+
+export async function abrirEnviados(acc: Acc): Promise<SessaoEnviados | { error: string }> {
+  const host = acc.imap_host || acc.smtp_host;
+  if (!host || !acc.smtp_user) return { error: "Caixa sem dados de IMAP." };
+
+  const client = new ImapFlow({
+    host,
+    port: acc.imap_port || 993,
+    secure: true,
+    auth: { user: acc.smtp_user, pass: acc.smtp_pass || "" },
+    logger: false,
+    socketTimeout: 15000,
+  });
+
+  try {
+    await client.connect();
+  } catch (e: any) {
+    return { error: e?.message || "Falha ao conectar no IMAP." };
+  }
+
+  let destino: string | null = null;
+  try {
+    const lista = await client.list();
+    const especial = (lista || []).find(
+      (m: any) => m.specialUse === "\\Sent" || (m.flags && m.flags.has && m.flags.has("\\Sent"))
+    );
+    if (especial) destino = especial.path;
+    if (!destino) {
+      const caminhos = new Set((lista || []).map((m: any) => m.path));
+      destino = NOMES_ENVIADOS.find((n) => caminhos.has(n)) || null;
+    }
+  } catch { /* servidor sem LIST utilizável: tenta o nome mais comum */ }
+  if (!destino) destino = "Sent";
+
+  const pasta = destino;
+  return {
+    pasta,
+    append: async (raw) => {
+      try {
+        await client.append(pasta, raw, ["\\Seen"]);
+        return { ok: true, pasta };
+      } catch (e: any) {
+        return { error: e?.message || "Falha ao gravar em Enviados." };
+      }
+    },
+    fechar: async () => { await client.logout().catch(() => {}); },
+  };
+}

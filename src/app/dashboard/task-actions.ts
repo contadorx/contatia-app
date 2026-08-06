@@ -84,7 +84,62 @@ export async function markReplied(contactId: string) {
 }
 
 // ---- Envio de e-mail real (SMTP/Gmail) a partir de uma tarefa da fila ----
+//
+// A ação PÚBLICA é esta casca. O miolo (`enviarUm`) aceita um contexto de lote que o
+// cliente não tem como forjar — se o `lote` fosse parâmetro da server action, bastaria
+// mandar uma capacidade inventada para furar o limite diário do próprio workspace.
 export async function sendEmailTask(taskId: string, override?: { subject?: string; body?: string }) {
+  return await enviarUm(taskId, override);
+}
+
+// ============================================================
+// CONTEXTO DE LOTE — o que não faz sentido refazer 200 vezes
+//
+// Enviando um a um, cada e-mail repetia: 2 consultas de capacidade, 1 da assinatura do
+// workspace, e um aperto de mão SMTP inteiro. Somado, dava ~4 segundos por mensagem —
+// e o lote, com 40 segundos de orçamento, entregava 10. O contexto carrega o que é
+// igual para todas as mensagens da volta e mantém a conexão aberta.
+//
+// A capacidade é a única parte delicada: ela precisa ANDAR durante o lote, senão as
+// 200 mensagens leriam "folga 80" e passariam do limite. Por isso `usadosNoLote`.
+// ============================================================
+type ContextoLote = {
+  cap: Awaited<ReturnType<typeof import("@/lib/capacidadeEmail").capacidadeDeHoje>>;
+  usadosNoLote: Record<string, number>;
+  transportes: Map<string, any>;
+  // sessão de "Enviados" por caixa, aberta na primeira cópia e reaproveitada.
+  // `null` = já tentamos abrir e não deu — não insiste a cada mensagem.
+  imap: Map<string, any>;
+  assinaturaTenant?: string | null;
+  // ONDE O TEMPO VAI. Duas respostas minhas sobre este problema foram palpite (o
+  // limite da caixa, depois o SMTP). Medido, deixa de ser palpite.
+  tempos: { banco: number; smtp: number; copia: number };
+};
+
+// Abre (uma vez por caixa) a sessão de "Enviados" do lote. Caixa que grava a cópia
+// sozinha no servidor — Gmail, Outlook.com — não entra aqui: o APPEND criaria duplicata.
+async function sessaoEnviadosDoLote(lote: ContextoLote, acct: any) {
+  if (acct.provider === "gmail" || acct.save_to_sent === false) return undefined;
+  if (lote.imap.has(acct.id)) {
+    const s = lote.imap.get(acct.id);
+    return s ? (raw: Buffer) => s.append(raw) : undefined;
+  }
+  const { abrirEnviados } = await import("@/lib/imap");
+  const s = await abrirEnviados(acct);
+  if ((s as any)?.append) {
+    lote.imap.set(acct.id, s);
+    return (raw: Buffer) => (s as any).append(raw);
+  }
+  lote.imap.set(acct.id, null);   // não tenta de novo a cada mensagem
+  return undefined;
+}
+
+async function enviarUm(
+  taskId: string,
+  override?: { subject?: string; body?: string },
+  lote?: ContextoLote
+) {
+  const tInicio = Date.now();
   const { sendEmail } = await import("@/lib/mailer");
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
@@ -157,14 +212,16 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   // conta morava aqui dentro e a tela tinha a sua; quando as duas discordassem, o
   // operador leria uma capacidade que o envio não honra.
   const { capacidadeDeHoje } = await import("@/lib/capacidadeEmail");
-  const cap = await capacidadeDeHoje(supabase);
+  const cap = lote?.cap ?? (await capacidadeDeHoje(supabase));
   const accts = cap.contas;
   if (!accts.length) {
     return { error: "Nenhuma caixa de e-mail conectada. Cadastre a sua em Configurações → Canais." };
   }
   const anyWarming = cap.algumaAquecendo;
   const folgaPorId = new Map(cap.porCaixa.map((c) => [c.conta.id as string, c.folga]));
-  const folgaDe = (a: any) => folgaPorId.get(a.id) ?? 0;
+  // desconta o que JÁ saiu nesta volta: sem isto o lote leria a folga do começo em
+  // todas as mensagens e passaria direto pelo limite diário.
+  const folgaDe = (a: any) => (folgaPorId.get(a.id) ?? 0) - (lote?.usadosNoLote[a.id] || 0);
 
   // ESCOLHA POR CAMADAS: minha → do workspace → emprestada (ver lib/caixas).
   //
@@ -237,7 +294,9 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   }
 
   // assinatura do negócio (renderiza {{primeiro_nome}}/{{empresa}} com os dados do contato)
-  const { data: tnt } = await supabase.from("tenants").select("email_signature").maybeSingle();
+  const tnt = lote && lote.assinaturaTenant !== undefined
+    ? { email_signature: lote.assinaturaTenant }
+    : ((await supabase.from("tenants").select("email_signature").maybeSingle()).data as any);
   // assinatura DA CAIXA que enviou; se vazia, cai na assinatura geral do workspace
   const boxSig = (acct as any)?.signature as string | undefined;
   const signature = (boxSig && boxSig.trim()) ? boxSig : ((tnt as any)?.email_signature as string | undefined);
@@ -292,11 +351,17 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   };
 
   let copia: { copiaEmEnviados?: boolean; erroCopia?: string; copiar?: () => Promise<any> } = {};
+  const tSmtp = Date.now();
+  if (lote) lote.tempos.banco += tSmtp - tInicio;
   try {
     copia = await sendEmail(
       acct as any,
       { to, subject: task.title || "", text: bodyText, html },
-      { adiarCopia: true }   // a cópia sai do caminho crítico (ver mailer)
+      {
+        adiarCopia: true,           // a cópia sai do caminho crítico (ver mailer)
+        transport: lote?.transportes.get((acct as any).id),
+        gravarEnviados: lote ? await sessaoEnviadosDoLote(lote, acct) : undefined,
+      }
     );
   } catch (e: any) {
     await devolverParaFila();
@@ -330,9 +395,16 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     meta: { to },
   });
 
+  if (lote) {
+    lote.usadosNoLote[(acct as any).id] = (lote.usadosNoLote[(acct as any).id] || 0) + 1;
+    lote.tempos.smtp += Date.now() - tSmtp;
+  }
+
   // Agora sim a cópia em "Enviados" (best-effort, fora do caminho crítico).
   if (copia.copiar) {
+    const tCopia = Date.now();
     try { copia = { ...(await copia.copiar()) }; } catch { /* nunca derruba o envio */ }
+    if (lote) lote.tempos.copia += Date.now() - tCopia;
   }
 
   // A cópia em "Enviados" falhou por login/host de IMAP? Desliga para ESTA caixa.
@@ -351,7 +423,8 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     }
   }
 
-  revalidatePath("/dashboard");
+  // no lote, quem revalida é o final da volta — 200 revalidações não adiantam nada
+  if (!lote) revalidatePath("/dashboard");
   // Envio sem registro é o pior estado possível: o limite diário deixa de contá-lo e a
   // pessoa perde a noção de quanto já mandou. Se acontecer, avisa alto.
   const avisoRegistro = reg?.ok === false
@@ -551,10 +624,32 @@ export async function sendAllEmailTasks(selecionadas?: string[]) {
   const porCaixa: Record<string, number> = {};
   const motivos: Record<string, number> = {};
   let i = 0;
+  let tempoEsgotado = false;
+
+  // ---- contexto do lote: capacidade, assinatura e CONEXÕES abertas uma vez só ----
+  const { capacidadeDeHoje: capHoje } = await import("@/lib/capacidadeEmail");
+  const { transporteDeLote } = await import("@/lib/mailer");
+  const capInicial = await capHoje(supabase);
+  const { data: tenantRow } = await supabase.from("tenants").select("email_signature").maybeSingle();
+  const lote: ContextoLote = {
+    cap: capInicial,
+    usadosNoLote: {},
+    transportes: new Map<string, any>(),
+    imap: new Map<string, any>(),
+    assinaturaTenant: ((tenantRow as any)?.email_signature as string) ?? null,
+    tempos: { banco: 0, smtp: 0, copia: 0 },
+  };
+  for (const c of capInicial.porCaixa) {
+    // conexão só para caixa que ainda tem folga hoje — abrir a das esgotadas seria
+    // pagar aperto de mão para não mandar nada
+    if (c.folga <= 0) continue;
+    try { lote.transportes.set(c.conta.id as string, transporteDeLote(c.conta)); }
+    catch { /* caixa mal configurada cai no caminho de sempre e reporta o erro dela */ }
+  }
 
   for (; i < ids.length; i++) {
-    if (Date.now() - inicio > ORCAMENTO_ENVIO_MS) break;
-    const res = (await sendEmailTask(ids[i])) as { ok?: boolean; error?: string; caixa?: string };
+    if (Date.now() - inicio > ORCAMENTO_ENVIO_MS) { tempoEsgotado = true; break; }
+    const res = (await enviarUm(ids[i], undefined, lote)) as { ok?: boolean; error?: string; caixa?: string };
     if (res?.ok) {
       sent++;
       if (res.caixa) porCaixa[res.caixa] = (porCaixa[res.caixa] || 0) + 1;
@@ -571,8 +666,18 @@ export async function sendAllEmailTasks(selecionadas?: string[]) {
     if (res?.error && /[Ll]imite/.test(res.error)) { limiteAtingido = res.error; break; }
   }
 
+  // fecha as conexões do lote — deixar pool aberto num ambiente serverless segura a
+  // função viva e o servidor de e-mail vê a sessão pendurada
+  for (const t of lote.transportes.values()) { try { t.close?.(); } catch { /* nada a fazer */ } }
+  for (const s of lote.imap.values()) { if (s) { try { await s.fechar(); } catch { /* nada a fazer */ } } }
+  revalidatePath("/dashboard");
+
   const processados = i;
   const restantes = Math.max(0, ids.length - processados);
+  const duracaoMs = Date.now() - inicio;
+  // quanto custou cada mensagem: é este número que diz se o freio é a conexão, o
+  // servidor de e-mail ou o banco — e sem ele a conversa vira palpite (já virou).
+  const msPorEmail = processados ? Math.round(duracaoMs / processados) : null;
 
   // A CONTA DO DIA, sempre — é ela que transforma "saíram 10" em resposta.
   // Vem de capacidadeDeHoje, a MESMA função que o envio usa para decidir; duas contas
@@ -597,6 +702,12 @@ export async function sendAllEmailTasks(selecionadas?: string[]) {
     // parou porque acabou o limite do dia (e não por tempo ou por fim da fila):
     // com isto a tela deixa de mandar "clicar de novo" contra um teto.
     paradoPorLimite: !!limiteAtingido,
+    // parou porque o orçamento de tempo da função acabou: aqui clicar de novo ADIANTA
+    paradoPorTempo: tempoEsgotado,
+    duracaoMs,
+    msPorEmail,
+    // onde o tempo foi: banco/preparo, SMTP, cópia em "Enviados"
+    tempos: lote.tempos,
     capacidadeHoje: cap.capTotal,
     usadosHoje: cap.usados,
     folgaHoje: cap.folga,
