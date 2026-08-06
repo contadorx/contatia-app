@@ -4,6 +4,7 @@ import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { logAction } from "@/lib/actionLog";
+import { variacoesDoPasso, escolherVariacao } from "@/lib/variacoes";
 
 async function ctx() {
   const supabase = createClient();
@@ -89,7 +90,9 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string): Prom
     // ---------- 1) passos da cadência (uma vez) ----------
     const { data: steps, error: errSteps } = await supabase
       .from("sequence_steps")
-      .select("position, channel, delay_days, subject, subject_b, body_template")
+      // `*`: `body_variants` nasce na 0111 e, pedida pelo nome, derrubaria a inscrição
+      // em lote inteira enquanto a migration não estivesse aplicada.
+      .select("*")
       .eq("sequence_id", sequenceId)
       .order("position", { ascending: true });
     if (errSteps) return { error: msgErro(errSteps) };
@@ -229,11 +232,16 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string): Prom
         const temB = s.channel === "email" && s.subject_b && String(s.subject_b).trim();
         const variante = temB ? (Math.random() < 0.5 ? "a" : "b") : null;
         const assunto = variante === "b" ? s.subject_b : s.subject;
+        // a redação deste passo PARA ESTE CONTATO: contatos vizinhos na lista caem em
+        // variações diferentes, que é o que o motor do WhatsApp observa
+        const redacoes = variacoesDoPasso(s.body_template, (s as any).body_variants);
+        const escolha = escolherVariacao(redacoes, `${c.id}:${s.position}`);
         tarefas.push({
           tenant_id, enrollment_id, contact_id: c.id, assigned_to: assigned,
           channel: s.channel,
           title: renderTemplate(assunto, c) || (channelLabel as any)[s.channel],
-          generated_content: renderTemplate(s.body_template, c),
+          generated_content: renderTemplate(escolha.texto || s.body_template, c),
+          body_variant: escolha.indice,
           due_date: addDaysISO(hoje, offset),
           status: "pending",
           step_position: s.position,
@@ -243,11 +251,13 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string): Prom
       }
     }
 
-    let falhaTarefas: string | null = null;
-    for (let i = 0; i < tarefas.length; i += LOTE_INSERT) {
-      const { error } = await supabase.from("tasks").insert(tarefas.slice(i, i + LOTE_INSERT));
-      if (error) { falhaTarefas = msgErro(error); break; }
-    }
+    // inserirTarefas tolera a 0111 ainda não aplicada: a primeira tentativa leva
+    // `body_variant`, e se o banco não conhecer a coluna a segunda vai sem ela. Sem
+    // isso, o PostgREST recusaria o insert INTEIRO e a inscrição em lote ficaria sem
+    // tarefa nenhuma — o mesmo estrago do PGRST204 nos eventos.
+    const { inserirTarefas } = await import("@/lib/inserirTarefas");
+    const rTarefas = await inserirTarefas(supabase, tarefas);
+    const falhaTarefas: string | null = rTarefas.error ? msgErro(rTarefas.error) : null;
 
     // Inscrição sem tarefa é pior que inscrição nenhuma: o contato aparece "em cadência"
     // e não recebe nada. Se as tarefas falharam, desfazemos as inscrições deste lote.

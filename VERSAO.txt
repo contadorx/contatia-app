@@ -1,17 +1,24 @@
 Contatia — versão deste pacote
 ==============================
-v2026.08.06-55
+v2026.08.06-57
+
+⚠ A migration 0111_variacoes_mensagem.sql (entregue no pacote anterior) continua
+   pendente se você ainda não aplicou — ela é das VARIAÇÕES de mensagem.
+   O copiloto de IA desta versão NÃO precisa de migration.
 
 O que entrou agora:
-· "Engajou agora" não trava mais em 60. O cartão passa a contar PESSOAS na janela
-  de 48h; a lista continua mostrando as 60 mais recentes e diz isso.
-· Os eventos são lidos em páginas (ordem estável), no lugar do teto de 1.000 —
-  uma pessoa gera vários eventos, então 1.000 eventos podiam ser 40 pessoas.
+· Copiloto de resposta na caixa Respostas: botão "✨ Rascunhar resposta".
+  Estimulado, nunca automático — o texto cai na caixa para você editar e enviar.
+  Lê a conversa dos dois lados, os toques da cadência que já saíram, os sinais
+  (abriu/clicou/abriu proposta), quem é o lead, o produto e o contexto de negócio
+  que você já escreveu para a IA de cadência.
+· Campo opcional "dizer o que responder": você dá a intenção em uma linha, a IA
+  cuida da forma.
+· "desfazer" devolve o texto que estava na caixa antes do rascunho.
+· Usa a MESMA cota mensal de IA das cadências, e mostra quanto já foi usado.
 
-Inclui tudo de 49 a 54 (peneira do filtro de contatos, capacidade do e-mail,
-conexão SMTP/IMAP reaproveitada no lote, fila drenando sozinha, número sem
-WhatsApp virando fila de revisão, score na fila e commit no rodapé).
+Requer ANTHROPIC_API_KEY no ambiente (já usada pelas outras IAs do app) ou a
+chave própria do workspace em Config.
 
-COMO CONFERIR SE ISTO ESTÁ NO AR
-1. Publique e abra o app; olhe o rodapé do menu lateral.
-2. Tem de aparecer "v2026.08.06-55" seguido dos 7 primeiros caracteres do commit.
+COMO CONFERIR SE ESTÁ NO AR
+Rodapé do menu lateral: "v2026.08.06-57" + os 7 primeiros do commit.

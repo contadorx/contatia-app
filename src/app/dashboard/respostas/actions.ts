@@ -3,6 +3,7 @@
 import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { dataCurta } from "@/lib/datas";
 
 async function ctx() {
   const supabase = createClient();
@@ -386,4 +387,197 @@ async function marcarLidas(supabase: any, tenant_id: string, contactId: string |
   if (contactId) q = q.eq("contact_id", contactId);
   else q = q.eq("phone", phone);
   await q;
+}
+
+// ============================================================
+// RASCUNHO DE RESPOSTA COM IA — estimulado, nunca automático
+//
+// Quem aperta o botão é a pessoa, e o que volta é texto na caixa de edição. Nada sai
+// daqui para o lead: o envio continua sendo o botão "Enviar", com o texto que o humano
+// aprovou (e quase sempre mexeu).
+//
+// A parte cara desta função não é a chamada ao modelo — é JUNTAR O CONTEXTO. Um
+// rascunho genérico é pior que rascunho nenhum, porque ainda dá o trabalho de apagar.
+// Por isso ela lê, antes de escrever: a conversa dos dois lados, os toques que já foram
+// enviados na cadência, os sinais de engajamento das últimas semanas, quem é o lead, de
+// que produto se trata e o contexto de negócio que o operador já escreveu uma vez para
+// a IA de cadência (reaproveitado — ninguém quer preencher briefing duas vezes).
+//
+// A cota é a MESMA das gerações de cadência, de propósito: um número só de "IA no mês"
+// é entendível; dois viram suporte.
+// ============================================================
+export async function rascunharResposta(input: {
+  contactId?: string | null;
+  phone?: string | null;
+  canal: "whatsapp" | "email";
+  instrucao?: string;
+}): Promise<{ texto?: string; usados?: number; quota?: number; error?: string }> {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const canal = input.canal === "email" ? "email" : "whatsapp";
+
+  // ---- cota de uso justo (mesma bolsa da IA de cadência) ----
+  const { data: tenant } = await supabase
+    .from("tenants")
+    .select("ai_model, ai_api_key, ai_context, email_signature, platform_plans(ai_quota, segment)")
+    .eq("id", tenant_id)
+    .maybeSingle();
+  const plano = (tenant as any)?.platform_plans;
+  const agora = new Date();
+  const inicioDoMes = new Date(Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), 1)).toISOString();
+  let quota = plano?.ai_quota != null ? Number(plano.ai_quota) : 100;
+  if (plano?.segment === "equipe") {
+    const { count: assentos } = await supabase.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenant_id);
+    quota = quota * Math.max(1, assentos ?? 1);
+  }
+  const { count: usados } = await supabase
+    .from("events")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenant_id)
+    .in("type", ["ai_generation", "ai_generation_opus", "ai_rascunho"])
+    .gte("created_at", inicioDoMes);
+  if ((usados ?? 0) >= quota) {
+    return { error: `Você atingiu o limite de ${quota} usos de IA neste mês (cadências + rascunhos). O limite renova no dia 1º.` };
+  }
+
+  // ---- quem é o lead ----
+  let lead: any = null;
+  if (input.contactId) {
+    const { data } = await supabase
+      .from("contacts")
+      // `*`: uma coluna ausente aqui (o schema evoluiu por migrations aplicadas à mão)
+      // faria o PostgREST recusar a consulta e o rascunho perderia QUEM é o lead.
+      .select("*")
+      .eq("id", input.contactId)
+      .maybeSingle();
+    lead = data;
+  }
+  if (!lead && !input.phone) return { error: "Conversa sem contato cadastrado — cadastre o contato para a IA ter com quem falar." };
+
+  // ---- a conversa (os dois lados) ----
+  const conversa: { de: "lead" | "voce"; texto: string; quando?: string | null }[] = [];
+  if (canal === "whatsapp") {
+    let q = supabase.from("whatsapp_messages").select("direction, text, created_at").order("created_at", { ascending: true }).limit(40);
+    q = input.contactId ? q.eq("contact_id", input.contactId) : q.eq("phone", input.phone as string);
+    const { data } = await q;
+    for (const m of ((data as any[]) || [])) {
+      if (!m.text) continue;
+      conversa.push({ de: m.direction === "out" ? "voce" : "lead", texto: m.text, quando: m.created_at });
+    }
+  } else if (input.contactId) {
+    const { data } = await supabase
+      .from("email_messages")
+      // a coluna do corpo chama `text` (0077) — pedir `body` faria o PostgREST recusar
+      // a consulta inteira e o rascunho sairia sem conhecer a conversa, em silêncio.
+      .select("direction, subject, text, created_at")
+      .eq("contact_id", input.contactId)
+      .order("created_at", { ascending: true })
+      .limit(40);
+    for (const m of ((data as any[]) || [])) {
+      const t = [m.subject ? `(${m.subject})` : "", m.text || ""].filter(Boolean).join(" ");
+      if (!t.trim()) continue;
+      conversa.push({ de: m.direction === "out" ? "voce" : "lead", texto: t, quando: m.created_at });
+    }
+  }
+
+  // ---- os toques da cadência que JÁ SAÍRAM (para não repetir argumento) ----
+  const toques: { canal: string; titulo?: string | null; texto?: string | null; quando?: string | null }[] = [];
+  let cadencia: string | null = null;
+  let produto: string | null = null;
+  if (input.contactId) {
+    const { data: feitas } = await supabase
+      .from("tasks")
+      .select("channel, title, generated_content, completed_at, enrollment_id")
+      .eq("contact_id", input.contactId)
+      .eq("status", "done")
+      .order("completed_at", { ascending: true })
+      .limit(10);
+    for (const t of ((feitas as any[]) || [])) {
+      toques.push({ canal: t.channel, titulo: t.title, texto: t.generated_content, quando: t.completed_at ? dataCurta(t.completed_at) : null });
+    }
+    const enrollmentId = ((feitas as any[]) || []).map((t) => t.enrollment_id).filter(Boolean).pop();
+    if (enrollmentId) {
+      const { data: enr } = await supabase
+        .from("enrollments")
+        .select("sequences(name, products(name))")
+        .eq("id", enrollmentId)
+        .maybeSingle();
+      cadencia = ((enr as any)?.sequences?.name as string) || null;
+      produto = ((enr as any)?.sequences?.products?.name as string) || null;
+    }
+  }
+
+  // ---- sinais de engajamento (o que ele fez, além de escrever) ----
+  const sinais: string[] = [];
+  if (input.contactId) {
+    const { data: evs } = await supabase
+      .from("events")
+      .select("type, created_at, meta")
+      .eq("contact_id", input.contactId)
+      .in("type", ["email_opened", "link_clicked", "doc_opened", "meeting"])
+      .order("created_at", { ascending: false })
+      .limit(20);
+    const conta: Record<string, number> = {};
+    const urls: string[] = [];
+    for (const e of ((evs as any[]) || [])) {
+      conta[e.type] = (conta[e.type] || 0) + 1;
+      if (e.type === "link_clicked" && e.meta?.url && urls.length < 3) urls.push(String(e.meta.url).slice(0, 120));
+    }
+    if (conta.email_opened) sinais.push(`abriu o e-mail ${conta.email_opened}x (abertura é sinal fraco: pode ser o servidor dele)`);
+    if (conta.link_clicked) sinais.push(`clicou em link ${conta.link_clicked}x${urls.length ? ` — ${urls.join(", ")}` : ""}`);
+    if (conta.doc_opened) sinais.push(`ABRIU A PROPOSTA ${conta.doc_opened}x (sinal forte de compra)`);
+    if (conta.meeting) sinais.push("já tem reunião marcada");
+  }
+
+  // ---- contexto de negócio: o MESMO briefing da IA de cadência ----
+  const ai = ((tenant as any)?.ai_context as Record<string, any>) || {};
+  const negocio = [
+    ai.market ? `Mercado: ${ai.market}` : null,
+    ai.product ? `Produto: ${ai.product}` : null,
+    ai.icp ? `Cliente ideal: ${ai.icp}` : null,
+    ai.tone ? `Tom: ${ai.tone}` : null,
+    ai.pain ? `Dor que resolve: ${ai.pain}` : null,
+    ai.proof ? `Provas: ${ai.proof}` : null,
+    ai.avoid ? `Evitar: ${ai.avoid}` : null,
+  ].filter(Boolean).join("\n") || null;
+
+  const { montarPrompt, limparRascunho } = await import("@/lib/copiloto");
+  const { system, pergunta } = montarPrompt({
+    canal,
+    lead: {
+      nome: lead?.name,
+      empresa: lead?.company,
+      cargo: lead?.role_title,
+      atividade: (lead?.custom as any)?.cnae_descricao || lead?.cnae || null,
+    },
+    produto: produto || ai.product || null,
+    cadencia,
+    toquesEnviados: toques,
+    sinais,
+    conversa,
+    negocio,
+    instrucao: input.instrucao,
+  });
+
+  const { assistantReply } = await import("@/lib/aichat");
+  const r = await assistantReply({
+    system,
+    messages: [{ role: "user", content: pergunta }],
+    // mesmo modelo da geração de cadência (o tenant pode ter o dele); rascunho de
+    // resposta é onde o texto encosta no cliente, então não é lugar de economizar.
+    model: ((tenant as any)?.ai_model as string) || process.env.ANTHROPIC_MODEL || undefined,
+  });
+  if (r.error) return { error: r.error };
+  const texto = limparRascunho(r.text || "");
+  if (!texto) return { error: "A IA não devolveu texto. Tente de novo." };
+
+  // conta o uso só quando deu certo — erro de API não pode consumir cota
+  await supabase.from("events").insert({
+    tenant_id,
+    contact_id: input.contactId || null,
+    type: "ai_rascunho",
+    meta: { canal, comInstrucao: !!input.instrucao?.trim() },
+  } as any);
+
+  return { texto, usados: (usados ?? 0) + 1, quota };
 }

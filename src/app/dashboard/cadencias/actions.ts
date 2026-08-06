@@ -6,6 +6,7 @@ import { canCreate, mensagemLimite } from "@/lib/plan";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { renderTemplate, addDaysISO, channelLabel, type Channel } from "@/lib/cadence";
+import { variacoesDoPasso, escolherVariacao } from "@/lib/variacoes";
 import { isManager } from "@/lib/permissions";
 
 async function ctx() {
@@ -38,7 +39,25 @@ export type StepInput = {
   subject: string;
   subject_b?: string;
   body: string;
+  // redações ALTERNATIVAS do mesmo passo (a principal é `body`). WhatsApp e Instagram
+  // tratam texto idêntico repetido como padrão de disparo — ver @/lib/variacoes.
+  body_variants?: string[];
 };
+
+// Limpa o que veio da tela: sem vazio, sem repetido, com teto. O teto é generoso mas
+// existe: alguém colando uma planilha inteira aqui viraria uma linha de banco enorme
+// carregada em toda edição de cadência.
+const MAX_VARIACOES = 10;
+function variacoesLimpas(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: string[] = [];
+  for (const x of v) {
+    const t = String(x ?? "").trim();
+    if (t && !out.includes(t)) out.push(t);
+    if (out.length >= MAX_VARIACOES) break;
+  }
+  return out.length ? out : null;
+}
 
 export async function createSequence(input: {
   name: string;
@@ -89,6 +108,7 @@ export async function createSequence(input: {
     subject: s.subject || null,
     subject_b: s.channel === "email" && s.subject_b?.trim() ? s.subject_b.trim() : null,
     body_template: s.body || null,
+    body_variants: variacoesLimpas(s.body_variants),
   }));
   const { error: e2 } = await supabase.from("sequence_steps").insert(steps);
   if (e2) return { error: msgErro(e2) };
@@ -106,7 +126,9 @@ export async function loadSequence(id: string) {
   if (!seq) return { error: "Cadência não encontrada." };
   const { data: steps } = await supabase
     .from("sequence_steps")
-    .select("position, channel, delay_days, subject, subject_b, body_template")
+    // `*` de propósito: `body_variants` nasce na 0111 e, pedida pelo nome, derrubaria a
+    // EDIÇÃO de cadência inteira enquanto a migration não estivesse aplicada.
+    .select("*")
     .eq("sequence_id", id)
     .order("position", { ascending: true });
   return {
@@ -121,6 +143,7 @@ export async function loadSequence(id: string) {
       delay_days: Number(s.delay_days) || 0,
       subject: s.subject || "",
       subject_b: s.subject_b || "",
+      body_variants: Array.isArray(s.body_variants) ? (s.body_variants as string[]) : [],
       body: s.body_template || "",
     })) as StepInput[],
   };
@@ -161,6 +184,10 @@ export async function updateSequence(id: string, input: { name: string; audience
     subject: s.subject || null,
     subject_b: s.channel === "email" && s.subject_b?.trim() ? s.subject_b.trim() : null,
     body_template: s.body || null,
+    // A FUNÇÃO DO BANCO PRECISA CONHECER O CAMPO (0111). Enquanto a migration não for
+    // aplicada, ela ignora `body_variants` e as variações somem ao salvar — sem erro
+    // nenhum. Por isso a migration acompanha esta entrega.
+    body_variants: variacoesLimpas(s.body_variants),
   }));
   const { error: e2 } = await supabase.rpc("replace_sequence_steps", {
     p_seq: id,
@@ -203,7 +230,9 @@ export async function enrollContact(contactId: string, sequenceId: string) {
 
   const { data: steps } = await supabase
     .from("sequence_steps")
-    .select("position, channel, delay_days, subject, subject_b, body_template")
+    // `*` de propósito: `body_variants` nasce na 0111 e, pedida pelo nome, derrubaria a
+    // EDIÇÃO de cadência inteira enquanto a migration não estivesse aplicada.
+    .select("*")
     .eq("sequence_id", sequenceId)
     .order("position", { ascending: true });
   if (!steps?.length) return { error: "Sequência sem passos." };
@@ -263,6 +292,9 @@ export async function enrollContact(contactId: string, sequenceId: string) {
     const hasB = s.channel === "email" && s.subject_b && String(s.subject_b).trim();
     const variant = hasB ? (Math.random() < 0.5 ? "a" : "b") : null;
     const chosenSubject = variant === "b" ? s.subject_b : s.subject;
+    // qual das redações deste passo vai para ESTE contato (ver @/lib/variacoes)
+    const redacoes = variacoesDoPasso(s.body_template, (s as any).body_variants);
+    const escolha = escolherVariacao(redacoes, `${contactId}:${s.position}`);
     tasks.push({
       tenant_id,
       enrollment_id: enr.id,
@@ -270,7 +302,8 @@ export async function enrollContact(contactId: string, sequenceId: string) {
       assigned_to: assigned,
       channel: s.channel,
       title: renderTemplate(chosenSubject, contact) || channelLabel[s.channel as Channel],
-      generated_content: renderTemplate(s.body_template, contact),
+      generated_content: renderTemplate(escolha.texto || s.body_template, contact),
+      body_variant: escolha.indice,
       due_date: addDaysISO(today, offset),
       status: "pending",
       step_position: s.position,
@@ -283,8 +316,11 @@ export async function enrollContact(contactId: string, sequenceId: string) {
     await supabase.from("enrollments").delete().eq("id", enr.id);
     return { error: "O contato não tem os dados necessários para os passos desta cadência.", missingData: true };
   }
-  const { error: e2 } = await supabase.from("tasks").insert(tasks);
-  if (e2) return { error: msgErro(e2) };
+  // inserirTarefas: tolera a 0111 ainda não aplicada (ver o comentário lá). Sem isso a
+  // inscrição ficaria SEM TAREFAS na janela entre publicar o app e rodar a migration.
+  const { inserirTarefas } = await import("@/lib/inserirTarefas");
+  const r2 = await inserirTarefas(supabase, tasks);
+  if (r2.error) return { error: msgErro(r2.error) };
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/contatos");

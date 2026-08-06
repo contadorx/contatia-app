@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   replyWhatsApp,
   replyEmail,
+  rascunharResposta,
   markThreadRead,
   createContactFromThread,
   createContactFromEmailThread,
@@ -89,6 +90,53 @@ export default function RespostasInbox({
   // Agora: botão de verdade, confirmação dentro da própria barra, e o resultado
   // (sucesso ou erro) aparece ali mesmo, com o número de mensagens afetadas.
   // ============================================================
+  // ============================================================
+  // COPILOTO — a IA escreve o rascunho, você manda
+  //
+  // Estimulado, nunca automático: nada sai daqui sem alguém apertar "Enviar". O que o
+  // botão faz é encher a caixa de texto com uma proposta que leu a conversa, os toques
+  // que já saíram e os sinais do lead.
+  //
+  // A instrução é opcional e é o que salva o rascunho de ser genérico quando você já
+  // sabe o que quer dizer ("responder que o preço fecha em 12x", "dizer que não
+  // atendemos MEI"): a IA cuida da forma, você cuida do conteúdo.
+  //
+  // Se já havia texto na caixa, ele NÃO é jogado fora — o rascunho anterior fica
+  // guardado e o botão "desfazer" traz de volta. Perder o que a pessoa escreveu para
+  // colocar texto de máquina no lugar seria a pior troca possível.
+  // ============================================================
+  const [instrucao, setInstrucao] = useState("");
+  const [iaAberta, setIaAberta] = useState(false);
+  const [iaPend, setIaPend] = useState(false);
+  const [iaErro, setIaErro] = useState<string | null>(null);
+  const [iaAntes, setIaAntes] = useState<string | null>(null);
+  const [iaCota, setIaCota] = useState<{ usados: number; quota: number } | null>(null);
+
+  function rascunhar(t: Thread) {
+    setIaErro(null);
+    setIaPend(true);
+    const anterior = text;
+    (async () => {
+      try {
+        const r = (await rascunharResposta({
+          contactId: t.contactId,
+          phone: t.phone || null,
+          canal: t.channel,
+          instrucao: instrucao.trim() || undefined,
+        })) as { texto?: string; usados?: number; quota?: number; error?: string };
+        if (r?.error) { setIaErro(r.error); return; }
+        if (!r?.texto) { setIaErro("A IA não devolveu texto. Tente de novo."); return; }
+        setIaAntes(anterior);
+        setText(t.channel === "email" ? r.texto.replace(/\n/g, "<br>") : r.texto);
+        if (r.usados != null && r.quota != null) setIaCota({ usados: r.usados, quota: r.quota });
+      } catch (e: any) {
+        setIaErro(e?.message || "Falha ao falar com a IA.");
+      } finally {
+        setIaPend(false);
+      }
+    })();
+  }
+
   const [selMode, setSelMode] = useState(false);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [confirmaLote, setConfirmaLote] = useState(false);
@@ -475,6 +523,60 @@ export default function RespostasInbox({
               </div>
             ))}
           </div>
+
+          {/* ---------- COPILOTO DE RESPOSTA ---------- */}
+          {(active.channel === "email" || canReply) && (
+            <div className="border-t border-line bg-muted/40 px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-semibold text-brand-dark hover:border-brand disabled:opacity-50"
+                  disabled={iaPend || (!active.contactId && active.channel === "email")}
+                  onClick={() => rascunhar(active)}
+                  title="A IA lê a conversa, os toques que já saíram e os sinais deste lead, e escreve um rascunho na caixa abaixo. Nada é enviado."
+                >
+                  {iaPend ? "Escrevendo…" : "✨ Rascunhar resposta"}
+                </button>
+                <button
+                  type="button"
+                  className="text-xs text-subtle hover:text-ink"
+                  onClick={() => setIaAberta((v) => !v)}
+                  title="Dizer em uma linha o que você quer responder — a IA cuida da forma"
+                >
+                  {iaAberta ? "esconder instrução" : "dizer o que responder"}
+                </button>
+                {iaAntes !== null && (
+                  <button
+                    type="button"
+                    className="text-xs text-subtle underline hover:text-ink"
+                    onClick={() => { setText(iaAntes); setIaAntes(null); }}
+                    title="Volta o texto que estava na caixa antes do rascunho"
+                  >
+                    desfazer
+                  </button>
+                )}
+                {iaCota && (
+                  <span className="ml-auto text-[11px] text-subtle">
+                    IA: {iaCota.usados} de {iaCota.quota} no mês
+                  </span>
+                )}
+              </div>
+              {iaAberta && (
+                <input
+                  className="input mt-2 py-1 text-sm"
+                  value={instrucao}
+                  onChange={(e) => setInstrucao(e.target.value)}
+                  placeholder="Ex.: dizer que fechamos em 12x sem juros e propor conversa quinta"
+                  onKeyDown={(e) => { if (e.key === "Enter") rascunhar(active); }}
+                />
+              )}
+              <p className="mt-1 text-[11px] text-subtle">
+                O rascunho é seu para editar — <b>nada sai sem você clicar em Enviar</b>. A IA não inventa preço,
+                prazo ou política: se faltar o dado, ela deixa a frase aberta ou pergunta.
+              </p>
+              {iaErro && <p className="mt-1 text-xs text-danger">{iaErro}</p>}
+            </div>
+          )}
 
           {/* resposta */}
           <div className="border-t border-line p-3">

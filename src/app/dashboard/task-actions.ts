@@ -882,3 +882,128 @@ export async function deleteTasks(ids: string[]) {
   revalidatePath("/dashboard");
   return { ok: true, count: n };
 }
+
+// ============================================================
+// ENVIAR SÓ O QUE ESTÁ MARCADO — e-mail E WhatsApp na mesma volta
+//
+// "Enviar todos" é uma decisão grande demais para o dia a dia: quase sempre o operador
+// quer disparar um punhado, olhar o que volta, e continuar. Até aqui a fila só sabia
+// fazer tudo (e-mail) ou um a um (WhatsApp) — não havia meio-termo, e o meio-termo é
+// justamente onde se trabalha.
+//
+// O canal é decidido POR TAREFA, não pelo botão: marcou três e-mails e dois WhatsApps,
+// saem os cinco pelos caminhos certos, cada um com as suas travas (limite diário da
+// caixa, número sem WhatsApp, texto com lixo).
+//
+// O RITMO DO WHATSAPP É DE PROPÓSITO. Cinco mensagens saindo no mesmo segundo, do mesmo
+// número, é o padrão que derruba conta. A pausa entre elas não é lentidão acidental —
+// é a única parte do envio que protege o número, e some do orçamento de tempo com
+// consciência: em 40 segundos cabem ~12 WhatsApps, e está certo que seja assim.
+// ============================================================
+const PAUSA_WHATSAPP_MS = 2500;
+
+export async function enviarSelecionadas(ids: string[]): Promise<{
+  ok?: boolean; enviados?: number; porCanal?: Record<string, number>; falhas?: number;
+  motivos?: string[]; restantes?: number; paradoPorTempo?: boolean; ignoradas?: number;
+  detalhe?: string; error?: string;
+}> {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  const pedidos = (ids || []).filter(Boolean);
+  if (!pedidos.length) return { error: "Nada marcado." };
+
+  const hoje = diaISO();
+  const elegiveis: { id: string; channel: string }[] = [];
+  // fatias de 200: 1.000 uuids numa URL do PostgREST passam de 37 KB e o servidor recusa
+  for (let i = 0; i < pedidos.length; i += 200) {
+    const { data } = await supabase
+      .from("tasks")
+      .select("id, channel, due_date")
+      .in("id", pedidos.slice(i, i + 200))
+      .eq("status", "pending")
+      .lte("due_date", hoje)
+      .in("channel", ["email", "whatsapp"])
+      .order("due_date", { ascending: true });
+    for (const t of ((data as any[]) || [])) elegiveis.push({ id: t.id, channel: t.channel });
+  }
+  const ignoradas = pedidos.length - elegiveis.length;
+  if (!elegiveis.length) {
+    return {
+      ok: true, enviados: 0, ignoradas,
+      error: "Nenhuma das marcadas pode sair agora: ou não é e-mail/WhatsApp, ou já saiu, ou vence depois de hoje.",
+    };
+  }
+
+  // contexto de lote só para o e-mail (conexões reaproveitadas); o WhatsApp é HTTP
+  const { capacidadeDeHoje: capHoje } = await import("@/lib/capacidadeEmail");
+  const { transporteDeLote } = await import("@/lib/mailer");
+  const temEmail = elegiveis.some((t) => t.channel === "email");
+  const capInicial = await capHoje(supabase);
+  const { data: tenantRow } = temEmail
+    ? await supabase.from("tenants").select("email_signature").maybeSingle()
+    : { data: null as any };
+  const lote: ContextoLote = {
+    cap: capInicial,
+    usadosNoLote: {},
+    transportes: new Map<string, any>(),
+    imap: new Map<string, any>(),
+    assinaturaTenant: ((tenantRow as any)?.email_signature as string) ?? null,
+    tempos: { banco: 0, smtp: 0, copia: 0 },
+  };
+  if (temEmail) {
+    for (const c of capInicial.porCaixa) {
+      if (c.folga <= 0) continue;
+      try { lote.transportes.set(c.conta.id as string, transporteDeLote(c.conta)); } catch { /* cai no caminho de sempre */ }
+    }
+  }
+
+  const inicio = Date.now();
+  const porCanal: Record<string, number> = {};
+  const motivos: Record<string, number> = {};
+  let enviados = 0;
+  let falhas = 0;
+  let paradoPorTempo = false;
+  let i = 0;
+
+  for (; i < elegiveis.length; i++) {
+    if (Date.now() - inicio > ORCAMENTO_ENVIO_MS) { paradoPorTempo = true; break; }
+    const t = elegiveis[i];
+
+    const res =
+      t.channel === "email"
+        ? ((await enviarUm(t.id, undefined, lote)) as { ok?: boolean; error?: string })
+        : ((await sendWhatsAppTask(t.id)) as { ok?: boolean; error?: string });
+
+    if (res?.ok) {
+      enviados++;
+      porCanal[t.channel] = (porCanal[t.channel] || 0) + 1;
+      // ritmo humano entre WhatsApps — ver o comentário do topo
+      if (t.channel === "whatsapp" && i < elegiveis.length - 1) {
+        await new Promise((r) => setTimeout(r, PAUSA_WHATSAPP_MS));
+      }
+      continue;
+    }
+    falhas++;
+    if (res?.error) motivos[res.error] = (motivos[res.error] || 0) + 1;
+    // limite do dia atingido: insistir só produz falhas iguais e some com o motivo
+    if (res?.error && /[Ll]imite/.test(res.error)) break;
+  }
+
+  for (const tr of lote.transportes.values()) { try { tr.close?.(); } catch { /* nada a fazer */ } }
+  for (const se of lote.imap.values()) { if (se) { try { await se.fechar(); } catch { /* nada a fazer */ } } }
+  revalidatePath("/dashboard");
+
+  return {
+    ok: true,
+    enviados,
+    porCanal,
+    falhas,
+    ignoradas,
+    restantes: Math.max(0, elegiveis.length - i),
+    paradoPorTempo,
+    motivos: Object.entries(motivos).sort((a, b) => b[1] - a[1]).map(([m, n]) => `${n}× ${m}`),
+    detalhe: Object.entries(porCanal)
+      .map(([c, n]) => `${n} ${c === "email" ? "e-mail" : "WhatsApp"}`)
+      .join(" · "),
+  };
+}

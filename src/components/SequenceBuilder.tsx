@@ -105,6 +105,34 @@ export default function SequenceBuilder({
     setAbOpen((s) => { const n = new Set(s); n.delete(i); return n; });
   }
 
+  // ============================================================
+  // VÁRIAS REDAÇÕES PARA O MESMO PASSO
+  //
+  // WhatsApp e Instagram olham repetição de texto. Aqui o passo deixa de ter UMA
+  // mensagem e passa a ter uma principal + alternativas; cada contato leva uma, de
+  // forma determinística (mesmo contato, mesmo texto — ver @/lib/variacoes).
+  //
+  // Fica nos canais de TEXTO (WhatsApp, Instagram, LinkedIn, ligação). No e-mail o que
+  // já existe é o A/B de assunto, e o corpo é rich text — N editores ricos no mesmo
+  // passo seria uma tela difícil de usar para resolver um problema que, no e-mail, tem
+  // outro nome (reputação de domínio, não padrão de disparo).
+  // ============================================================
+  const MAX_VARIACOES = 10;
+  const variacoesDe = (i: number) => steps[i]?.body_variants || [];
+  function addVariacao(i: number) {
+    const atuais = variacoesDe(i);
+    if (atuais.length >= MAX_VARIACOES) return;
+    update(i, { body_variants: [...atuais, ""] });
+  }
+  function setVariacao(i: number, j: number, texto: string) {
+    const atuais = [...variacoesDe(i)];
+    atuais[j] = texto;
+    update(i, { body_variants: atuais });
+  }
+  function removeVariacao(i: number, j: number) {
+    update(i, { body_variants: variacoesDe(i).filter((_, k) => k !== j) });
+  }
+
   function bf(k: string, v: string | number | string[]) {
     setBrief((s) => ({ ...s, [k]: v }));
   }
@@ -538,6 +566,48 @@ export default function SequenceBuilder({
                     Prévia: {s.body.replace(/\{\{\s*primeiro_nome\s*\}\}/g, "João").replace(/\{\{\s*empresa\s*\}\}/g, "Empresa X")}
                   </p>
                 )}
+
+                {/* --- outras redações do MESMO passo --- */}
+                {variacoesDe(i).map((v, j) => (
+                  <div key={j} className="mt-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-brand">Versão {j + 2}</span>
+                      <button type="button" className="text-[11px] text-danger hover:underline" onClick={() => removeVariacao(i, j)}>
+                        remover versão
+                      </button>
+                    </div>
+                    <textarea
+                      className="input mt-1 min-h-[110px] leading-relaxed"
+                      value={v}
+                      onChange={(e) => setVariacao(i, j, e.target.value)}
+                      placeholder="Escreva a mesma ideia com outras palavras. Use {{primeiro_nome}}, {{empresa}}..."
+                    />
+                  </div>
+                ))}
+                {variacoesDe(i).length < MAX_VARIACOES && (
+                  <button
+                    type="button"
+                    className="mt-2 text-xs font-medium text-brand hover:underline"
+                    onClick={() => addVariacao(i)}
+                    title="Cada contato recebe UMA das versões. Serve para o WhatsApp/Instagram não verem o mesmo texto repetido em sequência."
+                  >
+                    + Adicionar outra versão desta mensagem
+                  </button>
+                )}
+                <p className="mt-1 text-[11px] text-subtle">
+                  {variacoesDe(i).filter((v) => v.trim()).length + (s.body.trim() ? 1 : 0) > 1 ? (
+                    <>
+                      <b>{variacoesDe(i).filter((v) => v.trim()).length + (s.body.trim() ? 1 : 0)} versões</b> neste passo — cada
+                      contato recebe uma, sempre a mesma se for reinscrito. Escreva de verdade diferente:
+                      trocar duas palavras não engana ninguém.
+                    </>
+                  ) : (
+                    <>
+                      Uma versão só. WhatsApp e Instagram tratam texto <b>idêntico</b> repetido em sequência como
+                      disparo — duas ou três redações da mesma ideia reduzem esse sinal.
+                    </>
+                  )}
+                </p>
               </>
             )}
           </div>

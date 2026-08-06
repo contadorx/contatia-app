@@ -2,7 +2,7 @@
 
 import { useTransition, useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask, sendAllEmailTasks, completeTasks, skipTasks, deleteTasks } from "@/app/dashboard/task-actions";
+import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWhatsAppTask, sendAllEmailTasks, enviarSelecionadas, completeTasks, skipTasks, deleteTasks } from "@/app/dashboard/task-actions";
 import { channelLabel, waLink, type Channel } from "@/lib/cadence";
 import { linkInstagramDM, linkLinkedin, handleInstagram } from "@/lib/redes";
 import { conferirRede } from "@/app/dashboard/contatos/social-actions";
@@ -157,8 +157,12 @@ export default function TaskQueue({
   const semWaNaFila = tasks.filter(travadoSemWa);
   const [soTravados, setSoTravados] = useState(false);
   const tarefasVisiveis = soTravados ? semWaNaFila : tasks;
-  // e-mails marcados na fila: o botão passa a dizer o que vai fazer com eles
-  const emailsSelecionados = allTasks.filter((t) => sel.has(t.id) && t.channel === "email").length;
+  // marcados que TÊM como sair sozinhos (e-mail e WhatsApp). O botão principal passa a
+  // dizer o que vai fazer com eles — "enviar todos" é decisão grande demais para o dia
+  // a dia, e o meio-termo é onde se trabalha.
+  const enviaveisSelecionados = allTasks.filter(
+    (t) => sel.has(t.id) && (t.channel === "email" || t.channel === "whatsapp")
+  );
 
   useEffect(() => {
     if (focus > tasks.length - 1) setFocus(Math.max(0, tasks.length - 1));
@@ -216,6 +220,44 @@ export default function TaskQueue({
   // para um botão travado sem saber se ainda está vivo.
   // ============================================================
   const MAX_VOLTAS = 15;
+
+  // ============================================================
+  // ENVIAR SÓ O QUE ESTÁ MARCADO
+  //
+  // O canal é decidido POR TAREFA, no servidor: marcou três e-mails e dois WhatsApps,
+  // saem os cinco pelos caminhos certos. Aqui a tela só marca e mostra o resultado.
+  //
+  // Sem laço automático de propósito: quem marca cinco quer ver as cinco antes de
+  // continuar. O "continuar sozinho" fica no "enviar todos", onde ele faz sentido.
+  // ============================================================
+  function enviarMarcadas() {
+    const ids = enviaveisSelecionados.map((t) => t.id);
+    if (!ids.length) return;
+    setErr(null); setBulkMsg(null);
+    start(async () => {
+      const res = (await enviarSelecionadas(ids)) as
+        { enviados?: number; falhas?: number; ignoradas?: number; restantes?: number;
+          paradoPorTempo?: boolean; detalhe?: string; motivos?: string[]; error?: string } | undefined;
+      if (!res) { setErr("O envio não retornou resposta (tempo esgotado). Confira “Seus envios de hoje” antes de repetir."); return; }
+      if (res.error && !res.enviados) { setErr(res.error); return; }
+
+      const partes = [`✓ ${res.enviados ?? 0} enviado(s)`];
+      if (res.detalhe) partes.push(res.detalhe);
+      if (res.falhas) partes.push(`${res.falhas} falharam`);
+      if (res.ignoradas) partes.push(`${res.ignoradas} marcadas não podiam sair (canal manual, já enviadas ou com data futura)`);
+      if (res.restantes) {
+        partes.push(
+          res.paradoPorTempo
+            ? `${res.restantes} ficaram para a próxima volta — clique de novo`
+            : `${res.restantes} não saíram`
+        );
+      }
+      setBulkMsg(partes.join(" · ") + ".");
+      if (res.motivos?.length) setErr(`Não saíram: ${res.motivos.slice(0, 3).join(" · ")}`);
+      setSel(new Set());
+      router.refresh();
+    });
+  }
 
   function sendAll() {
     setErr(null);
@@ -595,12 +637,16 @@ export default function TaskQueue({
 
       {/* barra de atalhos + envio em lote */}
       <div className="flex flex-wrap items-center gap-3">
-        {pendingEmails > 0 && (
-          <button className="btn-brand py-1.5 text-sm" onClick={sendAll} disabled={pending}>
+        {(pendingEmails > 0 || enviaveisSelecionados.length > 0) && (
+          <button
+            className="btn-brand py-1.5 text-sm"
+            onClick={() => (enviaveisSelecionados.length > 0 ? enviarMarcadas() : sendAll())}
+            disabled={pending}
+          >
             {pending
               ? "Enviando..."
-              : emailsSelecionados > 0
-              ? `Enviar os ${emailsSelecionados} selecionados`
+              : enviaveisSelecionados.length > 0
+              ? `Enviar os ${enviaveisSelecionados.length} selecionados`
               : `Enviar todos os e-mails (${pendingEmails})`}
           </button>
         )}
