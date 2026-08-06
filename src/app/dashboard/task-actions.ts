@@ -152,48 +152,19 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
     return { error: `E-mail na lista de supressão (${(supp as any).reason}). Envio bloqueado para proteger sua reputação.` };
   }
 
-  // ROTAÇÃO DE CAIXAS: busca todas as caixas ativas e escolhe a com mais folga hoje
-  // (cap efetivo do dia − enviados hoje). Distribui a carga e protege cada domínio.
-  const { data: accts } = await supabase
-    .from("email_accounts")
-    .select("*")   // `*` de propósito: listar as colunas faria TODO envio quebrar com "column
-           // does not exist" no intervalo entre publicar o app e aplicar a migration —
-           // e o app é publicado pela Vercel enquanto a migration é aplicada à mão.
-           // A linha é pequena e já a líamos quase inteira.
-    .eq("is_active", true)
-    .order("created_at", { ascending: true });
-  if (!accts || !accts.length) {
+  // ROTAÇÃO DE CAIXAS: quem sabe quanto cada caixa ainda pode enviar hoje é
+  // capacidadeDeHoje — a MESMA conta que o relatório do lote mostra na tela. Antes esta
+  // conta morava aqui dentro e a tela tinha a sua; quando as duas discordassem, o
+  // operador leria uma capacidade que o envio não honra.
+  const { capacidadeDeHoje } = await import("@/lib/capacidadeEmail");
+  const cap = await capacidadeDeHoje(supabase);
+  const accts = cap.contas;
+  if (!accts.length) {
     return { error: "Nenhuma caixa de e-mail conectada. Cadastre a sua em Configurações → Canais." };
   }
-
-  // meia-noite BRT (UTC-3, fixo): o servidor roda em UTC — sem isso o "dia" do cap
-  // diário resetaria às 21h de Brasília e a caixa poderia enviar 2x o limite num dia real.
-  const BRT_OFFSET_MS = 3 * 3600000;
-  const nowBRT = new Date(Date.now() - BRT_OFFSET_MS);
-  const startOfDay = new Date(Date.UTC(nowBRT.getUTCFullYear(), nowBRT.getUTCMonth(), nowBRT.getUTCDate()) + BRT_OFFSET_MS);
-  const { effectiveDailyCap } = await import("@/lib/warmup");
-
-  // contagem de enviados hoje por caixa
-  const { data: sentToday } = await supabase
-    .from("events")
-    .select("email_account_id")
-    .eq("type", "email_sent")
-    .gte("created_at", startOfDay.toISOString());
-  const sentByAcct: Record<string, number> = {};
-  for (const e of (sentToday as any[]) || []) {
-    const id = e.email_account_id;
-    if (id) sentByAcct[id] = (sentByAcct[id] || 0) + 1;
-  }
-
-  // folga do dia de uma caixa (cap efetivo do aquecimento − enviados hoje)
-  let anyWarming = false;
-  const folgaDe = (a: any) => {
-    const warmupOn = (a.warmup_stage ?? 0) !== -1;
-    const { cap, warming } = effectiveDailyCap(a.created_at, a.daily_cap ?? 40, warmupOn);
-    if (warming) anyWarming = true;
-    return cap - (sentByAcct[a.id] || 0);
-  };
-  for (const a of accts as any[]) folgaDe(a);   // só para saber se ALGUMA está aquecendo
+  const anyWarming = cap.algumaAquecendo;
+  const folgaPorId = new Map(cap.porCaixa.map((c) => [c.conta.id as string, c.folga]));
+  const folgaDe = (a: any) => folgaPorId.get(a.id) ?? 0;
 
   // ESCOLHA POR CAMADAS: minha → do workspace → emprestada (ver lib/caixas).
   //
@@ -213,9 +184,7 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   if (desiredBoxId) {
     const d = (accts as any[]).find((a) => a.id === desiredBoxId);
     if (d) {
-      const warmupOn = (d.warmup_stage ?? 0) !== -1;
-      const { cap } = effectiveDailyCap(d.created_at, d.daily_cap ?? 40, warmupOn);
-      const dSlack = cap - (sentByAcct[d.id] || 0);
+      const dSlack = folgaDe(d);
       if (dSlack > 0) { acct = d; bestSlack = dSlack; }
     }
   }
@@ -488,19 +457,51 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
 const ORCAMENTO_ENVIO_MS = 40_000;   // sai limpo antes dos 60s da função
 const TETO_POR_CLIQUE = 200;
 
-export async function sendAllEmailTasks() {
+export async function sendAllEmailTasks(selecionadas?: string[]) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const today = diaISO();
-  const { data: tasks } = await supabase
-    .from("tasks")
-    .select("id")
-    .eq("channel", "email")
-    .eq("status", "pending")
-    .lte("due_date", today)
-    .order("due_date", { ascending: true })
-    .limit(TETO_POR_CLIQUE);
-  const ids = ((tasks as any[]) || []).map((t) => t.id);
+
+  // ============================================================
+  // A SELEÇÃO DA TELA VALE — mas quem decide o que pode sair é o servidor
+  //
+  // Marcar 260 linhas e ver "10 enviados" com o resto virando "clique de novo" é a
+  // queixa que originou isto. Duas coisas passam a ser ditas: a seleção é respeitada
+  // (antes o botão ignorava e pegava as mais antigas), e o que foi descartado dela —
+  // porque não é e-mail, porque já saiu, ou porque ainda não venceu — vira número, não
+  // silêncio. O filtro continua no servidor: o cliente manda ids, nunca a permissão.
+  // ============================================================
+  const pedidos = (selecionadas || []).filter(Boolean);
+  let descartadasDaSelecao = 0;
+  let ids: string[] = [];
+
+  if (pedidos.length) {
+    const elegiveis: string[] = [];
+    // fatias de 200: 1.000 uuids numa URL do PostgREST passam de 37 KB e o servidor recusa
+    for (let i = 0; i < pedidos.length; i += 200) {
+      const { data } = await supabase
+        .from("tasks")
+        .select("id")
+        .in("id", pedidos.slice(i, i + 200))
+        .eq("channel", "email")
+        .eq("status", "pending")
+        .lte("due_date", today)
+        .order("due_date", { ascending: true });
+      elegiveis.push(...(((data as any[]) || []).map((t) => t.id)));
+    }
+    descartadasDaSelecao = pedidos.length - elegiveis.length;
+    ids = elegiveis.slice(0, TETO_POR_CLIQUE);
+  } else {
+    const { data: tasks } = await supabase
+      .from("tasks")
+      .select("id")
+      .eq("channel", "email")
+      .eq("status", "pending")
+      .lte("due_date", today)
+      .order("due_date", { ascending: true })
+      .limit(TETO_POR_CLIQUE);
+    ids = ((tasks as any[]) || []).map((t) => t.id);
+  }
 
   // ============================================================
   // "ENVIEI E NÃO SAIU NADA" PRECISA DE UMA RESPOSTA, NÃO DE UM ZERO
@@ -573,6 +574,12 @@ export async function sendAllEmailTasks() {
   const processados = i;
   const restantes = Math.max(0, ids.length - processados);
 
+  // A CONTA DO DIA, sempre — é ela que transforma "saíram 10" em resposta.
+  // Vem de capacidadeDeHoje, a MESMA função que o envio usa para decidir; duas contas
+  // separadas divergiriam e a tela prometeria o que o envio não honra.
+  const { capacidadeDeHoje, comoAumentar } = await import("@/lib/capacidadeEmail");
+  const cap = await capacidadeDeHoje(supabase);
+
   // Nada saiu mesmo tendo o que tentar: o motivo mais frequente é a resposta.
   const maisComum = Object.entries(motivos).sort((a, b) => b[1] - a[1])[0];
   const diagnostico =
@@ -587,6 +594,18 @@ export async function sendAllEmailTasks() {
     failed,
     restantes,
     limiteAtingido,
+    // parou porque acabou o limite do dia (e não por tempo ou por fim da fila):
+    // com isto a tela deixa de mandar "clicar de novo" contra um teto.
+    paradoPorLimite: !!limiteAtingido,
+    capacidadeHoje: cap.capTotal,
+    usadosHoje: cap.usados,
+    folgaHoje: cap.folga,
+    resumoCapacidade: cap.resumo,
+    comoAumentar: comoAumentar(cap),
+    // a seleção da tela: quantas linhas marcadas não podiam sair agora
+    descartadasDaSelecao,
+    // o teto por clique bateu: existe mais fila do que esta volta pegou
+    tetoPorClique: ids.length >= TETO_POR_CLIQUE ? TETO_POR_CLIQUE : null,
     primeiroErro,
     porCaixa,
     diagnostico,

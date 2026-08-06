@@ -137,6 +137,8 @@ export default function TaskQueue({
   });
 
   const pendingEmails = tasks.filter((t) => t.channel === "email").length;
+  // e-mails marcados na fila: o botão passa a dizer o que vai fazer com eles
+  const emailsSelecionados = allTasks.filter((t) => sel.has(t.id) && t.channel === "email").length;
 
   useEffect(() => {
     if (focus > tasks.length - 1) setFocus(Math.max(0, tasks.length - 1));
@@ -179,11 +181,17 @@ export default function TaskQueue({
   function sendAll() {
     setErr(null);
     setBulkMsg(null);
+    // manda a SELEÇÃO quando existe: marcar 260 linhas e ver o botão pegar outras é o
+    // tipo de discordância que faz a pessoa desconfiar do número que aparece depois.
+    const escolhidas = allTasks.filter((t) => sel.has(t.id) && t.channel === "email").map((t) => t.id);
     start(async () => {
-      const res = (await sendAllEmailTasks()) as
+      const res = (await sendAllEmailTasks(escolhidas.length ? escolhidas : undefined)) as
         { sent?: number; failed?: number; restantes?: number; limiteAtingido?: string | null;
           primeiroErro?: string | null; detalhe?: string; error?: string;
-          diagnostico?: string | null; motivos?: string[] } | undefined;
+          diagnostico?: string | null; motivos?: string[];
+          paradoPorLimite?: boolean; capacidadeHoje?: number; usadosHoje?: number; folgaHoje?: number;
+          resumoCapacidade?: string; comoAumentar?: string;
+          descartadasDaSelecao?: number; tetoPorClique?: number | null } | undefined;
 
       // resposta vazia = função morta por tempo. Antes isso não dizia nada, e a pessoa
       // clicava de novo — reenviando o que já tinha saído.
@@ -202,11 +210,37 @@ export default function TaskQueue({
       const partes = [`✓ ${res.sent ?? 0} e-mail(is) enviado(s)`];
       if (res.detalhe) partes.push(res.detalhe);
       if (res.failed) partes.push(`${res.failed} falharam`);
-      if (res.restantes) partes.push(`${res.restantes} ainda na fila — clique de novo para continuar`);
+      if (res.restantes) {
+        // ============================================================
+        // "CLIQUE DE NOVO" SÓ QUANDO CLICAR DE NOVO ADIANTA
+        //
+        // Quando o lote para por LIMITE DO DIA, clicar de novo envia zero. A mensagem
+        // antiga convidava exatamente para isso — o operador clicava contra um teto que
+        // ninguém tinha dito qual era. Agora as duas paradas são ditas pelo nome: falta
+        // de tempo (dá para continuar agora) e falta de limite (só amanhã).
+        // ============================================================
+        partes.push(
+          res.paradoPorLimite
+            ? `${res.restantes} continuam na fila e saem nos próximos dias`
+            : `${res.restantes} ainda na fila — clique de novo para continuar`
+        );
+      }
+      if (res.descartadasDaSelecao) {
+        partes.push(`${res.descartadasDaSelecao} da sua seleção ficaram de fora (não são e-mail, já saíram, ou vencem depois de hoje)`);
+      }
+      if (res.tetoPorClique) partes.push(`esta volta pegou ${res.tetoPorClique} por vez`);
       setBulkMsg(partes.join(" · ") + ".");
       // O limite é a informação mais importante do lote: sem destaque, ela some no meio
-      // do resumo e a pessoa acha que enviou tudo.
-      if (res.limiteAtingido) setErr(res.limiteAtingido);
+      // do resumo e a pessoa acha que enviou tudo. E vem com a conta do dia + o que
+      // fazer, porque "tente amanhã" sozinho não diz se o freio é aquecimento, limite
+      // configurado ou caixa de menos.
+      if (res.limiteAtingido) {
+        setErr(
+          [res.limiteAtingido, res.resumoCapacidade, res.comoAumentar ? `Para enviar mais hoje: ${res.comoAumentar}` : ""]
+            .filter(Boolean)
+            .join(" ")
+        );
+      }
       else if (res.failed && res.motivos?.length) setErr(`Não saíram: ${res.motivos.slice(0, 3).join(" · ")}`);
       else if (res.failed && res.primeiroErro) setErr(`Primeira falha: ${res.primeiroErro}`);
     });
@@ -465,7 +499,11 @@ export default function TaskQueue({
       <div className="flex flex-wrap items-center gap-3">
         {pendingEmails > 0 && (
           <button className="btn-brand py-1.5 text-sm" onClick={sendAll} disabled={pending}>
-            {pending ? "Enviando..." : `Enviar todos os e-mails (${pendingEmails})`}
+            {pending
+              ? "Enviando..."
+              : emailsSelecionados > 0
+              ? `Enviar os ${emailsSelecionados} selecionados`
+              : `Enviar todos os e-mails (${pendingEmails})`}
           </button>
         )}
         {mostrarConcluirVisiveis && (

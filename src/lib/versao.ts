@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.06-49";
+export const VERSAO_APP = "2026.08.06-50";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "conserta o Bad Request em Prontos p/ cadencia: lista de ids grande demais para a URL passa a ser aplicada em memoria";
+export const VERSAO_NOTAS = "envio em lote: respeita a selecao e diz a capacidade do dia em vez de mandar clicar de novo contra o limite";
