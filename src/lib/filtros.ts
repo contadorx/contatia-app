@@ -42,3 +42,12 @@ export function contarFacetas(...facetas: (string | string[] | null | undefined)
 // certo em vez de virar duas cópias que um dia divergem.
 // ============================================================
 export const SEM_DONO = "__sem__";
+
+// ============================================================
+// "SEM NENHUM" TAMBÉM É UMA ESCOLHA
+//
+// Mora aqui pelo mesmo motivo do SEM_DONO: a barra de filtros é componente de CLIENTE
+// e `contatosFiltro` é `server-only` — importar de lá quebra o build inteiro. Uma
+// constante em dois arquivos é uma constante que um dia diverge.
+// ============================================================
+export const SEM_VINCULO = "__sem__";

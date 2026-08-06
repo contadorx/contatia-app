@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { renderTemplate, addDaysISO, channelLabel, type Channel } from "@/lib/cadence";
 import { variacoesDoPasso, escolherVariacao } from "@/lib/variacoes";
 import { isManager } from "@/lib/permissions";
+import { logAction } from "@/lib/actionLog";
 
 async function ctx() {
   const supabase = createClient();
@@ -561,4 +562,206 @@ export async function deleteSequence(id: string, force = false) {
   revalidatePath("/dashboard/cadencias");
   revalidatePath("/dashboard");
   return { ok: true, removed: ativos };
+}
+
+// ============================================================
+// REAPLICAR O TEXTO DA CADÊNCIA NAS TAREFAS PENDENTES
+//
+// O texto é renderizado e GRAVADO dentro de cada tarefa no momento da inscrição —
+// `{{primeiro_nome}}` já virou "Adriana" ali. É isso que faz o envio ser rápido e
+// previsível, e é isso que faz editar a cadência NÃO mexer em quem já está inscrito.
+// Consertar a mensagem depois de inscrever 260 contatos não consertava nada: a fila
+// continuava com o texto velho, e a única saída era editar tarefa por tarefa.
+//
+// Esta ação fecha esse buraco, com quatro travas:
+//
+//  1. SÓ O QUE NÃO SAIU. Tarefa `done` ou `skipped` é história — mexer nela seria
+//     reescrever o passado e estragar o relatório do que foi de fato enviado.
+//  2. TEXTO ESCRITO POR GENTE FICA. `body_editado` (0112) marca a tarefa que alguém
+//     ajustou na fila; ela é pulada por padrão, e incluí-la é escolha explícita.
+//  3. SIMULA ANTES. `simularReaplicacao` devolve os números e exemplos ANTES/DEPOIS
+//     reais, com os dados do contato — porque "confie em mim" não é revisão.
+//  4. ORÇAMENTO DE TEMPO. Base grande não cabe numa execução; a volta devolve
+//     `incompleto` e a tela chama de novo até zerar, igual à exclusão em massa.
+//
+// A variação da mensagem (0111) é reescolhida pela MESMA regra determinística da
+// inscrição: mesmo contato, mesma versão — a não ser que você tenha mudado as versões,
+// que é justamente o que se quer propagar.
+// ============================================================
+const ORCAMENTO_REAPLICAR_MS = 35_000;
+const FATIA_TAREFAS = 200;
+
+type LinhaPreparada = {
+  id: string;
+  contato: string;
+  canal: string;
+  antes: string;
+  depois: string;
+  tituloDepois: string | null;
+  variacao: number;
+  editada: boolean;
+};
+
+async function prepararReaplicacao(
+  supabase: any,
+  sequenceId: string,
+  opts: { limite: number }
+): Promise<{ linhas: LinhaPreparada[]; editadas: number; total: number; semColunaEditado: boolean; error?: string }> {
+  const { data: steps } = await supabase
+    .from("sequence_steps")
+    // `*`: `body_variants` nasce na 0111 e, pedida pelo nome, derrubaria tudo antes dela
+    .select("*")
+    .eq("sequence_id", sequenceId)
+    .order("position", { ascending: true });
+  if (!steps?.length) return { linhas: [], editadas: 0, total: 0, semColunaEditado: false, error: "Cadência sem passos." };
+
+  const porPosicao = new Map<number, any>();
+  for (const s of steps as any[]) porPosicao.set(Number(s.position), s);
+
+  // matrículas vivas desta cadência (quem respondeu ou terminou não entra)
+  const { data: enrs } = await supabase
+    .from("enrollments")
+    .select("id")
+    .eq("sequence_id", sequenceId)
+    .in("status", ["active", "paused"])
+    .order("id", { ascending: true })
+    .limit(5000);
+  const enrollmentIds = ((enrs as any[]) || []).map((e) => e.id);
+  if (!enrollmentIds.length) return { linhas: [], editadas: 0, total: 0, semColunaEditado: false };
+
+  const tarefas: any[] = [];
+  let semColunaEditado = false;
+  for (let i = 0; i < enrollmentIds.length; i += FATIA_TAREFAS) {
+    const fatia = enrollmentIds.slice(i, i + FATIA_TAREFAS);
+    let { data, error } = await supabase
+      .from("tasks")
+      .select("id, channel, title, generated_content, step_position, contact_id, body_editado, contacts(*)")
+      .in("enrollment_id", fatia)
+      .eq("status", "pending")
+      .order("due_date", { ascending: true });
+    if (error && ((error as any).code === "PGRST204" || (error as any).code === "42703")) {
+      // 0112 ainda não aplicada: seguimos sem distinguir editadas, e a tela avisa.
+      semColunaEditado = true;
+      const r2 = await supabase
+        .from("tasks")
+        .select("id, channel, title, generated_content, step_position, contact_id, contacts(*)")
+        .in("enrollment_id", fatia)
+        .eq("status", "pending")
+        .order("due_date", { ascending: true });
+      data = r2.data as any;
+      error = r2.error as any;
+    }
+    if (error) return { linhas: [], editadas: 0, total: 0, semColunaEditado, error: msgErro(error) };
+    tarefas.push(...(((data as any[]) || [])));
+  }
+
+  let editadas = 0;
+  const linhas: LinhaPreparada[] = [];
+  for (const t of tarefas) {
+    const passo = porPosicao.get(Number(t.step_position));
+    if (!passo) continue;                       // passo removido da cadência: não inventa texto
+    if (t.body_editado) { editadas++; continue; }
+
+    const contato = t.contacts || {};
+    const redacoes = variacoesDoPasso(passo.body_template, (passo as any).body_variants);
+    const escolha = escolherVariacao(redacoes, `${t.contact_id}:${passo.position}`);
+    const depois = renderTemplate(escolha.texto || passo.body_template, contato) || "";
+    const titulo =
+      passo.channel === "email"
+        ? renderTemplate(passo.subject, contato) || (channelLabel as any)[passo.channel]
+        : null;
+
+    const antes = String(t.generated_content || "");
+    const mudouTexto = antes.trim() !== depois.trim();
+    const mudouTitulo = passo.channel === "email" && String(t.title || "").trim() !== String(titulo || "").trim();
+    if (!mudouTexto && !mudouTitulo) continue;  // já está igual: não gasta escrita
+
+    linhas.push({
+      id: t.id,
+      contato: (contato.name as string) || "(sem nome)",
+      canal: t.channel,
+      antes,
+      depois,
+      tituloDepois: titulo,
+      variacao: escolha.indice,
+      editada: false,
+    });
+    if (linhas.length >= opts.limite) break;
+  }
+
+  return { linhas, editadas, total: linhas.length, semColunaEditado };
+}
+
+// Mostra o que MUDARIA, sem escrever nada. É a revisão que faltava antes de 260
+// mensagens saírem com o texto errado.
+export async function simularReaplicacao(sequenceId: string): Promise<{
+  ok?: boolean; mudam?: number; editadas?: number; semColunaEditado?: boolean;
+  exemplos?: { contato: string; canal: string; antes: string; depois: string }[];
+  error?: string;
+}> {
+  const { supabase, user_id } = await ctx();
+  if (!(await canUseSequence(supabase, user_id, sequenceId))) return { error: "Cadência não encontrada." };
+  const r = await prepararReaplicacao(supabase, sequenceId, { limite: 5000 });
+  if (r.error) return { error: r.error };
+  return {
+    ok: true,
+    mudam: r.linhas.length,
+    editadas: r.editadas,
+    semColunaEditado: r.semColunaEditado,
+    exemplos: r.linhas.slice(0, 3).map((l) => ({
+      contato: l.contato,
+      canal: l.canal,
+      antes: l.antes.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 220),
+      depois: l.depois.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 220),
+    })),
+  };
+}
+
+export async function reaplicarTextos(sequenceId: string): Promise<{
+  ok?: boolean; atualizadas?: number; editadasPuladas?: number; incompleto?: boolean; error?: string;
+}> {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  if (!(await canUseSequence(supabase, user_id, sequenceId))) return { error: "Cadência não encontrada." };
+
+  const inicio = Date.now();
+  const r = await prepararReaplicacao(supabase, sequenceId, { limite: 2000 });
+  if (r.error) return { error: r.error };
+  if (!r.linhas.length) return { ok: true, atualizadas: 0, editadasPuladas: r.editadas };
+
+  let atualizadas = 0;
+  let incompleto = false;
+  for (const l of r.linhas) {
+    if (Date.now() - inicio > ORCAMENTO_REAPLICAR_MS) { incompleto = true; break; }
+    const patch: Record<string, unknown> = { generated_content: l.depois, body_variant: l.variacao };
+    if (l.tituloDepois !== null) patch.title = l.tituloDepois;
+    let { error } = await supabase.from("tasks").update(patch).eq("id", l.id).eq("status", "pending");
+    if (error && ((error as any).code === "PGRST204" || (error as any).code === "42703")) {
+      // 0111 não aplicada: grava sem o número da variação (o texto é o que importa)
+      const { body_variant, ...semVariacao } = patch as any;
+      const r2 = await supabase.from("tasks").update(semVariacao).eq("id", l.id).eq("status", "pending");
+      error = r2.error as any;
+    }
+    if (error) return { ok: true, atualizadas, editadasPuladas: r.editadas, error: msgErro(error) };
+    atualizadas++;
+  }
+
+  // registro: reescrever a fila de 260 pessoas sem deixar rastro seria pior que o bug
+  await logAction(supabase, {
+    tenant_id,
+    user_id,
+    action: "cadence_reapply_text",
+    entity: "sequence",
+    entity_id: sequenceId,
+    qtd: atualizadas,
+    detail:
+      `Reaplicou o texto da cadência em ${atualizadas} tarefa(s) pendente(s)` +
+      (r.editadas ? ` — ${r.editadas} editada(s) à mão foram preservadas` : "") +
+      (incompleto ? " (volta parcial: orçamento de tempo)" : "") + ".",
+    meta: { atualizadas, editadasPuladas: r.editadas, incompleto },
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/cadencias");
+  return { ok: true, atualizadas, editadasPuladas: r.editadas, incompleto };
 }

@@ -1,24 +1,21 @@
 Contatia — versão deste pacote
 ==============================
-v2026.08.06-57
+v2026.08.06-59
 
-⚠ A migration 0111_variacoes_mensagem.sql (entregue no pacote anterior) continua
-   pendente se você ainda não aplicou — ela é das VARIAÇÕES de mensagem.
-   O copiloto de IA desta versão NÃO precisa de migration.
+⚠ DUAS MIGRATIONS PENDENTES (entregues à parte, aplicar no SQL Editor):
+   0111_variacoes_mensagem.sql       → várias redações por passo
+   0112_texto_editado_na_tarefa.sql  → marca a tarefa editada à mão
+   Sem a 0112, a reaplicação de texto não distingue o que você editou — a tela avisa.
 
 O que entrou agora:
-· Copiloto de resposta na caixa Respostas: botão "✨ Rascunhar resposta".
-  Estimulado, nunca automático — o texto cai na caixa para você editar e enviar.
-  Lê a conversa dos dois lados, os toques da cadência que já saíram, os sinais
-  (abriu/clicou/abriu proposta), quem é o lead, o produto e o contexto de negócio
-  que você já escreveu para a IA de cadência.
-· Campo opcional "dizer o que responder": você dá a intenção em uma linha, a IA
-  cuida da forma.
-· "desfazer" devolve o texto que estava na caixa antes do rascunho.
-· Usa a MESMA cota mensal de IA das cadências, e mostra quanto já foi usado.
+· Em Cadências, por cadência: "Atualizar toques pendentes".
+  Simula primeiro (quantas mudam + 3 exemplos ANTES → DEPOIS com dados reais) e só
+  então oferece o botão que escreve.
+· Só mexe em tarefa PENDENTE. O que já foi enviado fica intacto.
+· Tarefa editada à mão na fila é preservada (body_editado, 0112).
+· Reescolhe a variação da mensagem pela mesma regra determinística da inscrição.
+· Fica registrado em Resultados → Registro (quantas, quantas preservadas).
 
-Requer ANTHROPIC_API_KEY no ambiente (já usada pelas outras IAs do app) ou a
-chave própria do workspace em Config.
+Inclui tudo de 49 a 58.
 
-COMO CONFERIR SE ESTÁ NO AR
-Rodapé do menu lateral: "v2026.08.06-57" + os 7 primeiros do commit.
+COMO CONFERIR: rodapé do menu = "v2026.08.06-59" + 7 do commit.

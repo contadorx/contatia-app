@@ -25,6 +25,10 @@ export default async function Contatos({
     semcontato?: string;
     view?: string;
     email?: string;
+    // filtro negativo: ?tag_nao=1 inverte a caixa de tags, e assim por diante
+    tag_nao?: string;
+    produto_nao?: string;
+    cadencia_nao?: string;
   };
 }) {
   const supabase = createClient();
@@ -39,6 +43,10 @@ export default async function Contatos({
   const q = (searchParams.q || "").trim();
   // veredito do e-mail: bate | caixa | outro | sem
   const emailFiltro = (searchParams.email || "").trim();
+  // "1" = a caixa vira negativa ("não tem nenhuma destas")
+  const tagNao = searchParams.tag_nao === "1";
+  const produtoNao = searchParams.produto_nao === "1";
+  const cadenciaNao = searchParams.cadencia_nao === "1";
 
   const { data: { user } } = await supabase.auth.getUser();
   const { data: me } = await supabase.from("profiles").select("role, team_role").eq("id", user?.id ?? "").maybeSingle();
@@ -50,7 +58,7 @@ export default async function Contatos({
   // O filtro é montado por consultaContatos (@/lib/contatosFiltro) — o MESMO código que
   // a exclusão em massa usa. Antes essa lógica vivia só aqui; se a ação em lote a
   // recriasse "parecida", uma diferença sutil apagaria contatos fora do filtro.
-  const filtro = { q, view, tag: tagFilter, produto: produtoFilter, cadencia: cadenciaFilter, frio, responsavel: responsavelFilter, email: emailFiltro };
+  const filtro = { q, view, tag: tagFilter, produto: produtoFilter, cadencia: cadenciaFilter, frio, responsavel: responsavelFilter, email: emailFiltro, tagNao, produtoNao, cadenciaNao };
 
   // varrerContatos é a porta única: sem filtro de e-mail é a consulta de sempre; com
   // ele, passa pela peneira em JS e devolve TAMBÉM o total real do conjunto.
@@ -134,6 +142,9 @@ export default async function Contatos({
         frio={frio}
         responsavel={responsavelFilter}
         email={emailFiltro}
+        tagNao={tagNao}
+        produtoNao={produtoNao}
+        cadenciaNao={cadenciaNao}
         tags={tagList}
         produtos={produtoList}
         cadencias={seqs}

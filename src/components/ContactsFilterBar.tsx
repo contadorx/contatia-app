@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import SmartSelect from "@/components/SmartSelect";
-import { paraUrl, contarFacetas, SEM_DONO } from "@/lib/filtros";
+import { paraUrl, contarFacetas, SEM_DONO, SEM_VINCULO } from "@/lib/filtros";
 
 type Opt = { id: string; name: string };
 
@@ -22,12 +22,14 @@ const VIEWS: { v: string; label: string; tone?: "danger" | "warn" }[] = [
 
 export default function ContactsFilterBar({
   view, q, tag, produto, cadencia, frio, responsavel, email,
+  tagNao = false, produtoNao = false, cadenciaNao = false,
   tags, produtos, cadencias, membros,
 }: {
   // tag/produto/cadencia/responsavel são MULTI (arrays); frio e e-mail seguem single
   // (um contato tem UM veredito de e-mail; marcar dois não quer dizer nada).
   view: string; q: string; tag: string[]; produto: string[]; cadencia: string[]; frio: string;
   responsavel: string[]; email: string;
+  tagNao?: boolean; produtoNao?: boolean; cadenciaNao?: boolean;
   tags: Opt[]; produtos: Opt[]; cadencias: Opt[]; membros: Opt[];
 }) {
   const router = useRouter();
@@ -94,7 +96,14 @@ export default function ContactsFilterBar({
       {/* Filtros detalhados — recolhidos por padrão */}
       {open && (
         <div className="flex flex-wrap items-end gap-3 rounded-xl border border-line bg-surface p-3">
-          <Field label="Tag">
+          <Field
+            label={
+              <>
+                Tag{tagNao ? " — NÃO tem" : ""}
+                <BotaoNao ativo={tagNao} o="a tag escolhida" onClick={() => go({ tag_nao: tagNao ? "" : "1" })} />
+              </>
+            }
+          >
             <div className="w-[200px]">
               <SmartSelect
                 multiple
@@ -102,11 +111,18 @@ export default function ContactsFilterBar({
                 className="py-1.5 text-sm"
                 values={tag}
                 onValuesChange={(v) => go({ tag: paraUrl(v) })}
-                options={tags.map((t) => ({ value: t.id, label: t.name }))}
+                options={[{ value: SEM_VINCULO, label: "— sem tag nenhuma —" }, ...tags.map((t) => ({ value: t.id, label: t.name }))]}
               />
             </div>
           </Field>
-          <Field label="Produto">
+          <Field
+            label={
+              <>
+                Produto{produtoNao ? " — NÃO tem" : ""}
+                <BotaoNao ativo={produtoNao} o="o produto escolhido" onClick={() => go({ produto_nao: produtoNao ? "" : "1" })} />
+              </>
+            }
+          >
             <div className="w-[200px]">
               <SmartSelect
                 multiple
@@ -118,7 +134,14 @@ export default function ContactsFilterBar({
               />
             </div>
           </Field>
-          <Field label="Cadência">
+          <Field
+            label={
+              <>
+                Cadência{cadenciaNao ? " — NÃO está" : ""}
+                <BotaoNao ativo={cadenciaNao} o="a cadência escolhida" onClick={() => go({ cadencia_nao: cadenciaNao ? "" : "1" })} />
+              </>
+            }
+          >
             <div className="w-[200px]">
               <SmartSelect
                 multiple
@@ -126,7 +149,11 @@ export default function ContactsFilterBar({
                 className="py-1.5 text-sm"
                 values={cadencia}
                 onValuesChange={(v) => go({ cadencia: paraUrl(v) })}
-                options={cadencias.map((c) => ({ value: c.id, label: c.name }))}
+                options={[
+                  // o caso que motivou tudo isto: quem nunca entrou em cadência nenhuma
+                  { value: SEM_VINCULO, label: "— nunca entrou em cadência —" },
+                  ...cadencias.map((c) => ({ value: c.id, label: c.name })),
+                ]}
               />
             </div>
           </Field>
@@ -186,7 +213,7 @@ export default function ContactsFilterBar({
             {email && email !== "sem" && " O filtro de e-mail lê endereço por endereço — em base grande a lista demora alguns segundos."}
           </p>
           {detailedCount > 0 && (
-            <button type="button" className="pb-1.5 text-xs text-subtle hover:text-danger" onClick={() => go({ tag: "", produto: "", cadencia: "", frio: "", responsavel: "", email: "" })}>
+            <button type="button" className="pb-1.5 text-xs text-subtle hover:text-danger" onClick={() => go({ tag: "", produto: "", cadencia: "", frio: "", responsavel: "", email: "", tag_nao: "", produto_nao: "", cadencia_nao: "" })}>
               limpar filtros
             </button>
           )}
@@ -196,10 +223,33 @@ export default function ContactsFilterBar({
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+// ============================================================
+// O BOTÃO "≠" — inverter a caixa em vez de duplicar a barra de filtros
+//
+// A alternativa seria uma segunda caixa "sem a tag…" ao lado de cada uma, o que dobra
+// a barra e obriga a ler duas para saber o que está filtrado. Um botão que INVERTE a
+// caixa ao lado dela diz a mesma coisa em um caractere, e o rótulo muda junto ("Tag" →
+// "Tag — NÃO tem") para ninguém ler o filtro ao contrário.
+// ============================================================
+function BotaoNao({ ativo, onClick, o }: { ativo: boolean; onClick: () => void; o: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`ml-1 rounded px-1 text-[11px] font-bold leading-none ${
+        ativo ? "bg-danger text-white" : "bg-muted text-subtle hover:text-ink"
+      }`}
+      title={ativo ? `Voltar para "tem ${o}"` : `Inverter: mostrar quem NÃO tem ${o}`}
+    >
+      ≠
+    </button>
+  );
+}
+
+function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
     <div>
-      <span className="mb-0.5 block text-[11px] text-subtle">{label}</span>
+      <span className="mb-0.5 flex items-center text-[11px] text-subtle">{label}</span>
       {children}
     </div>
   );

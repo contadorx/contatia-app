@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.06-57";
+export const VERSAO_APP = "2026.08.06-59";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "copiloto de resposta com IA na caixa Respostas: rascunho estimulado, le conversa, toques e sinais do lead";
+export const VERSAO_NOTAS = "reaplicar o texto da cadencia nas tarefas pendentes, com simulacao antes/depois e preservando o que foi editado a mao";

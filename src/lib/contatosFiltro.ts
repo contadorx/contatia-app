@@ -14,7 +14,7 @@ import "server-only";
 
 import { HOT_THRESHOLD } from "@/lib/scoring";
 import { contatoIdsPorProduto } from "@/lib/produtos";
-import { comoLista, SEM_DONO } from "@/lib/filtros";
+import { comoLista, SEM_DONO, SEM_VINCULO } from "@/lib/filtros";
 import { vereditoEmail, VEREDITOS_EMAIL } from "@/lib/emailVeredito";
 
 const NENHUM = "00000000-0000-0000-0000-000000000000";
@@ -41,7 +41,28 @@ export type FiltroContatos = {
   frio?: string;                 // "15" | "30" | "nunca"
   responsavel?: string[];        // ids de profiles; "__sem__" = sem dono
   email?: string;                // veredito: bate | caixa | outro | sem
+  // ---- FILTRO NEGATIVO (ver o bloco "O QUE NÃO TEM" mais abaixo) ----
+  // Em cada faceta de vínculo, `true` inverte: em vez de "tem alguma destas", vira
+  // "não tem nenhuma destas". O valor especial SEM_VINCULO ("__sem__") dentro da lista
+  // significa "não tem NENHUMA", sem precisar escolher quais.
+  tagNao?: boolean;
+  produtoNao?: boolean;
+  cadenciaNao?: boolean;
 };
+
+// ============================================================
+// O QUE NÃO TEM — o filtro que faltava
+//
+// Toda a barra de filtros respondia "quem TEM isto". A pergunta que sobra na operação
+// é a oposta, e é ela que gera trabalho: quem ainda não entrou em cadência nenhuma,
+// quem não tem tag, quem não está ligado a produto nenhum. Sem isso, achar os 3.000
+// contatos importados que ninguém tocou dependia de exportar tudo e cruzar na planilha.
+//
+// O mecanismo é o mesmo do filtro positivo — a lista de ids de quem TEM —, só que
+// aplicada ao contrário. E entra na mesma peneira: "quem já está em cadência" costuma
+// ser uma lista grande demais para caber numa URL, que foi o Bad Request de ontem.
+// ============================================================
+export { SEM_VINCULO } from "@/lib/filtros";
 
 
 // A busca passa por saneamento: `%`, `*`, vírgula e parênteses viram espaço, porque
@@ -76,6 +97,9 @@ export function normalizarFiltro(f: any): FiltroContatos {
       const bons = pedidos.filter((x) => x === SEM_DONO || /^[0-9a-f-]{36}$/i.test(x));
       return bons.length ? bons : [NENHUM];
     })(),
+    tagNao: !!f?.tagNao,
+    produtoNao: !!f?.produtoNao,
+    cadenciaNao: !!f?.cadenciaNao,
     email: (() => {
       const bruto = typeof f?.email === "string" ? f.email.trim() : "";
       if (!bruto) return "";
@@ -128,17 +152,26 @@ export function precisaPeneira(filtro: any): boolean {
 const TETO_IDS_NA_URL = 250;
 
 export function listasGrandes(pre: Preparo): boolean {
-  return (pre.idsFacetas?.length ?? 0) > TETO_IDS_NA_URL || pre.emCadencia.length > TETO_IDS_NA_URL;
+  return (
+    (pre.idsFacetas?.length ?? 0) > TETO_IDS_NA_URL ||
+    pre.emCadencia.length > TETO_IDS_NA_URL ||
+    pre.idsExcluidos.length > TETO_IDS_NA_URL
+  );
 }
 
 type Contexto = { gerente: boolean; userId?: string | null; tenantId?: string | null };
 
 // O que é caro e não muda entre as páginas de uma mesma varredura.
-export type Preparo = { idsFacetas: string[] | null; emCadencia: string[] };
+export type Preparo = {
+  idsFacetas: string[] | null;
+  // ids a EXCLUIR vindos das facetas negativas ("sem cadência nenhuma", "sem a tag X")
+  idsExcluidos: string[];
+  emCadencia: string[];
+};
 
 export async function prepararFiltro(supabase: any, filtro: FiltroContatos): Promise<Preparo> {
   const f = normalizarFiltro(filtro);
-  const idsFacetas = await idsDasFacetas(supabase, f);
+  const { incluir: idsFacetas, excluir: idsExcluidos } = await idsDasFacetas(supabase, f);
   // "prontos" e "resgatar" excluem quem já está em cadência ativa. Paginado pelo mesmo
   // motivo das facetas: com mais de 1.000 matrículas ativas, a tela excluiria um
   // conjunto e a exclusão outro.
@@ -149,7 +182,7 @@ export async function prepararFiltro(supabase: any, filtro: FiltroContatos): Pro
       "contact_id"
     )));
   }
-  return { idsFacetas, emCadencia };
+  return { idsFacetas, idsExcluidos, emCadencia };
 }
 
 // Lê TODAS as páginas de uma tabela de vínculo. Sem isto o PostgREST devolve só as
@@ -167,39 +200,99 @@ async function todosOsVinculos(consulta: (de: number, ate: number) => any, campo
 }
 
 // As três facetas que restringem por LISTA DE IDS (tag, produto, cadência) são
-// resolvidas antes e intersectadas: dentro da caixa é OU, entre caixas é E.
-async function idsDasFacetas(supabase: any, f: FiltroContatos): Promise<string[] | null> {
+// resolvidas antes: dentro da caixa é OU, entre caixas é E. Com a negação ligada, a
+// mesma lista vira EXCLUSÃO — e `__sem__` quer dizer "não tem nenhuma", que é a lista
+// de quem tem QUALQUER uma.
+async function idsDasFacetas(
+  supabase: any,
+  f: FiltroContatos
+): Promise<{ incluir: string[] | null; excluir: string[] }> {
   const restricoes: string[][] = [];
+  const excluir = new Set<string>();
 
-  if (f.tag?.length) {
-    // ordem estável + paginação: com várias tags há uma linha POR TAG por contato,
-    // então o teto de 1.000 estoura ainda mais rápido que com uma tag só.
-    restricoes.push(
-      await todosOsVinculos(
-        (de, ate) => supabase.from("contact_tags").select("contact_id").in("tag_id", f.tag!).order("contact_id", { ascending: true }).range(de, ate),
-        "contact_id"
-      )
+  // quem tem QUALQUER tag / produto / cadência (para o "não tem nenhuma")
+  const comQualquerTag = () =>
+    todosOsVinculos(
+      (de, ate) => supabase.from("contact_tags").select("contact_id").order("contact_id", { ascending: true }).range(de, ate),
+      "contact_id"
     );
-  }
-  if (f.produto?.length) {
-    restricoes.push(await contatoIdsPorProduto(supabase, f.produto));
-  }
-  if (f.cadencia?.length) {
-    restricoes.push(
-      await todosOsVinculos(
-        (de, ate) => supabase.from("enrollments").select("contact_id").in("sequence_id", f.cadencia!).in("status", ["active", "paused"]).order("contact_id", { ascending: true }).range(de, ate),
-        "contact_id"
-      )
+  const comQualquerCadencia = () =>
+    todosOsVinculos(
+      // TODAS as matrículas, em qualquer estado: quem terminou uma cadência já entrou
+      // numa — e a pergunta aqui é "nunca entrou em nenhuma".
+      (de, ate) => supabase.from("enrollments").select("contact_id").order("contact_id", { ascending: true }).range(de, ate),
+      "contact_id"
     );
+
+  const facetas: {
+    valores: string[];
+    negar: boolean;
+    doValor: () => Promise<string[]>;
+    deQualquer: () => Promise<string[]>;
+  }[] = [
+    {
+      valores: f.tag || [],
+      negar: !!f.tagNao,
+      // ordem estável + paginação: com várias tags há uma linha POR TAG por contato,
+      // então o teto de 1.000 estoura ainda mais rápido que com uma tag só.
+      doValor: () =>
+        todosOsVinculos(
+          (de, ate) => supabase.from("contact_tags").select("contact_id").in("tag_id", (f.tag || []).filter((t) => t !== SEM_VINCULO)).order("contact_id", { ascending: true }).range(de, ate),
+          "contact_id"
+        ),
+      deQualquer: comQualquerTag,
+    },
+    {
+      valores: f.produto || [],
+      negar: !!f.produtoNao,
+      doValor: () => contatoIdsPorProduto(supabase, (f.produto || []).filter((p) => p !== SEM_VINCULO)),
+      // "sem produto nenhum" = quem não aparece em vínculo de produto algum. A função
+      // de produtos só sabe consultar por ids, então a lista de "qualquer" é a união
+      // dos produtos pedidos quando houver, e vazia quando não houver nenhum escolhido
+      // — nesse caso o `__sem__` sozinho não tem como ser resolvido e a faceta não
+      // aplica condição (melhor não filtrar do que filtrar errado).
+      deQualquer: async () => [],
+    },
+    {
+      valores: f.cadencia || [],
+      negar: !!f.cadenciaNao,
+      doValor: () =>
+        todosOsVinculos(
+          (de, ate) => supabase.from("enrollments").select("contact_id").in("sequence_id", (f.cadencia || []).filter((c) => c !== SEM_VINCULO)).in("status", ["active", "paused"]).order("contact_id", { ascending: true }).range(de, ate),
+          "contact_id"
+        ),
+      deQualquer: comQualquerCadencia,
+    },
+  ];
+
+  for (const faceta of facetas) {
+    if (!faceta.valores.length) continue;
+    const querSemNenhuma = faceta.valores.includes(SEM_VINCULO);
+    const escolhidos = faceta.valores.filter((v) => v !== SEM_VINCULO);
+
+    if (querSemNenhuma) {
+      // "não tem nenhuma" ganha da escolha de valores específicos: pedir as duas
+      // coisas na mesma caixa não quer dizer nada, e a leitura óbvia é a mais ampla.
+      for (const id of await faceta.deQualquer()) excluir.add(id);
+      continue;
+    }
+    if (!escolhidos.length) continue;
+
+    const ids = await faceta.doValor();
+    if (faceta.negar) for (const id of ids) excluir.add(id);
+    else restricoes.push(ids);
   }
 
-  if (!restricoes.length) return null;
   // Set para a interseção: com dezenas de milhares de ids, o .includes() em array
   // vira O(n²) e a página trava antes de qualquer consulta sair.
-  return restricoes.reduce((acc, cur) => {
-    const s = new Set(cur);
-    return acc.filter((id) => s.has(id));
-  });
+  const incluir = restricoes.length
+    ? restricoes.reduce((acc, cur) => {
+        const s2 = new Set(cur);
+        return acc.filter((id) => s2.has(id));
+      })
+    : null;
+
+  return { incluir, excluir: Array.from(excluir) };
 }
 
 // Monta a consulta já com TODAS as condições aplicadas. Quem chama decide o `select`,
@@ -243,7 +336,7 @@ export async function consultaContatos(
     );
   }
 
-  const { idsFacetas, emCadencia } = preparo;
+  const { idsFacetas, idsExcluidos, emCadencia } = preparo;
 
   let q = supabase
     .from("contacts")
@@ -256,6 +349,8 @@ export async function consultaContatos(
 
   // um id impossível quando a interseção deu vazia: "nenhum" e não "todos"
   if (idsFacetas) q = q.in("id", idsFacetas.length ? idsFacetas : [NENHUM]);
+  // filtro negativo: fora quem tem o vínculo que se pediu para NÃO ter
+  if (idsExcluidos.length) q = q.not("id", "in", `(${idsExcluidos.join(",")})`);
   // tenant explícito quando o chamador souber: a RLS já isola, mas este módulo é a
   // fonte de uma EXCLUSÃO — se um dia alguém passar aqui o client de service role
   // (como os crons fazem), sem esta linha a consulta atravessaria workspaces.
@@ -366,10 +461,14 @@ async function peneirar(
   // filtrar lá é sempre melhor, porque encurta a varredura.
   const facetasGrandes = (pre.idsFacetas?.length ?? 0) > TETO_IDS_NA_URL;
   const cadenciaGrande = pre.emCadencia.length > TETO_IDS_NA_URL;
+  const excluidosGrandes = pre.idsExcluidos.length > TETO_IDS_NA_URL;
   const incluir = facetasGrandes ? new Set(pre.idsFacetas as string[]) : null;
-  const excluir = cadenciaGrande ? new Set(pre.emCadencia) : null;
+  const excluir = cadenciaGrande || excluidosGrandes
+    ? new Set([...(cadenciaGrande ? pre.emCadencia : []), ...(excluidosGrandes ? pre.idsExcluidos : [])])
+    : null;
   const paraOBanco: Preparo = {
     idsFacetas: facetasGrandes ? null : pre.idsFacetas,
+    idsExcluidos: excluidosGrandes ? [] : pre.idsExcluidos,
     emCadencia: cadenciaGrande ? [] : pre.emCadencia,
   };
 

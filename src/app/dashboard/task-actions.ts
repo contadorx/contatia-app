@@ -149,7 +149,15 @@ async function enviarUm(
     const patch: Record<string, unknown> = {};
     if (override.subject !== undefined) patch.title = override.subject;
     if (override.body !== undefined) patch.generated_content = override.body;
-    if (Object.keys(patch).length) await supabase.from("tasks").update(patch).eq("id", taskId);
+    if (Object.keys(patch).length) {
+      // `body_editado` (0112): texto escrito por gente não pode ser sobrescrito pela
+      // reaplicação do texto da cadência. Se a coluna ainda não existe, grava sem ela —
+      // um PGRST204 aqui impediria o próprio envio.
+      const { error } = await supabase.from("tasks").update({ ...patch, body_editado: true }).eq("id", taskId);
+      if (error && ((error as any).code === "PGRST204" || (error as any).code === "42703")) {
+        await supabase.from("tasks").update(patch).eq("id", taskId);
+      }
+    }
   }
 
   const { data: task } = await supabase
@@ -450,7 +458,13 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
   }
 
   if (overrideBody !== undefined) {
-    await supabase.from("tasks").update({ generated_content: overrideBody }).eq("id", taskId);
+    const { error } = await supabase
+      .from("tasks")
+      .update({ generated_content: overrideBody, body_editado: true })
+      .eq("id", taskId);
+    if (error && ((error as any).code === "PGRST204" || (error as any).code === "42703")) {
+      await supabase.from("tasks").update({ generated_content: overrideBody }).eq("id", taskId);
+    }
   }
 
   const { data: task } = await supabase

@@ -3,6 +3,7 @@ import CadenceStart from "@/components/CadenceStart";
 import { SaveAsTemplateButton } from "@/components/TemplateGallery";
 import EditSequenceButton from "@/components/EditSequenceButton";
 import { CadenceReport } from "@/components/CadenceReport";
+import ReaplicarTextos from "@/components/ReaplicarTextos";
 import { listTemplates } from "@/app/dashboard/cadencias/actions";
 import { channelLabel, type Channel } from "@/lib/cadence";
 import { isManager } from "@/lib/permissions";
@@ -169,10 +170,14 @@ export default async function Cadencias({
                       {box?.from_email ? `${prod?.name ? " · " : ""}Caixa: ${box.from_email}` : prod?.name ? " · Caixa do produto" : ""}
                     </p>
                   )}
-                  <div className="mt-2 flex items-center gap-3">
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
                     <EditSequenceButton sequenceId={s.id} products={productOpts} accounts={accountOpts} documentos={docOpts} />
                     <span className="text-xs text-subtle">·</span>
                     <SaveAsTemplateButton sequenceId={s.id} />
+                    <span className="text-xs text-subtle">·</span>
+                    {/* editar a cadência não mexe em quem já está inscrito — este é o
+                        caminho para o texto novo alcançar a fila que já existe */}
+                    <ReaplicarTextos sequenceId={s.id} nome={s.name} />
                   </div>
                   <CadenceReport sequenceId={s.id} />
                 </div>
