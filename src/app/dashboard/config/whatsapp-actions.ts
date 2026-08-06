@@ -21,10 +21,13 @@ async function ctx() {
 // ============================================================
 // O cliente escolhe o NÍVEL do canal WhatsApp:
 //   'assistido' → link wa.me (zero risco). Não precisa de nada.
-//   'evolution' → API não-oficial (com risco). Exige ACEITE registrado uma vez.
+//   'hibrido'   → primeiro toque na MÃO (link), mas com a sessão vinculada para
+//                 receber, verificar número e responder conversa aberta. Exige o mesmo
+//                 aceite: quem carrega o risco é a SESSÃO, não o envio.
+//   'evolution' → API não-oficial ponta a ponta (com risco). Exige ACEITE registrado.
 // A API oficial da Meta é roadmap (não selecionável aqui ainda).
 // ============================================================
-export async function setWhatsAppMode(mode: "assistido" | "evolution", ackRisk?: boolean) {
+export async function setWhatsAppMode(mode: "assistido" | "hibrido" | "evolution", ackRisk?: boolean) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
 
@@ -36,12 +39,12 @@ export async function setWhatsAppMode(mode: "assistido" | "evolution", ackRisk?:
     return { ok: true };
   }
 
-  // modo Evolution: exige o aceite de risco (uma vez por workspace)
+  // sessão vinculada (híbrido ou Evolution): aceite de risco, uma vez por workspace
   const { data: t } = await supabase.from("tenants").select("whatsapp_risk_ack_at").eq("id", tenant_id).maybeSingle();
   const jaAceitou = !!(t as any)?.whatsapp_risk_ack_at;
   if (!jaAceitou && !ackRisk) return { needsAck: true };
 
-  const patch: Record<string, unknown> = { whatsapp_mode: "evolution" };
+  const patch: Record<string, unknown> = { whatsapp_mode: mode };
   if (!jaAceitou && ackRisk) {
     patch.whatsapp_risk_ack_at = new Date().toISOString();
     patch.whatsapp_risk_ack_by = user_id ?? null;
@@ -247,8 +250,9 @@ export async function criarMinhaInstancia() {
   }
 
   const { data: t } = await supabase.from("tenants").select("whatsapp_mode").eq("id", tenant_id).maybeSingle();
-  if ((t as any)?.whatsapp_mode !== "evolution") {
-    return { error: "Ative o modo Evolution acima antes de conectar um número." };
+  const { temSessao } = await import("@/lib/waModo");
+  if (!temSessao((t as any)?.whatsapp_mode)) {
+    return { error: "Escolha o modo híbrido ou o automático acima antes de conectar um número." };
   }
 
   // já tem? devolve a que existe — o botão vira "reconectar" sem criar duplicata

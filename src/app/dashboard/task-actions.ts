@@ -397,10 +397,14 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
 
-  // envio automático só no modo Evolution; no assistido o envio é manual pelo link
+  // O PRIMEIRO TOQUE automático é exclusividade do modo Evolution. No assistido e no
+  // híbrido ele sai pela mão — no híbrido isso é escolha, não limitação: a sessão está
+  // lá para receber, verificar e responder, e o disparo em massa é justamente a parte
+  // que mais chama atenção.
   const { data: tmode } = await supabase.from("tenants").select("whatsapp_mode").eq("id", tenant_id).maybeSingle();
-  if (((tmode as any)?.whatsapp_mode || "assistido") !== "evolution") {
-    return { error: "Modo assistido: abra o link do WhatsApp para enviar (botão “Abrir WhatsApp”)." };
+  const { envioAutomatico } = await import("@/lib/waModo");
+  if (!envioAutomatico((tmode as any)?.whatsapp_mode)) {
+    return { error: "Neste modo o envio do primeiro toque é manual: abra o link do WhatsApp (botão “Abrir WhatsApp”)." };
   }
 
   if (overrideBody !== undefined) {

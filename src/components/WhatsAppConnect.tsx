@@ -14,13 +14,16 @@ import {
 } from "@/app/dashboard/config/whatsapp-actions";
 
 type Acc = { id: string; evolution_url: string; instance: string; is_active: boolean; inbound_token: string; user_id?: string | null; is_shared?: boolean | null };
-type Mode = "assistido" | "evolution" | "meta";
+type Mode = "assistido" | "hibrido" | "evolution" | "meta";
+type ModoEscolhivel = "assistido" | "hibrido" | "evolution";
 
 // ============================================================
 // WhatsApp — o NÍVEL é escolha do cliente (trade-off de risco):
 //   1) Link wa.me (assistido) — zero risco. Default.
-//   2) API não-oficial (Evolution) — com risco, exige aceite.
-//   3) API oficial da Meta — roadmap (ainda não disponível).
+//   2) Híbrido — envio na mão + sessão vinculada para receber/verificar/responder.
+//      Risco menor que o automático, e não zero: quem a detecção enxerga é a sessão.
+//   3) API não-oficial (Evolution) — automático ponta a ponta, com risco. Exige aceite.
+//   4) API oficial da Meta — roadmap (ainda não disponível).
 // ============================================================
 export default function WhatsAppConnect({
   accounts,
@@ -47,9 +50,13 @@ export default function WhatsAppConnect({
   const [err, setErr] = useState<string | null>(null);
   const [showAck, setShowAck] = useState(false);
   const [ack, setAck] = useState(false);
+  // qual modo pediu o aceite: híbrido e automático usam o MESMO aceite (o risco é a
+  // sessão vinculada), mas o botão precisa ativar o que a pessoa clicou.
+  const [modoPedido, setModoPedido] = useState<ModoEscolhivel>("evolution");
 
-  function escolher(m: "assistido" | "evolution", ackRisk?: boolean) {
+  function escolher(m: ModoEscolhivel, ackRisk?: boolean) {
     setErr(null);
+    setModoPedido(m);
     start(async () => {
       const res = (await setWhatsAppMode(m, ackRisk)) as { ok?: boolean; needsAck?: boolean; error?: string };
       if (res?.needsAck) {
@@ -84,6 +91,33 @@ export default function WhatsAppConnect({
         }
       />
 
+      {/* NÍVEL 1.5 — HÍBRIDO: envio na mão, sessão conectada.
+          Nasceu de uma pergunta que o app respondia errado: dá para enviar pelo
+          WhatsApp Web e receber pelo Evolution? Dava — receber nunca dependeu do modo —
+          mas o resto do app exigia o modo automático para verificar número e responder
+          pela caixa, e recusava quem tinha a instância conectada e viva. */}
+      <ModeCard
+        selected={mode === "hibrido"}
+        badge="Risco menor"
+        badgeClass="bg-brand-soft text-brand-dark"
+        title="Híbrido (envio na mão, sessão conectada)"
+        desc="O primeiro toque sai pelo link, do seu WhatsApp, como no assistido — some o padrão de disparo automático, que é o que mais chama atenção. A sessão fica vinculada só para o resto: as respostas chegam na caixa, a cadência pausa sozinha, a verificação de número em massa funciona e dá para responder daqui. Atenção: a sessão vinculada continua sendo um cliente não-oficial, então o risco de bloqueio diminui — não desaparece."
+        action={
+          mode === "hibrido" ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-brand-dark">✓ Em uso</span>
+              <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={() => escolher("assistido")}>
+                Desativar
+              </button>
+            </div>
+          ) : (
+            <button className="btn-ghost py-1.5 text-sm" disabled={pending} onClick={() => escolher("hibrido", acked || undefined)}>
+              {acked ? "Usar este modo" : "Usar este modo (aceitar risco)"}
+            </button>
+          )
+        }
+      />
+
       {/* NÍVEL 2 — API não-oficial (Evolution) */}
       <ModeCard
         selected={mode === "evolution"}
@@ -108,22 +142,28 @@ export default function WhatsAppConnect({
       />
 
       {/* aceite de risco (aparece ao ativar pela primeira vez) */}
-      {showAck && mode !== "evolution" && (
+      {showAck && (
         <div className="rounded-xl border border-warn/40 bg-warn/5 p-4">
           <p className="text-sm font-semibold text-warn">Antes de ativar, confirme que você entende o risco</p>
           <p className="mt-1 text-sm text-ink/80">
-            O modo não-oficial usa o protocolo do WhatsApp Web (Baileys). <b>Não</b> é a API oficial da Meta e
+            Conectar o número usa o protocolo do WhatsApp Web (Baileys). <b>Não</b> é a API oficial da Meta e
             viola os Termos de Serviço do WhatsApp. Há risco <b>real</b> de banimento do número, que a Contatia
             não pode evitar nem reverter. Recomendamos usar um número <b>secundário/dedicado</b>, nunca o
             pessoal principal. Para operar sem risco de ban, use o modo assistido (link) — ou aguarde a API
             oficial da Meta.
           </p>
+          {modoPedido === "hibrido" && (
+            <p className="mt-2 text-sm text-ink/80">
+              No <b>híbrido</b> o risco é menor porque o disparo deixa de sair de um cliente automatizado — mas
+              a sessão vinculada continua existindo, e é ela que a detecção enxerga. Menor não é nenhum.
+            </p>
+          )}
           <label className="mt-3 flex items-start gap-2 text-sm">
             <input type="checkbox" className="mt-0.5" checked={ack} onChange={(e) => setAck(e.target.checked)} />
             <span>Li e assumo o risco de banimento no meu número ao usar o modo não-oficial.</span>
           </label>
           <div className="mt-3 flex gap-2">
-            <button className="btn-brand py-1.5 text-sm" disabled={pending || !ack} onClick={() => escolher("evolution", true)}>
+            <button className="btn-brand py-1.5 text-sm" disabled={pending || !ack} onClick={() => escolher(modoPedido, true)}>
               {pending ? "Ativando…" : "Aceitar e ativar"}
             </button>
             <button className="btn-ghost py-1.5 text-sm" onClick={() => { setShowAck(false); setAck(false); }}>
@@ -146,8 +186,8 @@ export default function WhatsAppConnect({
 
       {err && <p className="text-sm text-danger">{err}</p>}
 
-      {/* ÁREA DE CONEXÃO — só quando o modo Evolution está ativo */}
-      {mode === "evolution" && (
+      {/* ÁREA DE CONEXÃO — sempre que houver sessão (híbrido ou automático) */}
+      {(mode === "evolution" || mode === "hibrido") && (
         <div className="rounded-xl border border-line bg-muted/40 p-4">
           <p className="text-sm font-semibold">Conexão do número</p>
           {platformReady ? (

@@ -300,10 +300,12 @@ export async function replyWhatsApp(input: { contactId?: string | null; phone: s
   if (!text) return { error: "Escreva uma mensagem." };
   if (!input.phone) return { error: "Conversa sem número de telefone." };
 
-  // envio automático só existe no modo Evolution
+  // precisa de SESSÃO vinculada (híbrido ou automático), não de envio automático:
+  // responder quem já te escreveu é o envio de menor risco que existe.
   const { data: t } = await supabase.from("tenants").select("whatsapp_mode").eq("id", tenant_id).maybeSingle();
-  if (((t as any)?.whatsapp_mode || "assistido") !== "evolution") {
-    return { error: "No modo assistido a resposta é manual: use o botão “Abrir WhatsApp”. Ative o modo automático em Config → WhatsApp para responder daqui." };
+  const { temSessao } = await import("@/lib/waModo");
+  if (!temSessao((t as any)?.whatsapp_mode)) {
+    return { error: "No modo assistido a resposta é manual: use o botão “Abrir WhatsApp”. Ative o modo híbrido ou o automático em Config → Canais para responder daqui." };
   }
 
   const { data: acc } = await supabase

@@ -31,17 +31,22 @@ export async function verificarWhatsAppLote(contactIds: string[]): Promise<{
   if (!tenant_id) return { error: "Sem workspace." };
   if (!contactIds.length) return { error: "Nada selecionado." };
 
-  // Precisa do modo Evolution + instância conectada. As duas mensagens abaixo foram
-  // reescritas para dizer O QUE FAZER: "não funcionou" quase sempre é uma destas duas
-  // travas, e a redação anterior não dizia onde clicar nem em que estado a coisa está.
+  // Precisa de SESSÃO + instância conectada. As duas mensagens abaixo foram reescritas
+  // para dizer O QUE FAZER: "não funcionou" quase sempre é uma destas duas travas, e a
+  // redação anterior não dizia onde clicar nem em que estado a coisa está.
+  //
+  // O que a verificação usa é a sessão, não o envio automático — por isso o HÍBRIDO
+  // (primeiro toque na mão) também serve. Antes esta trava exigia o modo Evolution e
+  // recusava quem tinha a instância conectada e viva.
   const { data: tmode } = await supabase.from("tenants").select("whatsapp_mode").eq("id", tenant_id).maybeSingle();
-  const modo = (tmode as any)?.whatsapp_mode || "(não configurado)";
-  if (modo !== "evolution") {
+  const { temSessao, modoWa, ROTULO_MODO } = await import("@/lib/waModo");
+  const modo = (tmode as any)?.whatsapp_mode;
+  if (!temSessao(modo)) {
     return {
       error:
         `A verificação de WhatsApp consulta a sua sessão do WhatsApp para perguntar "este número existe?" — ` +
-        `e hoje o seu workspace está no modo "${modo}", que não tem sessão. ` +
-        `Vá em Configurações → Canais, escolha o modo Evolution e leia o QR code. Sem isso, nenhuma verificação é possível.`,
+        `e hoje o seu workspace está no modo "${ROTULO_MODO[modoWa(modo)]}", que não tem sessão. ` +
+        `Vá em Configurações → Canais, escolha o modo híbrido (envio na mão, sessão conectada) ou o automático, e leia o QR code.`,
     };
   }
   // a instância do PRÓPRIO usuário, quando ela existe (ver lib/instanciaWa)

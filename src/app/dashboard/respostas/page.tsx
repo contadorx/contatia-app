@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import RespostasInbox, { type Thread, type TriageItem, type Seq } from "@/components/RespostasInbox";
+import { temSessao } from "@/lib/waModo";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,10 @@ export default async function Respostas({
   const verArquivadas = searchParams?.arquivadas === "1";
 
   const { data: tenant } = await supabase.from("tenants").select("whatsapp_mode").maybeSingle();
-  const canReply = (((tenant as any)?.whatsapp_mode as string) || "assistido") === "evolution";
+  // Responder aqui exige SESSÃO, não envio automático. E responder dentro de uma
+  // conversa que o outro lado abriu é o envio de MENOR risco que existe — negar isso no
+  // híbrido seria proteger o número justamente onde ele não corre perigo.
+  const canReply = temSessao((tenant as any)?.whatsapp_mode);
 
   const [{ data: msgs }, { data: emails }, { data: triage }, { data: sequences }] = await Promise.all([
     supabase

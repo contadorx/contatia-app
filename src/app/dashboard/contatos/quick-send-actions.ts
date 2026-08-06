@@ -163,8 +163,9 @@ export async function sendQuickWhatsApp(contactId: string, body: string) {
   const { data: tmode } = await supabase.from("tenants").select("whatsapp_mode").eq("id", tenant_id).maybeSingle();
   const mode = (tmode as any)?.whatsapp_mode || "assistido";
 
-  // modo ASSISTIDO: devolve o link do WhatsApp (o usuário abre e envia)
-  if (mode !== "evolution") {
+  // ASSISTIDO e HÍBRIDO: devolve o link do WhatsApp (o usuário abre e envia)
+  const { envioAutomatico } = await import("@/lib/waModo");
+  if (!envioAutomatico(mode)) {
     return { ok: true, link: waLink(phone, body), assisted: true };
   }
 

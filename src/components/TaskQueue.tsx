@@ -547,7 +547,18 @@ export default function TaskQueue({
                       ) : (
                         <span className="text-xs text-subtle" title="Telefone inválido">sem nº válido</span>
                       )}
-                      <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={() => act(() => completeTask(t.id, t.contact_id ?? undefined))}>Feito</button>
+                      <button
+                        className="btn-ghost py-1.5 text-xs"
+                        disabled={pending}
+                        title={
+                          waMode === "hibrido"
+                            ? "No modo híbrido a tarefa se marca sozinha quando o envio for detectado pelo número conectado. Este botão é o atalho para não esperar."
+                            : "Marcar esta tarefa como feita"
+                        }
+                        onClick={() => act(() => completeTask(t.id, t.contact_id ?? undefined))}
+                      >
+                        Feito
+                      </button>
                     </>
                   )}
                 </>

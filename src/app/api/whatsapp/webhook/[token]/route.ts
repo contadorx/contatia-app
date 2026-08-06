@@ -83,9 +83,35 @@ export async function POST(req: Request, { params }: { params: { token: string }
   const jid = data?.key?.remoteJid || data?.remoteJid || "";
   const fromPhone = digits(String(jid).split("@")[0]);
 
-  // ignora status@broadcast, grupos (@g.us) e mensagens minhas
-  if (fromMe || !fromPhone || String(jid).includes("@g.us") || String(jid).includes("broadcast")) {
+  // ignora status@broadcast e grupos
+  if (!fromPhone || String(jid).includes("@g.us") || String(jid).includes("broadcast")) {
     return NextResponse.json({ ok: true, skipped: true });
+  }
+
+  // ============================================================
+  // MENSAGEM QUE VOCÊ MESMO ENVIOU (fromMe)
+  //
+  // Antes ela era jogada fora numa linha. Isso deixava um buraco justamente no modo
+  // híbrido: você abre o link, envia do seu WhatsApp — e o app não fica sabendo. A
+  // tarefa segue "pendente" até você lembrar de marcá-la, o histórico do contato não
+  // registra o toque, e a conversa na caixa de Respostas aparece pela metade (só o lado
+  // deles). "Enviei ou não enviei?" era pergunta sem resposta dentro do sistema.
+  //
+  // A sessão vinculada recebe esse evento de graça, tenha o envio saído do celular ou
+  // do WhatsApp Web. Aproveitá-lo fecha o ciclo do envio manual sem automatizar nada.
+  // As travas (só contato conhecido, idempotência) moram em @/lib/envioManual.
+  // ============================================================
+  if (fromMe) {
+    const { capturarEnvioManual } = await import("@/lib/envioManual");
+    const r = await capturarEnvioManual(admin, {
+      tenantId: tenant_id,
+      accountId: account_id,
+      phone: fromPhone,
+      text: extractText(data),
+      waId: data?.key?.id || null,
+      raw: data || {},
+    });
+    return NextResponse.json({ ok: true, fromMe: true, ...r });
   }
 
   const text = extractText(data);

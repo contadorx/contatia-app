@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { receitaConfigurada } from "@/lib/receita";
 import { workerConfigurado } from "@/lib/emailFinder";
 import ProspectarWizard from "@/components/ProspectarWizard";
+import { temSessao } from "@/lib/waModo";
 
 export const dynamic = "force-dynamic";
 // O passo 4 raspa sites e testa SMTP em lote — precisa do teto de 60s da função.
@@ -25,7 +26,8 @@ export default async function Prospectar() {
     .order("created_at", { ascending: false })
     .limit(100);
 
-  const waPronto = (tenant as any)?.whatsapp_mode === "evolution" && !!waAcc;
+  // a etapa aqui é VERIFICAR número, que só precisa de sessão — o híbrido serve
+  const waPronto = temSessao((tenant as any)?.whatsapp_mode) && !!waAcc;
 
   return (
     <div>

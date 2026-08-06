@@ -9,6 +9,7 @@ import { HOT_THRESHOLD } from "@/lib/scoring";
 import { effectiveDailyCap } from "@/lib/warmup";
 import { Termo } from "@/components/Termo";
 import { diaISO, diaISOmais } from "@/lib/datas";
+import { temSessao } from "@/lib/waModo";
 
 export const dynamic = "force-dynamic";
 
@@ -33,9 +34,11 @@ export default async function Today() {
     gestor: souGestor,
   });
 
-  // no modo automático, avisa se o número desconectou (envios falhariam em silêncio)
+  // com sessão vinculada (híbrido ou automático), avisa se o número desconectou:
+  // no automático os envios falhariam em silêncio; no híbrido, as RESPOSTAS parariam
+  // de chegar — que é pior, porque nada dá erro e a caixa só fica quieta.
   let waDisconnected = false;
-  if (waMode === "evolution") {
+  if (temSessao(waMode)) {
     const { data: waAcc } = await supabase
       .from("whatsapp_accounts")
       .select("status")
