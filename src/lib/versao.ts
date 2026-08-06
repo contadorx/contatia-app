@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.06-52";
+export const VERSAO_APP = "2026.08.06-53";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "um clique drena a fila (a tela repete sozinha), sessao IMAP unica para Enviados e reparticao do tempo por e-mail";
+export const VERSAO_NOTAS = "um clique drena a fila, sessao IMAP unica para Enviados, tempo medido por e-mail e o commit publicado no rodape";

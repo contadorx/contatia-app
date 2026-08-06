@@ -1,0 +1,12 @@
+Contatia — versão deste pacote
+==============================
+v2026.08.06-53
+
+O que entrou: um clique drena a fila de e-mail (a tela repete sozinha até acabar),
+sessão IMAP única para a cópia em "Enviados", tempo medido por e-mail (envio/cópia/
+banco) e o commit publicado aparecendo no rodapé ao lado da versão.
+
+COMO CONFERIR SE ISTO ESTÁ NO AR
+1. Depois de publicar, abra o app e olhe o rodapé do menu lateral.
+2. Tem de aparecer "v2026.08.06-53" seguido dos 7 primeiros caracteres do commit.
+3. Se o número for MENOR que este, o que está no ar não é este pacote.

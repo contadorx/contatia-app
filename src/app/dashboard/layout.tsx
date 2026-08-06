@@ -187,10 +187,30 @@ export default async function DashboardLayout({
             <p className="truncate text-sm font-medium">{profile?.full_name || user?.email}</p>
             <p className="mb-2 text-xs text-subtle">{profile?.role === "owner" ? "Dono" : "Parceiro"}</p>
             <SignOut />
-            {/* Carimbo da versão: responde em 1 segundo "o build que estou vendo já tem
-                o conserto?". Hoje isso custou duas rodadas de diagnóstico em cima de um
-                bug que já estava corrigido, só que noutro build. */}
-            <p className="mt-3 text-[10px] text-subtle/70" title={VERSAO_NOTAS}>v{VERSAO_APP}</p>
+            {/* ============================================================
+                CARIMBO DA VERSÃO — e do DEPLOY, que é outra coisa
+
+                O número da versão responde "o build que estou vendo já tem o conserto?".
+                Não responde a pergunta seguinte, que já custou uma rodada inteira: a
+                versão está velha porque o deploy NÃO aconteceu, ou porque aconteceu com
+                os arquivos antigos?
+
+                Os dois juntos separam os casos num olhar:
+                  · versão velha + commit velho → o código novo não chegou ao GitHub
+                    (ou o build da Vercel falhou, e ela segue servindo o anterior);
+                  · versão velha + commit NOVO  → chegou e publicou, mas o que subiu era
+                    o zip antigo;
+                  · versão nova                 → é este o código que está rodando.
+
+                `VERCEL_GIT_COMMIT_SHA` é preenchida pela própria Vercel durante a build.
+                Fora dela (ambiente local) a linha some sozinha.
+                ============================================================ */}
+            <p className="mt-3 text-[10px] text-subtle/70" title={VERSAO_NOTAS}>
+              v{VERSAO_APP}
+              {process.env.VERCEL_GIT_COMMIT_SHA ? (
+                <span title="commit publicado na Vercel"> · {String(process.env.VERCEL_GIT_COMMIT_SHA).slice(0, 7)}</span>
+              ) : null}
+            </p>
           </div>
         </aside>
 
