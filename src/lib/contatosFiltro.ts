@@ -23,7 +23,7 @@ export { SEM_DONO };
 // mesma regra do responsável: faceta descartada em silêncio ALARGA a consulta, e esta
 // consulta também alimenta a exclusão em massa.
 const EMAIL_INVALIDO = "__invalido__";
-const VIEWS_VALIDAS = ["completar", "quentes", "com_wa", "prontos", "resgatar"];
+const VIEWS_VALIDAS = ["completar", "quentes", "com_wa", "sem_wa", "prontos", "resgatar"];
 const FRIOS_VALIDOS = ["nunca", "15", "30"];
 // Páginas de 1.000 ao varrer as tabelas de vínculo. O PostgREST corta em 1.000 por
 // consulta; sem paginar, um filtro de tag com 5.000 contatos devolveria mil ids
@@ -34,7 +34,7 @@ const MAX_VINCULOS = 100000;
 
 export type FiltroContatos = {
   q?: string;
-  view?: string;                 // completar | quentes | com_wa | prontos | resgatar
+  view?: string;                 // completar | quentes | com_wa | sem_wa | prontos | resgatar
   tag?: string[];
   produto?: string[];
   cadencia?: string[];
@@ -300,6 +300,10 @@ export async function consultaContatos(
     q = q.gte("score", HOT_THRESHOLD);
   } else if (f.view === "com_wa") {
     q = q.eq("wa_status", "valid");
+  } else if (f.view === "sem_wa") {
+    // FILA DE REVISÃO: número verificado e sem conta de WhatsApp. Não é "falta dado" —
+    // o telefone está lá; o que falta é OUTRO número, e é isso que se vem fazer aqui.
+    q = q.eq("wa_status", "invalid");
   } else if (f.view === "prontos") {
     q = q.or("email.neq.,phone.neq.");
     if (emCadencia.length) q = q.not("id", "in", `(${emCadencia.join(",")})`);

@@ -6,6 +6,8 @@ import { completeTask, skipTask, snoozeTask, sendEmailTask, markReplied, sendWha
 import { channelLabel, waLink, type Channel } from "@/lib/cadence";
 import { linkInstagramDM, linkLinkedin, handleInstagram } from "@/lib/redes";
 import { conferirRede } from "@/app/dashboard/contatos/social-actions";
+import { capturarDoSiteLote } from "@/app/dashboard/contatos/web-capture-actions";
+import { tipoTelefone } from "@/lib/telefone";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
 import RichTextEditor from "@/components/RichTextEditor";
 
@@ -25,6 +27,7 @@ type Task = {
   owner_name?: string;
   contacts: {
     name: string; company: string | null; phone: string | null; email: string | null; score: number | null;
+    wa_status?: string | null;
     instagram?: string | null; linkedin?: string | null;
     instagram_conferido_at?: string | null; linkedin_conferido_at?: string | null;
   } | null;
@@ -137,6 +140,23 @@ export default function TaskQueue({
   });
 
   const pendingEmails = tasks.filter((t) => t.channel === "email").length;
+
+  // ============================================================
+  // TOQUE DE WHATSAPP QUE NÃO TEM COMO SAIR
+  //
+  // `wa_status='invalid'` quer dizer que já perguntamos ao WhatsApp, com e sem o 9º
+  // dígito, e a resposta foi "não existe". Enquanto isso não aparecia na fila, a
+  // tarefa era indistinguível das outras: você clicava, tomava o erro, e amanhã ela
+  // estava lá de novo — o disparo de hoje foi assim.
+  //
+  // Aqui ela ganha cara de PENDÊNCIA DE REVISÃO, não de tarefa: some o botão de
+  // enviar (não há para onde) e entram as três saídas reais — procurar outro número
+  // no site, abrir a ficha para digitar um celular, ou pular o toque.
+  // ============================================================
+  const travadoSemWa = (t: Task) => t.channel === "whatsapp" && t.contacts?.wa_status === "invalid";
+  const semWaNaFila = tasks.filter(travadoSemWa);
+  const [soTravados, setSoTravados] = useState(false);
+  const tarefasVisiveis = soTravados ? semWaNaFila : tasks;
   // e-mails marcados na fila: o botão passa a dizer o que vai fazer com eles
   const emailsSelecionados = allTasks.filter((t) => sel.has(t.id) && t.channel === "email").length;
 
@@ -320,6 +340,27 @@ export default function TaskQueue({
     canalFilters.length > 0 && !canalFilters.includes("email") && tasks.length > 0;
   function act(fn: () => Promise<unknown>) {
     start(async () => { await fn(); });
+  }
+
+  // Procura OUTRO número no site da empresa para um contato travado. O resultado é
+  // dito com todas as letras: "achei" e "não achei" levam a próximos passos opostos, e
+  // um spinner que some sem mensagem faz a pessoa clicar de novo achando que falhou.
+  function procurarNumero(t: Task) {
+    if (!t.contact_id) return;
+    setErr(null); setBulkMsg(null);
+    start(async () => {
+      const r = (await capturarDoSiteLote([t.contact_id!])) as
+        { ok?: boolean; achou?: number; whats?: number; filaVerif?: number; semDominio?: number; error?: string } | undefined;
+      if (r?.error) { setErr(r.error); return; }
+      if (r?.semDominio) {
+        setErr(`${t.contacts?.name || "Este contato"}: não há site/domínio conhecido para raspar. Abra a ficha e informe o domínio da empresa, ou procure o celular pelo Radar (sócios).`);
+        return;
+      }
+      if (r?.whats) setBulkMsg(`✓ Achei um WhatsApp no site de ${t.contacts?.company || t.contacts?.name}. A tarefa volta a valer.`);
+      else if (r?.achou) setBulkMsg(`Achei telefone no site de ${t.contacts?.company || t.contacts?.name}${r.filaVerif ? " — está na fila de verificação do WhatsApp" : ""}.`);
+      else setErr(`Nada de telefone novo no site de ${t.contacts?.company || t.contacts?.name}. Restam a ficha (digitar um celular) ou pular o toque.`);
+      router.refresh();
+    });
   }
   function send(id: string, override?: { subject?: string; body?: string }) {
     setErr(null);
@@ -571,11 +612,21 @@ export default function TaskQueue({
         <span className="text-xs text-subtle">
           Teclado: <b>↑/↓</b> navegar · <b>Enter</b> enviar/concluir · <b>Espaço</b> marcar · <b>r</b> respondeu · <b>z</b> adiar · <b>x</b> pular
         </span>
+        {semWaNaFila.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setSoTravados((v) => !v)}
+            className={`rounded-full px-3 py-1 text-xs font-semibold ${soTravados ? "bg-warn text-white" : "border border-warn/40 bg-warn/10 text-warn hover:bg-warn/20"}`}
+            title="Toques de WhatsApp para números que já foram verificados e não têm conta. Não adianta enviar — precisam de outro número."
+          >
+            {soTravados ? "◂ voltar à fila" : `${semWaNaFila.length} sem WhatsApp — revisar`}
+          </button>
+        )}
         {bulkMsg && <span className="text-sm text-signal">{bulkMsg}</span>}
       </div>
       {err && <div className="rounded-xl bg-danger/10 p-3 text-sm text-danger">{err}</div>}
 
-      {tasks.map((t, i) => {
+      {tarefasVisiveis.map((t, i) => {
         const c = t.contacts;
         const content = t.generated_content || "";
         const score = c?.score ?? 0;
@@ -608,6 +659,19 @@ export default function TaskQueue({
               </span>
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-2 truncate text-sm font-semibold">
+                  {/* O SCORE NA FILA. A ordem já é por score (o servidor ordena assim),
+                      mas sem o número a ordem é invisível — e quando o limite do dia
+                      aperta, a decisão é "quem eu mando primeiro?". Com o número dá
+                      para parar na hora certa em vez de descobrir depois que os 80
+                      envios foram para os frios. */}
+                  <span
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
+                      hot ? "bg-warn/15 text-warn" : score > 0 ? "bg-muted text-subtle" : "bg-muted/60 text-subtle/60"
+                    }`}
+                    title={`Score ${score} — quente a partir de ${hotThreshold}. A fila vem ordenada por ele.`}
+                  >
+                    {score}
+                  </span>
                   {c?.name || "Contato"}
                   {c?.company ? <span className="font-normal text-subtle">· {c.company}</span> : null}
                   {hotNowLabel && <span className="rounded-full bg-warn px-2 py-0.5 text-[10px] font-bold text-white">{hotNowLabel}</span>}
@@ -621,7 +685,36 @@ export default function TaskQueue({
                 </p>
               </div>
 
-              {t.channel === "whatsapp" && c?.phone && (
+              {t.channel === "whatsapp" && c?.phone && travadoSemWa(t) && (
+                <>
+                  <span
+                    className="shrink-0 rounded-lg bg-danger/10 px-2 py-1 text-[11px] font-semibold text-danger"
+                    title="Perguntamos ao WhatsApp com e sem o 9º dígito e este número não tem conta. Enviar não é possível — o que resolve é outro número."
+                  >
+                    sem WhatsApp{tipoTelefone(c.phone) === "fixo" ? " (fixo)" : ""}
+                  </span>
+                  <button
+                    className="btn-ghost py-1.5 text-xs"
+                    disabled={pending}
+                    title="Raspa o site da empresa procurando telefone/WhatsApp publicado"
+                    onClick={(e) => { e.stopPropagation(); procurarNumero(t); }}
+                  >
+                    Procurar no site
+                  </button>
+                  <a
+                    className="btn-ghost py-1.5 text-xs"
+                    href={`/dashboard/contatos/${t.contact_id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    title="Abrir a ficha para digitar outro número"
+                  >
+                    Abrir ficha
+                  </a>
+                  <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={() => act(() => skipTask(t.id))}>
+                    Pular
+                  </button>
+                </>
+              )}
+              {t.channel === "whatsapp" && c?.phone && !travadoSemWa(t) && (
                 <>
                   <button className="btn-ghost py-1.5 text-xs" disabled={pending} onClick={(e) => { e.stopPropagation(); setEditing((s) => s[t.id] ? (() => { const n = { ...s }; delete n[t.id]; return n; })() : { ...s, [t.id]: { subject: "", body: content } }); }}>
                     {editing[t.id] ? "Fechar" : "Editar"}

@@ -180,7 +180,7 @@ export async function enrollContact(contactId: string, sequenceId: string) {
 
   const { data: contact } = await supabase
     .from("contacts")
-    .select("id, name, email, company, phone, role_title, cnpj, custom, assigned_to, opted_out")
+    .select("id, name, email, company, phone, role_title, cnpj, custom, assigned_to, opted_out, wa_status")
     .eq("id", contactId)
     .single();
   if (!contact) return { error: "Contato não encontrado." };
@@ -213,12 +213,24 @@ export async function enrollContact(contactId: string, sequenceId: string) {
   // entrava e "enviava"). Passos sem o dado são PULADOS; se sobrar zero, não inscreve.
   const hasEmail = !!(contact.email && String(contact.email).trim());
   const hasPhone = !!(contact.phone && String(contact.phone).trim());
+  // ============================================================
+  // JÁ SABEMOS QUE NÃO TEM WHATSAPP — não crie a tarefa
+  //
+  // `wa_status='invalid'` é conclusão VERIFICADA (a verificação em massa ou o próprio
+  // envio perguntaram ao WhatsApp, com e sem o 9º dígito). Continuar gerando passo de
+  // WhatsApp para esse contato produz uma tarefa que só existe para dar erro no dia do
+  // disparo — e foi o que encheu a fila de hoje. Ligação continua valendo: o número
+  // existe, só não serve para este canal.
+  // ============================================================
+  const semWa = (contact as any).wa_status === "invalid";
   const podeCanal = (ch: string) =>
-    ch === "email" ? hasEmail : ch === "whatsapp" || ch === "call" ? hasPhone : true;
+    ch === "email" ? hasEmail : ch === "whatsapp" ? hasPhone && !semWa : ch === "call" ? hasPhone : true;
   if (!steps.some((s) => podeCanal(s.channel))) {
     return {
       error: hasEmail || hasPhone
-        ? "O contato não tem o dado necessário para nenhum passo desta cadência."
+        ? semWa
+          ? "Esta cadência só tem passos que este contato não pode receber: o número dele já foi verificado e não tem WhatsApp."
+          : "O contato não tem o dado necessário para nenhum passo desta cadência."
         : "Este contato não tem e-mail nem telefone — adicione um contato antes de inscrever numa cadência.",
       missingData: true,
     };

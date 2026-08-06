@@ -68,7 +68,7 @@ const LOTE_INSERT = 300;
 const TETO_INSCRICAO = 2000;  // trava de segurança por clique
 
 type ResEnroll = {
-  ok?: boolean; enrolled?: number; semDado?: number; jaInscrito?: number;
+  ok?: boolean; enrolled?: number; semDado?: number; semWhatsapp?: number; jaInscrito?: number;
   suprimidos?: number; outros?: number; tarefas?: number;
   truncado?: boolean; teto?: number; selecionados?: number; error?: string;
 };
@@ -129,6 +129,9 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string): Prom
     // ---------- 5) classifica (em memória, sem tocar o banco) ----------
     const elegiveis: any[] = [];
     let semDado = 0, jaInscrito = 0, suprimidos = 0;
+    // contado à parte de propósito: "sem dado" e "o número não tem WhatsApp" pedem
+    // ações diferentes — uma é cadastro incompleto, a outra é caçar outro número.
+    let semWhatsapp = 0;
 
     // ============================================================
     // GATE DE DADO POR CANAL
@@ -139,15 +142,22 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string): Prom
     // `instagram` e `linkedin` entram aqui pelo mesmo motivo dos outros: sem o perfil
     // não existe link para abrir, e o toque assistido não tem para onde ir.
     // ============================================================
+    //
+    // WHATSAPP TEM UMA CONDIÇÃO A MAIS: ter telefone não basta. Quando a verificação
+    // (ou o próprio envio) já perguntou ao WhatsApp e a resposta foi "não existe", a
+    // tarefa criada aqui só serve para dar erro no dia do disparo. Ligação continua
+    // valendo — o número existe, só não serve para ESTE canal.
     const podeCanal = (
       ch: string,
       temEmail: boolean,
       temFone: boolean,
       temIg = false,
-      temLi = false
+      temLi = false,
+      temWa = true
     ) =>
       ch === "email" ? temEmail
-      : ch === "whatsapp" || ch === "call" ? temFone
+      : ch === "whatsapp" ? temFone && temWa
+      : ch === "call" ? temFone
       : ch === "instagram" ? temIg
       : ch === "linkedin" ? temLi
       : true;
@@ -159,15 +169,20 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string): Prom
       const temFone = !!String(c.phone || "").trim();
       const temIg = !!String((c as any).instagram || "").trim();
       const temLi = !!String((c as any).linkedin || "").trim();
-      if (!steps.some((s: any) => podeCanal(s.channel, temEmail, temFone, temIg, temLi))) { semDado++; continue; }
-      elegiveis.push({ ...c, temEmail, temFone, temIg, temLi });
+      const temWa = (c as any).wa_status !== "invalid";
+      if (!steps.some((s: any) => podeCanal(s.channel, temEmail, temFone, temIg, temLi, temWa))) {
+        if (!temWa && temFone) semWhatsapp++;
+        else semDado++;
+        continue;
+      }
+      elegiveis.push({ ...c, temEmail, temFone, temIg, temLi, temWa });
     }
     // contato que sumiu entre a seleção e agora
     const sumidos = ids.length - contatos.length;
 
     if (!elegiveis.length) {
       return {
-        ok: true, enrolled: 0, semDado, jaInscrito,
+        ok: true, enrolled: 0, semDado, semWhatsapp, jaInscrito,
         outros: suprimidos + Math.max(0, sumidos),
         suprimidos, truncado, teto: TETO_INSCRICAO, selecionados: ids.length,
       };
@@ -210,7 +225,7 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string): Prom
       for (const s of steps as any[]) {
         // o cronograma acumula sobre TODOS os passos; só vira tarefa o passo elegível
         offset += Number(s.delay_days) || 0;
-        if (!podeCanal(s.channel, c.temEmail, c.temFone, c.temIg, c.temLi)) continue;
+        if (!podeCanal(s.channel, c.temEmail, c.temFone, c.temIg, c.temLi, c.temWa)) continue;
         const temB = s.channel === "email" && s.subject_b && String(s.subject_b).trim();
         const variante = temB ? (Math.random() < 0.5 ? "a" : "b") : null;
         const assunto = variante === "b" ? s.subject_b : s.subject;
@@ -252,16 +267,16 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string): Prom
       detail:
         `Inscreveu ${enrolled} de ${ids.length} contato(s) na cadência "${(seq?.name as string) || "?"}" ` +
         `(${tarefas.length} tarefa(s) criadas)` +
-        (semDado || jaInscrito || suprimidos
-          ? ` — ${[semDado ? `${semDado} sem e-mail/telefone` : "", jaInscrito ? `${jaInscrito} já inscritos` : "", suprimidos ? `${suprimidos} suprimidos` : ""].filter(Boolean).join(", ")}`
+        (semDado || semWhatsapp || jaInscrito || suprimidos
+          ? ` — ${[semDado ? `${semDado} sem e-mail/telefone` : "", semWhatsapp ? `${semWhatsapp} sem WhatsApp` : "", jaInscrito ? `${jaInscrito} já inscritos` : "", suprimidos ? `${suprimidos} suprimidos` : ""].filter(Boolean).join(", ")}`
           : "") + ".",
-      meta: { cadencia: seq?.name || null, enrolled, semDado, jaInscrito, suprimidos, tarefas: tarefas.length, selecionados: ids.length },
+      meta: { cadencia: seq?.name || null, enrolled, semDado, semWhatsapp, jaInscrito, suprimidos, tarefas: tarefas.length, selecionados: ids.length },
     });
 
     revalidatePath("/dashboard/contatos");
     revalidatePath("/dashboard");
     return {
-      ok: true, enrolled, semDado, jaInscrito, suprimidos,
+      ok: true, enrolled, semDado, semWhatsapp, jaInscrito, suprimidos,
       outros: suprimidos + Math.max(0, sumidos),
       tarefas: tarefas.length, truncado, teto: TETO_INSCRICAO, selecionados: ids.length,
     };

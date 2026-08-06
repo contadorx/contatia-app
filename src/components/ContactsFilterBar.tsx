@@ -15,6 +15,9 @@ const VIEWS: { v: string; label: string; tone?: "danger" | "warn" }[] = [
   { v: "resgatar", label: "Frios a resgatar", tone: "warn" },
   { v: "quentes", label: "Quentes", tone: "warn" },
   { v: "com_wa", label: "Com WhatsApp" },
+  // fila de trabalho, não estado de erro: o número existe e não tem conta de WhatsApp,
+  // então o que se faz aqui é achar outro número (site, sócios, ligação)
+  { v: "sem_wa", label: "Sem WhatsApp", tone: "warn" },
 ];
 
 export default function ContactsFilterBar({

@@ -277,7 +277,7 @@ export default function ContactsTable({
     start(async () => {
       try {
         const res = (await bulkEnroll([...sel], seq)) as
-          { enrolled?: number; semDado?: number; jaInscrito?: number; suprimidos?: number;
+          { enrolled?: number; semDado?: number; semWhatsapp?: number; jaInscrito?: number; suprimidos?: number;
             outros?: number; tarefas?: number; truncado?: boolean; teto?: number; error?: string } | undefined;
 
         // `res` PODE vir undefined: quando a função do servidor é morta por tempo, a
@@ -298,6 +298,9 @@ export default function ContactsTable({
         const partes = [`✓ ${res.enrolled ?? 0} inscrito(s)`];
         if (res.tarefas) partes.push(`${res.tarefas} tarefa(s) criadas`);
         if (res.semDado) partes.push(`⚠ ${res.semDado} sem e-mail/telefone — complete o cadastro (visão “A completar”)`);
+        // separado do "sem dado" porque a ação é outra: aqui o telefone existe, só não
+        // tem conta de WhatsApp — o que falta é OUTRO número, e a visão certa é a nova.
+        if (res.semWhatsapp) partes.push(`⚠ ${res.semWhatsapp} com número sem WhatsApp — visão “Sem WhatsApp” para achar outro`);
         if (res.jaInscrito) partes.push(`${res.jaInscrito} já em cadência`);
         if (res.suprimidos) partes.push(`${res.suprimidos} suprimidos (pediram para parar)`);
         // idem: o número vem do servidor, não escrito aqui.

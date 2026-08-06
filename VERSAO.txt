@@ -1,12 +1,21 @@
 Contatia — versão deste pacote
 ==============================
-v2026.08.06-53
+v2026.08.06-54
 
-O que entrou: um clique drena a fila de e-mail (a tela repete sozinha até acabar),
-sessão IMAP única para a cópia em "Enviados", tempo medido por e-mail (envio/cópia/
-banco) e o commit publicado aparecendo no rodapé ao lado da versão.
+O que entrou:
+· "Este número não tem WhatsApp" deixa de ser só mensagem: marca o contato
+  (wa_status=invalid), grava nota no histórico e cria fila de revisão.
+· Nova visão em Contatos: "Sem WhatsApp".
+· Fila de hoje: os toques travados ganham selo + "Procurar no site", "Abrir ficha"
+  e "Pular"; e um botão no topo mostra quantos são.
+· Inscrição em cadência não cria mais passo de WhatsApp para quem já se provou
+  que não tem (individual e em lote), e o relatório do lote diz quantos foram.
+· Score visível na fila de hoje, ao lado do nome.
+
+Inclui também o que estava em 49–53 (peneira do filtro, capacidade do e-mail,
+conexão SMTP/IMAP reaproveitada no lote, fila drenando sozinha, commit no rodapé).
 
 COMO CONFERIR SE ISTO ESTÁ NO AR
-1. Depois de publicar, abra o app e olhe o rodapé do menu lateral.
-2. Tem de aparecer "v2026.08.06-53" seguido dos 7 primeiros caracteres do commit.
-3. Se o número for MENOR que este, o que está no ar não é este pacote.
+1. Publique e abra o app; olhe o rodapé do menu lateral.
+2. Tem de aparecer "v2026.08.06-54" seguido dos 7 primeiros caracteres do commit.
+3. Se o número for menor, o que está no ar não é este pacote.

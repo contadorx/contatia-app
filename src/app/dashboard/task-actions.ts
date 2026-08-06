@@ -488,7 +488,31 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
   }
 
   const res = await sendText(acc as any, phone, task.generated_content || "");
-  if (res.error) return { error: res.error };
+  if (res.error) {
+    // "não tem WhatsApp" não é só um erro de envio: é um FATO sobre o contato, e a
+    // descoberta custou uma consulta ao WhatsApp. Marcado, ele some da fila de envio e
+    // aparece na lista de revisão — em vez de reaparecer amanhã com o mesmo erro.
+    const { ehErroSemWhatsapp, marcarSemWhatsapp } = await import("@/lib/semWhatsapp");
+    if (ehErroSemWhatsapp(res.error)) {
+      const r = await marcarSemWhatsapp(supabase, {
+        tenantId: tenant_id,
+        contactId: (task as any).contact_id,
+        phone,
+      });
+      revalidatePath("/dashboard");
+      return {
+        error:
+          res.error +
+          (r.ok
+            ? r.motivo === "fixo"
+              ? " Marquei o contato como sem WhatsApp (o número é fixo) — ele está em Contatos → Sem WhatsApp para você achar um celular."
+              : " Marquei o contato como sem WhatsApp — ele está em Contatos → Sem WhatsApp para revisão."
+            : " (não consegui marcar o contato — ele vai reaparecer nesta fila)"),
+        semWhatsapp: true,
+      };
+    }
+    return { error: res.error };
+  }
 
   await supabase.from("tasks").update({ status: "done", completed_at: new Date().toISOString() }).eq("id", taskId);
   await scoreEvent(supabase, { tenant_id, contact_id: (task as any).contact_id, type: "task_done", user_id });
