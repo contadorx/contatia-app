@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.05-46";
+export const VERSAO_APP = "2026.08.05-47";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "filtrar contatos pelo veredito do e-mail (bate com o nome / caixa geral / outro nome / sem e-mail), com total real do conjunto";
+export const VERSAO_NOTAS = "fila de hoje: filtro por responsavel + nome do dono na linha (e o aviso de fila concentrada numa pessoa)";

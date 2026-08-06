@@ -55,17 +55,18 @@ export default async function Today() {
   // A segunda contagem (score >= HOT_THRESHOLD) foi REMOVIDA: era consultada e nunca
   // usada em lugar nenhum da página — uma varredura completa de 78 mil linhas por
   // carregamento, à toa.
-  const [{ data: rawTasks }, contactsCount, { data: boxes }] = await Promise.all([
+  const [{ data: rawTasks }, contactsCount, { data: boxes }, { data: equipe }] = await Promise.all([
     supabase
       .from("tasks")
       // O embed de contatos traz `*`: `instagram`/`linkedin` nascem na 0110 e, pedidas
       // pelo nome, derrubariam a FILA INTEIRA enquanto a migration não estivesse
       // aplicada — a tela mais importante do app ficaria vazia sem dizer por quê.
-      .select("id, channel, title, generated_content, due_date, contact_id, enrollment_id, contacts(*)")
+      .select("id, channel, title, generated_content, due_date, contact_id, enrollment_id, assigned_to, contacts(*)")
       .eq("status", "pending")
       .lte("due_date", in3),
     supabase.from("contacts").select("id", { count: "estimated", head: true }),
     supabase.from("email_accounts").select("daily_cap, warmup_stage, created_at").eq("is_active", true),
+    supabase.from("profiles").select("id, full_name, email").eq("is_active", true),
   ]);
 
   // Envio Seguro: soma o que as caixas conseguem enviar HOJE (com aquecimento) — evita a
@@ -236,6 +237,19 @@ export default async function Today() {
       return (b.quando || "").localeCompare(a.quando || "");
     });
 
+  // ============================================================
+  // DE QUEM É A TAREFA
+  //
+  // `tasks.assigned_to` é carimbado na inscrição: vem do responsável do CONTATO e, se
+  // o contato não tem dono, cai em quem inscreveu. Numa base importada sem responsável
+  // isso põe a fila inteira na conta de uma pessoa só — e sem o nome na tela não dá
+  // nem para perceber. Aqui o id vira nome, e a fila passa a poder ser filtrada.
+  // ============================================================
+  const nomePorPerfil = new Map<string, string>();
+  for (const p of ((equipe as any[]) || [])) {
+    nomePorPerfil.set(p.id as string, (p.full_name as string) || (p.email as string) || "sem nome");
+  }
+
   // anexa cadência + tags a cada task; separa "hoje/atrasados" de "próximos"
   const tasks = sorted.map((t) => ({
     ...t,
@@ -243,6 +257,8 @@ export default async function Today() {
     tags: t.contact_id ? tagsByContact[t.contact_id] || [] : [],
     is_future: (t.due_date || "") > today,
     hot_now: t.contact_id ? hotNowByContact[t.contact_id] || null : null,
+    owner_id: (t.assigned_to as string) || "",
+    owner_name: t.assigned_to ? nomePorPerfil.get(t.assigned_to as string) || "outro usuário" : "sem responsável",
   }));
 
   // re-ordena: quem engajou agora (hot_now) vem no topo absoluto, mantendo o resto por score

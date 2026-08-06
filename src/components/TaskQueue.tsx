@@ -20,6 +20,9 @@ type Task = {
   tags?: { id: string; name: string; color: string }[];
   is_future?: boolean;
   hot_now?: { type: string; created_at: string } | null;
+  // dono da TAREFA (carimbado na inscrição, vindo do responsável do contato)
+  owner_id?: string;
+  owner_name?: string;
   contacts: {
     name: string; company: string | null; phone: string | null; email: string | null; score: number | null;
     instagram?: string | null; linkedin?: string | null;
@@ -106,11 +109,25 @@ export default function TaskQueue({
   const cadences = Array.from(new Set(allTasks.map((t) => t.cadence).filter(Boolean))) as string[];
   const [cadFilters, setCadFilters] = useState<string[]>([]);   // filtro por VÁRIAS cadências
 
+  // ============================================================
+  // FILTRO POR RESPONSÁVEL
+  //
+  // As opções saem das tarefas que ESTÃO na fila, não da lista de usuários: oferecer
+  // gente com zero tarefa só faz o operador filtrar e ver vazio. Quando aparece um
+  // nome só, a caixa continua visível e diz por quê — é a informação que importa
+  // ("está tudo no admin"), e escondê-la faria a fila parecer distribuída.
+  // ============================================================
+  const donos = Array.from(
+    new Map(allTasks.map((t) => [t.owner_id || "", t.owner_name || "sem responsável"])).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1]));
+  const [respFilters, setRespFilters] = useState<string[]>([]);
+
   const tasks = allTasks.filter((t) => {
     if (periodo === "hoje" && t.is_future) return false;
     if (canalFilters.length && !canalFilters.includes(t.channel)) return false;
     if (tagFilters.length && !(t.tags || []).some((tg) => tagFilters.includes(tg.id))) return false;
     if (cadFilters.length && !cadFilters.includes(t.cadence || "")) return false;
+    if (respFilters.length && !respFilters.includes(t.owner_id || "")) return false;
     if (busca) {
       const q = busca.toLowerCase();
       const hay = `${t.contacts?.name || ""} ${t.contacts?.company || ""} ${t.contacts?.email || ""}`.toLowerCase();
@@ -352,6 +369,18 @@ export default function TaskQueue({
             />
           </div>
         )}
+        {donos.length > 0 && (
+          <div className="w-[150px] shrink-0 grow-0">
+            <SmartSelect
+              multiple
+              className="py-1 text-xs"
+              placeholder="Todos os responsáveis"
+              values={respFilters}
+              onValuesChange={setRespFilters}
+              options={donos.map(([id, nome]): SmartOption => ({ value: id, label: nome }))}
+            />
+          </div>
+        )}
         {tasks.length > 0 && (
           <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-subtle">
             <input type="checkbox" className="h-4 w-4 accent-brand" checked={todosMarcados} onChange={toggleTodos} />
@@ -360,6 +389,17 @@ export default function TaskQueue({
         )}
         <span className="shrink-0 text-xs text-subtle">{tasks.length} na visão</span>
       </div>
+
+      {/* A fila inteira numa pessoa só não é um estado a esconder: é o que explica
+          por que filtrar por responsável não separa nada hoje, e onde se resolve. */}
+      {donos.length === 1 && allTasks.length > 0 && (
+        <p className="px-1 text-[11px] text-subtle">
+          Todas as {allTasks.length} tarefas estão com <b>{donos[0][1]}</b>. O dono da tarefa é carimbado na
+          inscrição, a partir do <b>responsável do contato</b> — quem não tem responsável fica com quem inscreveu.
+          Para dividir a fila, atribua os contatos em{" "}
+          <a href="/dashboard/contatos" className="text-brand-dark underline">Contatos</a> e inscreva depois disso.
+        </p>
+      )}
 
       {tasks.length === 0 && (
         <div className="card p-8 text-center text-sm text-subtle">Nenhum toque nesta visão. Ajuste os filtros acima.</div>
@@ -478,7 +518,12 @@ export default function TaskQueue({
                   {hotNowLabel && <span className="rounded-full bg-warn px-2 py-0.5 text-[10px] font-bold text-white">{hotNowLabel}</span>}
                   {!hotNowLabel && hot && <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[10px] font-bold text-warn">QUENTE</span>}
                 </p>
-                <p className="truncate text-xs text-subtle">{t.title || content || channelLabel[t.channel]}</p>
+                <p className="truncate text-xs text-subtle">
+                  {t.title || content || channelLabel[t.channel]}
+                  {/* o dono só aparece quando há mais de um: com a fila inteira numa
+                      pessoa, repetir o mesmo nome em toda linha é ruído */}
+                  {donos.length > 1 && t.owner_name ? <span className="ml-1 opacity-70">· {t.owner_name}</span> : null}
+                </p>
               </div>
 
               {t.channel === "whatsapp" && c?.phone && (
