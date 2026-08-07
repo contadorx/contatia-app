@@ -10,6 +10,7 @@ import { effectiveDailyCap } from "@/lib/warmup";
 import { Termo } from "@/components/Termo";
 import { diaISO, diaISOmais, dataDoDia } from "@/lib/datas";
 import { temSessao } from "@/lib/waModo";
+import { msgErro } from "@/lib/erros";
 
 export const dynamic = "force-dynamic";
 // O "enviar todos os e-mails" roda como server action DESTA rota — sem `maxDuration`
@@ -142,16 +143,36 @@ export default async function Today() {
   const tagsByContact: Record<string, { id: string; name: string; color: string }[]> = {};
   const lastActivity: Record<string, { type: string; created_at: string; text?: string }> = {};
 
-  const [{ data: enrs }, { data: cts }, { data: evs }] = await Promise.all([
-    enrollmentIds.length
-      ? supabase.from("enrollments").select("id, sequence_id, sequences(name)").in("id", enrollmentIds as string[])
-      : Promise.resolve({ data: [] as any[] }),
-    contactIds.length
-      ? supabase.from("contact_tags").select("contact_id, tags(id, name, color)").in("contact_id", contactIds as string[])
-      : Promise.resolve({ data: [] as any[] }),
-    contactIds.length
-      ? supabase.from("events").select("contact_id, type, created_at, meta").in("contact_id", contactIds as string[]).order("created_at", { ascending: false }).limit(500)
-      : Promise.resolve({ data: [] as any[] }),
+  // ============================================================
+  // AS TRÊS CONSULTAS DE APOIO VÃO EM FATIAS — e o motivo é recente
+  //
+  // Elas traduzem os ids da fila em nome da cadência, tags e última atividade. Iam com
+  // um `.in()` só. Enquanto a fila era cortada em 1.000 tarefas, a lista de ids cabia
+  // na URL; quando a paginação entrou (v60) e a fila passou a trazer milhares, a URL
+  // estourou o limite do servidor e as três passaram a falhar.
+  //
+  // O sintoma foi indireto e por isso difícil: a caixa "Todas as cadências" DESAPARECEU
+  // da barra de filtros. Ela só é desenhada quando existe ao menos um nome de cadência
+  // — e o mapa estava vazio porque a consulta tinha sido recusada. Nada deu erro.
+  // ============================================================
+  const { emFatias } = await import("@/lib/emFatias");
+  const [{ data: enrs, error: errEnr }, { data: cts }, { data: evs }] = await Promise.all([
+    emFatias(enrollmentIds as string[], (fatia) =>
+      supabase.from("enrollments").select("id, sequence_id, sequences(name)").in("id", fatia)
+    ),
+    emFatias(contactIds as string[], (fatia) =>
+      supabase.from("contact_tags").select("contact_id, tags(id, name, color)").in("contact_id", fatia)
+    ),
+    // o limite de 500 é POR FATIA: o que interessa é a atividade mais recente de cada
+    // contato, e ela está no topo de cada pedaço
+    emFatias(contactIds as string[], (fatia) =>
+      supabase
+        .from("events")
+        .select("contact_id, type, created_at, meta")
+        .in("contact_id", fatia)
+        .order("created_at", { ascending: false })
+        .limit(500)
+    ),
   ]);
 
   // ============================================================
@@ -173,14 +194,17 @@ export default async function Today() {
   const seqIds = Array.from(new Set(Object.values(sequenciaDoEnrollment)));
   const passosPorSequencia: Record<string, number> = {};
   if (seqIds.length) {
-    const { data: passos } = await supabase
-      .from("sequence_steps")
-      .select("sequence_id")
-      .in("sequence_id", seqIds);
+    const { data: passos } = await emFatias(seqIds, (fatia) =>
+      supabase.from("sequence_steps").select("sequence_id").in("sequence_id", fatia)
+    );
     for (const p of ((passos as any[]) || [])) {
       passosPorSequencia[p.sequence_id] = (passosPorSequencia[p.sequence_id] || 0) + 1;
     }
   }
+
+  // Se a tradução matrícula → cadência falhou, a barra de filtros perderia a caixa de
+  // cadência EM SILÊNCIO (foi o que aconteceu). Dizer é o mínimo.
+  const erroCadencias = errEnr ? msgErro(errEnr) : null;
   for (const ct of (cts as any[]) || []) {
     if (ct.tags) (tagsByContact[ct.contact_id] ||= []).push(ct.tags);
   }
@@ -500,6 +524,12 @@ export default async function Today() {
       <h2 className="mb-3 mt-8 font-display text-lg font-bold">Fila de hoje</h2>
       {/* teto da varredura atingido: a fila abaixo NÃO é o conjunto inteiro. Dizer isso
           é o mínimo — foi a versão calada disso que sumiu com toques do dia. */}
+      {erroCadencias && (
+        <p className="mb-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
+          Não consegui carregar os nomes das cadências desta fila ({erroCadencias}). Os filtros de cadência e passo
+          podem aparecer incompletos — os toques abaixo estão corretos.
+        </p>
+      )}
       {filaCortada && (
         <p className="mb-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn">
           Parei de carregar a fila em 6.000 toques: o que está abaixo é parte do que vence até {dataDoDia(in3)}.

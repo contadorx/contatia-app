@@ -1,14 +1,17 @@
 Contatia — versão deste pacote
 ==============================
-v2026.08.07-64
+v2026.08.07-65
 
-Migrations: nenhuma nova (0111, 0112 e 0113 já entregues).
+Migrations: nenhuma nova.
 
-O que entrou agora, na fila de hoje:
-· Filtro por PASSO da cadência ("Todos os passos" → Passo 1, 2, 3…). As opções saem
-  dos passos que estão na fila, não de 1 a 10 no vazio.
-· Selo "3/7" em cada linha (passo 3 de 7), com a cadência no title.
-· O filtro por CADÊNCIA já existia — agora os dois trabalham juntos: "Enquadria,
-  passo 1" é a fila do primeiro contato; "passo 5+" é a de quem não respondeu.
+CONSERTO: o filtro de CADÊNCIA tinha sumido da fila de hoje.
+Causa: quando a fila passou a ser paginada (v60), a lista de ids de matrícula cresceu
+de centenas para milhares. As três consultas de apoio (nome da cadência, tags, última
+atividade) mandavam TODOS os ids numa URL só — que estourou o limite do servidor e
+passou a ser recusada. Sem nome de cadência, a caixa "Todas as cadências" nem era
+desenhada. Nada deu erro.
+Agora essas consultas vão em fatias de 200, e se ainda assim falharem a tela avisa
+em vez de mostrar a barra de filtros incompleta.
 
-COMO CONFERIR: rodapé do menu = "v2026.08.07-64" + 7 do commit.
+COMO CONFERIR: rodapé do menu = "v2026.08.07-65" + 7 do commit.
+Depois de publicar, a caixa "Todas as cadências" tem de reaparecer ao lado de "Passo".
