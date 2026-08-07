@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import AssignSelect from "@/components/AssignSelect";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
-import { bulkAssign, bulkEnroll } from "@/app/dashboard/contatos/bulk-actions";
+import { bulkAssign, bulkEnroll, desinscreverLote } from "@/app/dashboard/contatos/bulk-actions";
 import { bulkTag, createTag } from "@/app/dashboard/contatos/tag-actions";
 import { bulkDeleteContacts } from "@/app/dashboard/contatos/actions";
 import { contarPorFiltro, excluirPorFiltro, exportarContatosPorFiltro } from "@/app/dashboard/contatos/filtro-actions";
@@ -318,6 +318,58 @@ export default function ContactsTable({
       }
     });
   }
+  // ============================================================
+  // TIRAR DA CADÊNCIA (o contrário do botão ao lado)
+  //
+  // Usa a MESMA caixa de cadência do "Inscrever", com uma diferença que a confirmação
+  // deixa explícita: caixa vazia = sai de TODAS as cadências; cadência escolhida = sai
+  // só daquela. Duas caixas para o mesmo campo seria pior — a pessoa escolheria numa e
+  // clicaria na outra.
+  //
+  // Confirma antes porque a parte que não volta são os toques agendados: eles somem da
+  // fila de hoje e dos próximos dias, e reinscrever recomeça o cronograma do zero.
+  // ============================================================
+  function doDesinscrever() {
+    const nomeSeq = seq ? (sequences.find((s) => s.id === seq)?.name || "esta cadência") : null;
+    const alvo = nomeSeq ? `da cadência "${nomeSeq}"` : "de TODAS as cadências";
+    if (!confirm(
+      `Tirar ${sel.size} contato(s) ${alvo}?\n\n` +
+      `Os toques ainda pendentes são cancelados (somem da fila). O que já foi enviado ` +
+      `continua no histórico. Para voltar, só inscrevendo de novo — e o cronograma recomeça.`
+    )) return;
+    setMsg(null);
+    start(async () => {
+      try {
+        const res = (await desinscreverLote([...sel], seq || null)) as
+          { encerradas?: number; contatos?: number; tarefas?: number; semCadencia?: number;
+            truncado?: boolean; teto?: number; error?: string } | undefined;
+        if (!res) {
+          setMsg(
+            "A saída da cadência não retornou resposta — normalmente é tempo esgotado no servidor. " +
+            "Parte pode ter saído: confira em Resultados → Registro antes de repetir."
+          );
+          router.refresh();
+          return;
+        }
+        if (res.error) { setMsg(res.error); return; }
+        const partes = [`✓ ${res.contatos ?? 0} contato(s) fora ${alvo.replace("de TODAS as cadências", "de todas as cadências")}`];
+        if (res.encerradas) partes.push(`${res.encerradas} inscrição(ões) encerrada(s)`);
+        partes.push(`${res.tarefas ?? 0} toque(s) pendente(s) cancelado(s)`);
+        if (res.semCadencia) partes.push(`${res.semCadencia} já não estavam nessa situação`);
+        if (res.truncado) partes.push(`teto de ${typeof res.teto === "number" ? res.teto.toLocaleString("pt-BR") : "segurança"} por vez — selecione o resto e repita`);
+        setMsg(partes.join(" · "));
+        clear();
+        setSeq("");
+        router.refresh();
+      } catch (e: any) {
+        setMsg(
+          `A saída da cadência foi interrompida (${e?.message || "falha de conexão"}). ` +
+          `Parte pode ter saído — confira em Resultados → Registro antes de repetir.`
+        );
+        router.refresh();
+      }
+    });
+  }
   function doTag() {
     if (!tagIds.length) return setMsg("Escolha ao menos uma tag.");
     setMsg(null);
@@ -496,6 +548,20 @@ export default function ContactsTable({
             <button className="btn-brand py-1.5 text-sm" onClick={doEnroll} disabled={pending || apagando || !seq}>
               {pending ? "..." : "Inscrever"}
             </button>
+            {/* A saída existia só dentro da ficha, uma por vez. Fica ao lado da entrada
+                de propósito: é a mesma caixa de cadência — vazia, tira de todas. */}
+            <button
+              className="rounded-lg border border-amber-300 bg-amber-50 py-1.5 px-3 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-40"
+              onClick={doDesinscrever}
+              disabled={pending || apagando}
+              title={
+                seq
+                  ? "Tira os selecionados desta cadência e cancela os toques pendentes dela."
+                  : "Sem cadência escolhida, tira os selecionados de TODAS as cadências e cancela os toques pendentes."
+              }
+            >
+              {pending ? "..." : seq ? "Desinscrever" : "Desinscrever de todas"}
+            </button>
           </div>
 
           <div className="flex items-center gap-1">
@@ -640,7 +706,7 @@ export default function ContactsTable({
 
           {todosFiltro !== null && (
             <p className="mt-2 text-[11px] text-subtle">
-              Inscrever, atribuir, aplicar tag, capturar do site e verificar WhatsApp continuam agindo sobre as{" "}
+              Inscrever, desinscrever, atribuir, aplicar tag, capturar do site e verificar WhatsApp continuam agindo sobre as{" "}
               <b>{sel.size}</b> desta página — essas ações trabalham contato a contato e não aguentam a base inteira de
               uma vez. Só a <b>exclusão</b> vale para os {todosFiltro}.
             </p>

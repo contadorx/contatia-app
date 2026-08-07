@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.07-65";
+export const VERSAO_APP = "2026.08.07-66";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "volta o filtro de cadencia na fila: as consultas de apoio passaram a ir em fatias (a URL estourava com a fila paginada)";
+export const VERSAO_NOTAS = "desinscrever cadencia em lote na tela de Contatos (de uma cadencia ou de todas), cancelando os toques pendentes";

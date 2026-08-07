@@ -26,6 +26,7 @@ export type AcaoLog =
   | "contact_tag_bulk"
   | "contact_assign_bulk"
   | "contact_enroll_bulk"
+  | "contact_unenroll_bulk"
   | "account_tag_bulk"
   | "account_assign_bulk"
   | "meeting_reschedule"
@@ -43,6 +44,7 @@ export const ACAO_LABEL: Record<string, string> = {
   contact_tag_bulk: "Aplicou tags em lote",
   contact_assign_bulk: "Atribuiu contatos em lote",
   contact_enroll_bulk: "Inscreveu em cadência em lote",
+  contact_unenroll_bulk: "Tirou da cadência em lote",
   account_tag_bulk: "Aplicou tags em empresas",
   account_assign_bulk: "Atribuiu empresas em lote",
   meeting_reschedule: "Cancelou reunião para remarcar",
@@ -56,6 +58,9 @@ export const ACOES_DESTRUTIVAS = [
   "contact_delete_bulk",
   "account_delete",
   "account_delete_bulk",
+  // não apaga nada, mas cancela toques agendados e não tem "retomar": para desfazer,
+  // só inscrevendo de novo (e o cronograma recomeça do zero).
+  "contact_unenroll_bulk",
 ];
 
 export function labelAcao(a?: string | null): string {

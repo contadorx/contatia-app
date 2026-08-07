@@ -75,6 +75,149 @@ type ResEnroll = {
   truncado?: boolean; teto?: number; selecionados?: number; error?: string;
 };
 
+// ============================================================
+// DESINSCREVER EM LOTE
+//
+// Tirar da cadência só existia DENTRO DA FICHA, uma inscrição por vez. Quem inscreveu
+// 300 contatos na cadência errada — e isso acontece, porque inscrever é um clique —
+// tinha que abrir 300 fichas. A porta de entrada era em lote; a de saída, não.
+//
+// O QUE ESTA AÇÃO FAZ, LITERALMENTE:
+//   1. encerra as inscrições ATIVAS e PAUSADAS dos contatos selecionados
+//      (status "stopped" — o mesmo de stopEnrollment, na ficha);
+//   2. cancela as tarefas ainda PENDENTES dessas inscrições (status "skipped").
+//
+// O QUE ELA NÃO FAZ, DE PROPÓSITO:
+//   - não toca em tarefa `done`: o toque saiu, o histórico é o que aconteceu, não o que
+//     a gente gostaria que tivesse acontecido;
+//   - não apaga a inscrição: "stopped" preserva o que o contato recebeu antes. Apagar
+//     levaria as tarefas junto (FK cascade) e o relatório da cadência mentiria depois;
+//   - não mexe em `replied`/`finished` — essas já acabaram sozinhas.
+//
+// `sequenceId` opcional: com cadência escolhida, sai só daquela; sem cadência, sai de
+// TODAS. A tela pergunta antes, porque o número de toques cancelados é a parte que não
+// volta.
+// ============================================================
+type ResDesinscrever = {
+  ok?: boolean;
+  encerradas?: number;    // inscrições que passaram para "stopped"
+  contatos?: number;      // pessoas realmente afetadas
+  tarefas?: number;       // toques pendentes cancelados
+  semCadencia?: number;   // selecionados que não estavam em cadência nenhuma
+  truncado?: boolean;
+  teto?: number;
+  selecionados?: number;
+  error?: string;
+};
+
+export async function desinscreverLote(
+  contactIds: string[],
+  sequenceId?: string | null
+): Promise<ResDesinscrever> {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  if (!contactIds?.length) return { error: "Nenhum contato selecionado." };
+
+  const ids = Array.from(new Set(contactIds.filter(Boolean))).slice(0, TETO_INSCRICAO);
+  const truncado = contactIds.length > ids.length;
+
+  try {
+    // ---------- 1) quais inscrições estão de pé, em fatias ----------
+    const inscricoes: { id: string; contact_id: string; sequence_id: string }[] = [];
+    for (let i = 0; i < ids.length; i += FATIA_CONSULTA) {
+      let q = supabase
+        .from("enrollments")
+        .select("id, contact_id, sequence_id")
+        .eq("tenant_id", tenant_id)
+        .in("status", ["active", "paused"])
+        .in("contact_id", ids.slice(i, i + FATIA_CONSULTA));
+      if (sequenceId) q = q.eq("sequence_id", sequenceId);
+      const { data, error } = await q;
+      // erro aqui NÃO pode virar "[]": encerraria zero e a tela diria "pronto"
+      if (error) return { error: msgErro(error) };
+      inscricoes.push(...((data as any[]) || []));
+    }
+
+    const contatosAfetados = new Set(inscricoes.map((e) => e.contact_id));
+    const semCadencia = ids.length - contatosAfetados.size;
+
+    if (!inscricoes.length) {
+      return {
+        ok: true, encerradas: 0, contatos: 0, tarefas: 0,
+        semCadencia, truncado, teto: TETO_INSCRICAO, selecionados: ids.length,
+      };
+    }
+
+    const enrIds = inscricoes.map((e) => e.id);
+
+    // ---------- 2) conta os toques pendentes ANTES de cancelar ----------
+    // Depois do update eles já não são "pending" — contar depois devolveria zero e o
+    // relatório diria "nenhum toque cancelado" justamente quando cancelou centenas.
+    let tarefas = 0;
+    for (let i = 0; i < enrIds.length; i += FATIA_CONSULTA) {
+      const { count, error } = await supabase
+        .from("tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending")
+        .in("enrollment_id", enrIds.slice(i, i + FATIA_CONSULTA));
+      if (error) return { error: msgErro(error) };
+      tarefas += count ?? 0;
+    }
+
+    // ---------- 3) cancela as tarefas, depois encerra as inscrições ----------
+    // Nesta ordem de propósito: se parar no meio, sobra inscrição ativa sem tarefa
+    // (visível e corrigível) em vez de tarefa órfã disparando de cadência encerrada.
+    for (let i = 0; i < enrIds.length; i += FATIA_CONSULTA) {
+      const fatia = enrIds.slice(i, i + FATIA_CONSULTA);
+      const { error: errT } = await supabase
+        .from("tasks")
+        .update({ status: "skipped" })
+        .eq("status", "pending")
+        .in("enrollment_id", fatia);
+      if (errT) return { error: msgErro(errT) };
+    }
+
+    let encerradas = 0;
+    for (let i = 0; i < enrIds.length; i += FATIA_CONSULTA) {
+      const fatia = enrIds.slice(i, i + FATIA_CONSULTA);
+      const { data, error: errE } = await supabase
+        .from("enrollments")
+        .update({ status: "stopped" })
+        .in("id", fatia)
+        .select("id");
+      if (errE) return { error: msgErro(errE) };
+      encerradas += ((data as any[]) || []).length;
+    }
+
+    let nomeCad = "todas as cadências";
+    if (sequenceId) {
+      const { data: seq } = await supabase.from("sequences").select("name").eq("id", sequenceId).maybeSingle();
+      nomeCad = `a cadência "${(seq?.name as string) || "?"}"`;
+    }
+    await logAction(supabase, {
+      tenant_id, user_id,
+      action: "contact_unenroll_bulk", entity: "contact", entity_id: sequenceId || null,
+      qtd: encerradas,
+      detail:
+        `Tirou ${contatosAfetados.size} contato(s) de ${nomeCad}: ${encerradas} inscrição(ões) encerrada(s) ` +
+        `e ${tarefas} toque(s) pendente(s) cancelado(s).`,
+      meta: {
+        cadencia: sequenceId ? nomeCad : null, encerradas, contatos: contatosAfetados.size,
+        tarefas, semCadencia, selecionados: ids.length,
+      },
+    });
+
+    revalidatePath("/dashboard/contatos");
+    revalidatePath("/dashboard");
+    return {
+      ok: true, encerradas, contatos: contatosAfetados.size, tarefas,
+      semCadencia, truncado, teto: TETO_INSCRICAO, selecionados: ids.length,
+    };
+  } catch (e: any) {
+    return { error: msgErro(e) };
+  }
+}
+
 export async function bulkEnroll(contactIds: string[], sequenceId: string): Promise<ResEnroll> {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };

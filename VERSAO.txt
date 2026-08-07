@@ -1,17 +1,30 @@
 Contatia — versão deste pacote
 ==============================
-v2026.08.07-65
+v2026.08.07-66
 
 Migrations: nenhuma nova.
 
-CONSERTO: o filtro de CADÊNCIA tinha sumido da fila de hoje.
-Causa: quando a fila passou a ser paginada (v60), a lista de ids de matrícula cresceu
-de centenas para milhares. As três consultas de apoio (nome da cadência, tags, última
-atividade) mandavam TODOS os ids numa URL só — que estourou o limite do servidor e
-passou a ser recusada. Sem nome de cadência, a caixa "Todas as cadências" nem era
-desenhada. Nada deu erro.
-Agora essas consultas vão em fatias de 200, e se ainda assim falharem a tela avisa
-em vez de mostrar a barra de filtros incompleta.
+NOVO: botão DESINSCREVER na tela de Contatos (barra de ações em lote).
+Ficava só dentro da ficha, uma inscrição por vez — quem inscrevia 300 na cadência
+errada tinha que abrir 300 fichas. A entrada era em lote; a saída, não.
 
-COMO CONFERIR: rodapé do menu = "v2026.08.07-65" + 7 do commit.
-Depois de publicar, a caixa "Todas as cadências" tem de reaparecer ao lado de "Passo".
+COMO FUNCIONA: usa a MESMA caixa de cadência do "Inscrever".
+  - com uma cadência escolhida  → "Desinscrever"           (sai só daquela)
+  - com a caixa vazia           → "Desinscrever de todas"  (sai de todas)
+Pede confirmação, porque a parte que não volta são os toques agendados.
+
+O QUE ELE FAZ: encerra as inscrições ativas/pausadas (status "stopped") e cancela as
+tarefas PENDENTES delas (status "skipped").
+O QUE ELE NÃO FAZ: não toca em tarefa já concluída, não apaga a inscrição (o histórico
+da cadência continua honesto) e não mexe em quem já respondeu/terminou.
+
+O relatório volta com números reais: quantos contatos saíram, quantas inscrições
+encerraram, quantos toques foram cancelados e quantos já não estavam em cadência.
+Os toques pendentes são CONTADOS ANTES do cancelamento — contar depois devolveria
+zero justamente quando cancelou centenas.
+
+Fica no Registro (Resultados → Registro) como "Tirou da cadência em lote", marcado
+como ação destrutiva: para desfazer, só inscrevendo de novo — e o cronograma recomeça.
+
+COMO CONFERIR: rodapé do menu = "v2026.08.07-66" + 7 do commit.
+Marque alguns contatos em Contatos → o botão âmbar aparece ao lado de "Inscrever".
