@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { renderTemplate, addDaysISO, channelLabel, type Channel } from "@/lib/cadence";
 import { variacoesDoPasso, escolherVariacao } from "@/lib/variacoes";
+import { normalizarCondicao } from "@/lib/condicoes";
 import { isManager } from "@/lib/permissions";
 import { logAction } from "@/lib/actionLog";
 
@@ -43,6 +44,8 @@ export type StepInput = {
   // redações ALTERNATIVAS do mesmo passo (a principal é `body`). WhatsApp e Instagram
   // tratam texto idêntico repetido como padrão de disparo — ver @/lib/variacoes.
   body_variants?: string[];
+  // regra opcional do passo ("só se abriu o e-mail") — ver @/lib/condicoes
+  condicao?: { tipo: string; passo?: number | null } | null;
 };
 
 // Limpa o que veio da tela: sem vazio, sem repetido, com teto. O teto é generoso mas
@@ -110,6 +113,7 @@ export async function createSequence(input: {
     subject_b: s.channel === "email" && s.subject_b?.trim() ? s.subject_b.trim() : null,
     body_template: s.body || null,
     body_variants: variacoesLimpas(s.body_variants),
+    condicao: normalizarCondicao(s.condicao),
   }));
   const { error: e2 } = await supabase.from("sequence_steps").insert(steps);
   if (e2) return { error: msgErro(e2) };
@@ -145,6 +149,7 @@ export async function loadSequence(id: string) {
       subject: s.subject || "",
       subject_b: s.subject_b || "",
       body_variants: Array.isArray(s.body_variants) ? (s.body_variants as string[]) : [],
+      condicao: normalizarCondicao((s as any).condicao),
       body: s.body_template || "",
     })) as StepInput[],
   };
@@ -189,6 +194,7 @@ export async function updateSequence(id: string, input: { name: string; audience
     // aplicada, ela ignora `body_variants` e as variações somem ao salvar — sem erro
     // nenhum. Por isso a migration acompanha esta entrega.
     body_variants: variacoesLimpas(s.body_variants),
+    condicao: normalizarCondicao(s.condicao),
   }));
   const { error: e2 } = await supabase.rpc("replace_sequence_steps", {
     p_seq: id,
@@ -305,6 +311,9 @@ export async function enrollContact(contactId: string, sequenceId: string) {
       title: renderTemplate(chosenSubject, contact) || channelLabel[s.channel as Channel],
       generated_content: renderTemplate(escolha.texto || s.body_template, contact),
       body_variant: escolha.indice,
+      // a condição vai JUNTO com a tarefa: ela é o compromisso já assumido com este
+      // contato, e editar a cadência amanhã não pode mudar o que está na fila sozinho
+      condicao: normalizarCondicao((s as any).condicao),
       due_date: addDaysISO(today, offset),
       status: "pending",
       step_position: s.position,

@@ -7,6 +7,7 @@ import {
   replyWhatsApp,
   replyEmail,
   rascunharResposta,
+  revisarRespostasAutomaticas,
   markThreadRead,
   createContactFromThread,
   createContactFromEmailThread,
@@ -133,6 +134,42 @@ export default function RespostasInbox({
         setIaErro(e?.message || "Falha ao falar com a IA.");
       } finally {
         setIaPend(false);
+      }
+    })();
+  }
+
+  // ============================================================
+  // CENTRAL AUTOMÁTICA QUE VIROU "RESPOSTA"
+  //
+  // O conserto no webhook vale de agora em diante. O que já está no banco continua
+  // errado: contato quente por causa de um "Bem-vindo(a) ao atendimento automático" e,
+  // pior, cadência PAUSADA por um robô. Este painel varre os últimos 60 dias e mostra
+  // o que achou ANTES de mexer — corrigir um score em silêncio, que talvez você tenha
+  // usado para decidir alguma coisa, seria trocar um erro por outro.
+  // ============================================================
+  const [autoPend, setAutoPend] = useState(false);
+  const [autoRes, setAutoRes] = useState<any>(null);
+  const [autoMsg, setAutoMsg] = useState<string | null>(null);
+
+  function revisarAuto(aplicar: boolean) {
+    setAutoPend(true);
+    setAutoMsg(null);
+    (async () => {
+      try {
+        const r = (await revisarRespostasAutomaticas({ aplicar })) as any;
+        if (r?.error) { setAutoMsg(r.error); return; }
+        if (aplicar) {
+          setAutoMsg(
+            `✓ ${r.corrigidas} corrigida(s) · ${r.cadenciasReativadas} cadência(s) voltaram a andar · ` +
+            `${r.toquesDevolvidos} toque(s) futuros devolvidos à fila.`
+          );
+          setAutoRes({ ...(autoRes || {}), encontradas: 0, contatos: [] });
+          router.refresh();
+        } else {
+          setAutoRes(r);
+        }
+      } finally {
+        setAutoPend(false);
       }
     })();
   }
@@ -280,6 +317,60 @@ export default function RespostasInbox({
                 </Link>
               </div>
             ) : (
+              <div className="mt-2 hidden" />
+            )}
+            {/* --- CENTRAL AUTOMÁTICA: revisão do que já entrou errado --- */}
+            {!selMode && (
+              <div className="mt-2 rounded-lg border border-line bg-muted/40 p-2 text-[11px]">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="font-semibold text-brand hover:underline disabled:opacity-50"
+                    disabled={autoPend}
+                    onClick={() => revisarAuto(false)}
+                    title="Procura, nos últimos 60 dias, respostas que na verdade são de central automática — elas pontuaram como resposta e pausaram a cadência."
+                  >
+                    {autoPend ? "Procurando…" : "🤖 Revisar respostas automáticas"}
+                  </button>
+                  {autoRes && (
+                    <span className="text-subtle">
+                      {autoRes.encontradas
+                        ? `${autoRes.encontradas} encontrada(s)`
+                        : "nenhuma encontrada nos últimos 60 dias"}
+                    </span>
+                  )}
+                </div>
+
+                {autoRes?.encontradas ? (
+                  <div className="mt-2 space-y-1">
+                    {(autoRes.contatos || []).map((c: any, i: number) => (
+                      <p key={i} className="truncate text-subtle">
+                        <b className="text-ink">{c.nome}</b> · {c.texto}
+                      </p>
+                    ))}
+                    {autoRes.encontradas > (autoRes.contatos || []).length && (
+                      <p className="text-subtle">…e mais {autoRes.encontradas - (autoRes.contatos || []).length}.</p>
+                    )}
+                    <p className="pt-1 text-subtle">
+                      Corrigir tira os pontos, marca o evento como automático e faz a <b>cadência voltar a andar</b>
+                      (os toques futuros que tinham sido cancelados voltam para a fila). Toque com data já vencida
+                      fica cancelado — revivê-lo despejaria semanas de mensagens atrasadas de uma vez.
+                    </p>
+                    <button
+                      type="button"
+                      className="btn-brand mt-1 py-1 text-[11px]"
+                      disabled={autoPend}
+                      onClick={() => revisarAuto(true)}
+                    >
+                      {autoPend ? "Corrigindo…" : `Corrigir ${autoRes.encontradas}`}
+                    </button>
+                  </div>
+                ) : null}
+                {autoMsg && <p className="mt-1 text-signal">{autoMsg}</p>}
+              </div>
+            )}
+
+            {selMode && (
               <div className="space-y-2 rounded-lg border border-brand/30 bg-brand-soft/40 p-2">
                 <div className="flex items-center justify-between gap-2">
                   <label className="flex cursor-pointer items-center gap-1.5 font-medium">

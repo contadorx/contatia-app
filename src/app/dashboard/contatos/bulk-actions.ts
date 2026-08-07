@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { logAction } from "@/lib/actionLog";
 import { variacoesDoPasso, escolherVariacao } from "@/lib/variacoes";
+import { normalizarCondicao } from "@/lib/condicoes";
 
 async function ctx() {
   const supabase = createClient();
@@ -242,6 +243,7 @@ export async function bulkEnroll(contactIds: string[], sequenceId: string): Prom
           title: renderTemplate(assunto, c) || (channelLabel as any)[s.channel],
           generated_content: renderTemplate(escolha.texto || s.body_template, c),
           body_variant: escolha.indice,
+          condicao: normalizarCondicao((s as any).condicao),
           due_date: addDaysISO(hoje, offset),
           status: "pending",
           step_position: s.position,

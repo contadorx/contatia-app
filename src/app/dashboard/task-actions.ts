@@ -165,7 +165,7 @@ async function enviarUm(
     // enrollment_id/step_position entram aqui para o rastreio saber DE QUAL PASSO o
     // e-mail saiu — sem isso, "cliques e aberturas por passo" é impossível de montar
     // depois: a origem só é conhecida no momento do envio.
-    .select("id, channel, title, generated_content, contact_id, email_account_id, enrollment_id, step_position, contacts(email, name, email_status)")
+    .select("id, channel, title, generated_content, contact_id, email_account_id, enrollment_id, step_position, condicao, contacts(*)")
     .eq("id", taskId)
     .single();
   if (!task) return { error: "Tarefa não encontrada." };
@@ -187,6 +187,22 @@ async function enviarUm(
       return { error: AVISO_LIXO };
     }
   }
+  // ---- PASSO CONDICIONAL: reconfere antes de mandar ----
+  // O cron já limpa a fila do dia; isto é a rede para a janela entre uma coisa e outra
+  // (e para quem dispara uma tarefa de amanhã pela ficha).
+  if ((task as any).condicao) {
+    const { avaliarCondicao, rotuloCondicao } = await import("@/lib/condicoes");
+    const r = await avaliarCondicao(supabase, (task as any).condicao, {
+      contactId: (task as any).contact_id,
+      enrollmentId: (task as any).enrollment_id,
+      contato: (task as any).contacts || {},
+    });
+    if (!r.ok) {
+      await supabase.from("tasks").update({ status: "skipped" }).eq("id", taskId).eq("status", "pending");
+      return { error: `Passo condicional (${rotuloCondicao((task as any).condicao)}): ${r.motivo}. Toque pulado.` };
+    }
+  }
+
   const to = (task as any).contacts?.email as string | undefined;
   if (!to) {
     // contato sem e-mail: pula a tarefa (não fica pendente para sempre) — cobre também
@@ -469,7 +485,7 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
 
   const { data: task } = await supabase
     .from("tasks")
-    .select("id, channel, generated_content, contact_id, contacts(phone, name)")
+    .select("id, channel, generated_content, contact_id, enrollment_id, condicao, contacts(*)")
     .eq("id", taskId)
     .single();
   if (!task) return { error: "Tarefa não encontrada." };
@@ -479,6 +495,19 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
     const { textoTemLixo, AVISO_LIXO } = await import("@/lib/nomeValido");
     if (textoTemLixo((task as any).generated_content)) return { error: AVISO_LIXO };
   }
+  if ((task as any).condicao) {
+    const { avaliarCondicao, rotuloCondicao } = await import("@/lib/condicoes");
+    const r = await avaliarCondicao(supabase, (task as any).condicao, {
+      contactId: (task as any).contact_id,
+      enrollmentId: (task as any).enrollment_id,
+      contato: (task as any).contacts || {},
+    });
+    if (!r.ok) {
+      await supabase.from("tasks").update({ status: "skipped" }).eq("id", taskId).eq("status", "pending");
+      return { error: `Passo condicional (${rotuloCondicao((task as any).condicao)}): ${r.motivo}. Toque pulado.` };
+    }
+  }
+
   const phone = (task as any).contacts?.phone as string | undefined;
   if (!phone) return { error: "Contato sem telefone." };
 

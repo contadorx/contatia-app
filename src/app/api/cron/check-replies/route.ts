@@ -216,6 +216,19 @@ export async function GET(req: Request) {
   const HORA_DIARIA_UTC = 14;                   // 11h de Brasília
   const faseDiaria = forcar || (agoraH === HORA_DIARIA_UTC && agoraMin < 5);
 
+  // ---- PASSOS CONDICIONAIS: limpa a fila do dia ANTES de o operador olhar ----
+  // Sem isto, o toque condicional apareceria na fila, contaria no "toques de hoje" e
+  // sumiria na hora de enviar — o número do dia mentiria todo dia.
+  let condPuladas = 0;
+  try {
+    if (!faseHoraria) throw new Error("__pular__");
+    const { resolverCondicoesDoDia } = await import("@/lib/resolverCondicoes");
+    const r = await resolverCondicoesDoDia(admin);
+    condPuladas = r.puladas;
+  } catch {
+    /* condição não resolvida nesta volta: o portão do envio ainda protege */
+  }
+
   let autoRan = 0;
   try {
     if (!faseHoraria) throw new Error("__pular__");
@@ -384,5 +397,5 @@ export async function GET(req: Request) {
 
   // As fases entram na resposta: "por que nao rodou?" precisa ser respondivel olhando
   // a saida do cron, nao lendo o codigo.
-  return NextResponse.json({ ok: true, fases: { imap: true, horaria: faseHoraria, diaria: faseDiaria }, accounts: (accounts as any[])?.length || 0, marked, suggestions, bounced, autoRan, purged, reminders, seatsSynced, lifecycle, dunning, retention, crm, pagamentos, discovery, errors });
+  return NextResponse.json({ ok: true, fases: { imap: true, horaria: faseHoraria, diaria: faseDiaria }, accounts: (accounts as any[])?.length || 0, marked, suggestions, bounced, autoRan, condPuladas, purged, reminders, seatsSynced, lifecycle, dunning, retention, crm, pagamentos, discovery, errors });
 }

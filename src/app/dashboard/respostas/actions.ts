@@ -3,7 +3,7 @@
 import { msgErro } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { dataCurta } from "@/lib/datas";
+import { dataCurta, diaISO } from "@/lib/datas";
 
 async function ctx() {
   const supabase = createClient();
@@ -580,4 +580,116 @@ export async function rascunharResposta(input: {
   } as any);
 
   return { texto, usados: (usados ?? 0) + 1, quota };
+}
+
+// ============================================================
+// LIMPAR O ESTRAGO QUE JÁ ESTÁ NO BANCO
+//
+// O conserto no webhook vale para o que chegar de agora em diante. O que já entrou
+// continua lá: contatos com +30 pontos por causa de um "Bem-vindo(a) ao atendimento
+// automático", aparecendo como quentes — e, pior, com a cadência PAUSADA e os toques
+// seguintes cancelados por um robô.
+//
+// Esta ação varre as respostas de WhatsApp dos últimos 60 dias, roda o MESMO detector
+// e devolve o que encontrou. Em duas etapas de propósito: primeiro só olha (`aplicar`
+// falso), e a tela mostra quantos e quais. Corrigir em silêncio um score que você
+// talvez tenha usado para decidir alguma coisa seria trocar um erro por outro.
+//
+// O que a correção faz, quando você manda:
+//   · o evento vira `auto_reply` (o histórico continua mostrando que a central falou);
+//   · os 30 pontos saem do score (nunca abaixo de zero);
+//   · a cadência volta a ANDAR: matrícula de 'replied' para 'active' e os toques
+//     futuros que tinham sido cancelados voltam para pendente.
+//
+// Toque com data JÁ VENCIDA fica cancelado de propósito: revivê-lo despejaria semanas
+// de mensagens atrasadas na fila de hoje, todas de uma vez — que é justamente o tipo
+// de disparo que derruba número.
+// ============================================================
+export async function revisarRespostasAutomaticas(opts?: { aplicar?: boolean }): Promise<{
+  ok?: boolean;
+  encontradas?: number;
+  contatos?: { nome: string; texto: string; motivo: string | null }[];
+  corrigidas?: number;
+  cadenciasReativadas?: number;
+  toquesDevolvidos?: number;
+  error?: string;
+}> {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const desde = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString();
+  const { data: evs, error } = await supabase
+    .from("events")
+    .select("id, contact_id, created_at, meta, contacts(name, score)")
+    .eq("tenant_id", tenant_id)
+    .eq("type", "replied")
+    .gte("created_at", desde)
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (error) return { error: msgErro(error) };
+
+  const { pareceRespostaAutomatica } = await import("@/lib/respostaAutomatica");
+  const achados = ((evs as any[]) || [])
+    .map((e) => ({ e, v: pareceRespostaAutomatica(e.meta?.text) }))
+    .filter((x) => x.v.automatica && x.e.contact_id);
+
+  if (!opts?.aplicar) {
+    return {
+      ok: true,
+      encontradas: achados.length,
+      contatos: achados.slice(0, 8).map((x) => ({
+        nome: (x.e.contacts?.name as string) || "(sem nome)",
+        texto: String(x.e.meta?.text || "").slice(0, 120),
+        motivo: x.v.motivo,
+      })),
+    };
+  }
+
+  const { POINTS } = await import("@/lib/scoring");
+  const pontosDaResposta = POINTS["replied"] || 30;
+  const hoje = diaISO();
+  let corrigidas = 0;
+  let cadenciasReativadas = 0;
+  let toquesDevolvidos = 0;
+
+  for (const { e, v } of achados) {
+    // 1) o evento deixa de ser "respondeu"
+    const { error: eEv } = await supabase
+      .from("events")
+      .update({ type: "auto_reply", meta: { ...(e.meta || {}), motivo: v.motivo, corrigido_em: new Date().toISOString() } })
+      .eq("id", e.id);
+    if (eEv) continue;
+    corrigidas++;
+
+    // 2) devolve os pontos
+    const scoreAtual = Number(e.contacts?.score ?? 0);
+    await supabase
+      .from("contacts")
+      .update({ score: Math.max(0, scoreAtual - pontosDaResposta) })
+      .eq("id", e.contact_id);
+
+    // 3) a cadência volta a andar
+    const { data: paradas } = await supabase
+      .from("enrollments")
+      .select("id")
+      .eq("tenant_id", tenant_id)
+      .eq("contact_id", e.contact_id)
+      .eq("status", "replied");
+    for (const enr of ((paradas as any[]) || [])) {
+      await supabase.from("enrollments").update({ status: "active" }).eq("id", enr.id);
+      cadenciasReativadas++;
+      const { data: revividas } = await supabase
+        .from("tasks")
+        .update({ status: "pending" })
+        .eq("enrollment_id", enr.id)
+        .eq("status", "skipped")
+        .gte("due_date", hoje)
+        .select("id");
+      toquesDevolvidos += ((revividas as any[]) || []).length;
+    }
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/respostas");
+  return { ok: true, encontradas: achados.length, corrigidas, cadenciasReativadas, toquesDevolvidos };
 }

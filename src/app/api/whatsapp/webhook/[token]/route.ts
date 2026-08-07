@@ -174,6 +174,52 @@ export async function POST(req: Request, { params }: { params: { token: string }
   // corrida: o índice único barrou uma duplicata concorrente → não segue para pontuar
   if (insErr) return NextResponse.json({ ok: true, duplicate: true });
 
+  // ============================================================
+  // A CENTRAL AUTOMÁTICA DO OUTRO LADO NÃO PODE DESLIGAR A SUA PROSPECÇÃO
+  //
+  // "Olá! Bem-vindo(a) ao atendimento automático da X" chegava aqui como RESPOSTA:
+  // +30 pontos, contato quente no painel e — o caro — a cadência PAUSADA com os
+  // toques seguintes cancelados. O robô do outro lado desligava a sequência, e o lead
+  // nunca mais era tocado, sem nada aparecer em lugar nenhum.
+  //
+  // A mensagem continua sendo gravada (ela existe, e a caixa de Respostas mostra),
+  // mas não pontua, não pausa e não entra no "Engajou agora". O evento fica como
+  // `auto_reply`: o histórico registra que a central respondeu, sem chamar aquilo de
+  // engajamento.
+  //
+  // O tempo desde o SEU envio entra na conta porque é o sinal mais honesto que existe
+  // (ninguém lê, decide e escreve em 20 segundos) — mas nunca decide sozinho.
+  // ============================================================
+  let segundosDepoisDoEnvio: number | null = null;
+  if (contact) {
+    const { data: ultimaSaida } = await admin
+      .from("whatsapp_messages")
+      .select("created_at")
+      .eq("tenant_id", tenant_id)
+      .eq("contact_id", contact.id)
+      .eq("direction", "out")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const quando = (ultimaSaida as any)?.created_at;
+    if (quando) segundosDepoisDoEnvio = Math.max(0, (Date.now() - new Date(quando).getTime()) / 1000);
+  }
+  const { pareceRespostaAutomatica } = await import("@/lib/respostaAutomatica");
+  const auto = pareceRespostaAutomatica(text, { segundosDepoisDoEnvio });
+
+  if (contact && auto.automatica) {
+    await admin.from("events").insert({
+      tenant_id,
+      contact_id: contact.id,
+      // tipo próprio: vale 0 ponto (não está em POINTS) e fica fora do "Engajou agora"
+      type: "auto_reply",
+      meta: { via: "whatsapp", text: text?.slice(0, 280) || "", motivo: auto.motivo, sinais: auto.sinais },
+    });
+    // `last_activity_at` anda (houve movimento no número), mas o score não
+    await admin.from("contacts").update({ last_activity_at: new Date().toISOString() }).eq("id", contact.id);
+    return NextResponse.json({ ok: true, stored: true, automatica: true, motivo: auto.motivo });
+  }
+
   // se é um contato conhecido em cadência ativa → pausa a sequência e pontua
   let marked = 0;
   if (contact) {

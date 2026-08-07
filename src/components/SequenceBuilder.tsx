@@ -6,6 +6,7 @@ import { createSequence, updateSequence, generateSequenceAI, loadAiContext, save
 import { checkSpamContent } from "@/app/dashboard/config/domain-actions";
 import type { Channel } from "@/lib/cadence";
 import SmartSelect, { SmartOption } from "@/components/SmartSelect";
+import { CONDICOES } from "@/lib/condicoes";
 import RichTextEditor, { type RichTextHandle } from "@/components/RichTextEditor";
 import SpamScore, { type SpamResultView } from "@/components/SpamScore";
 
@@ -430,6 +431,36 @@ export default function SequenceBuilder({
                 </button>
               )}
             </div>
+            {/* ============================================================
+                O PASSO CONDICIONAL
+                Fica logo abaixo do canal, antes do texto, porque é a primeira decisão:
+                "este passo é para todo mundo, ou só para quem fez alguma coisa?".
+                ============================================================ */}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-subtle">Enviar</span>
+              <div className="w-[260px]">
+                <SmartSelect
+                  clearable
+                  className="py-1 text-xs"
+                  placeholder="para todos (sem condição)"
+                  value={(s as any).condicao?.tipo || ""}
+                  onValueChange={(v) => update(i, { condicao: v ? { tipo: v, passo: null } : null } as any)}
+                  options={CONDICOES.map((c): SmartOption => ({ value: c.v, label: c.label }))}
+                />
+              </div>
+              {(s as any).condicao?.tipo && (
+                <span className="text-[11px] text-subtle">
+                  {CONDICOES.find((c) => c.v === (s as any).condicao?.tipo)?.ajuda}
+                </span>
+              )}
+            </div>
+            {(s as any).condicao?.tipo && (
+              <p className="mt-1 text-[11px] text-subtle">
+                Quando a condição não bater na data do passo, o toque é <b>pulado</b> (fica registrado na ficha do
+                contato com o motivo) e a cadência segue para o passo seguinte. Ninguém fica esperando para sempre.
+              </p>
+            )}
+
             {s.channel === "email" && (
               <>
                 <input

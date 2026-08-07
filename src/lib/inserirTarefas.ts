@@ -29,9 +29,18 @@ export async function inserirTarefas(
   let semVariacao = false;
   let inseridas = 0;
 
+  // colunas que nascem em migrations recentes; se o banco ainda não as tem, a segunda
+  // tentativa vai sem elas em vez de perder a inscrição inteira
+  const OPCIONAIS = ["body_variant", "condicao"];
+  const semOpcionais = (l: any) => {
+    const copia = { ...l };
+    for (const k of OPCIONAIS) delete copia[k];
+    return copia;
+  };
+
   for (let i = 0; i < linhas.length; i += LOTE) {
     const fatia = linhas.slice(i, i + LOTE);
-    const enviar = semVariacao ? fatia.map(({ body_variant, ...resto }: any) => resto) : fatia;
+    const enviar = semVariacao ? fatia.map(semOpcionais) : fatia;
 
     const { error } = await supabase.from("tasks").insert(enviar);
     if (!error) { inseridas += fatia.length; continue; }
@@ -44,9 +53,7 @@ export async function inserirTarefas(
 
     // segunda e última tentativa desta fatia, sem a coluna nova
     semVariacao = true;
-    const { error: erro2 } = await supabase.from("tasks").insert(
-      fatia.map(({ body_variant, ...resto }: any) => resto)
-    );
+    const { error: erro2 } = await supabase.from("tasks").insert(fatia.map(semOpcionais));
     if (erro2) return { inseridas, error: (erro2 as any)?.message || "Falha ao criar as tarefas.", semVariacao };
     inseridas += fatia.length;
   }

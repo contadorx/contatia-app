@@ -1,17 +1,20 @@
 Contatia — versão deste pacote
 ==============================
-v2026.08.06-61
+v2026.08.06-63
 
-Migrations: nenhuma nova (0111 e 0112 já aplicadas).
+⚠ MIGRATION NOVA: 0113_passo_condicional.sql (entregue à parte). Sem ela o app
+   funciona como hoje — as condições simplesmente não são salvas.
 
-O que entrou agora:
-· O filtro de E-mail (veredito) virou MULTI com busca, igual a Tag/Produto/Cadência.
-  Dá para marcar "Caixa geral" + "Outro nome" de uma vez — que é a pergunta real de
-  trabalho ("o que ainda dá trabalho"), antes só possível filtrando duas vezes.
-· Dentro da caixa é OU, como nas outras; entre caixas continua sendo E.
-· "Sem e-mail" sozinho continua resolvido pelo banco (rápido); junto com os outros,
-  entra na peneira sem podar quem não tem endereço.
+O que entrou — PASSO CONDICIONAL na cadência:
+· Em cada passo: "Enviar [para todos / só se abriu o e-mail / só se NÃO abriu /
+  só se clicou / só se NÃO clicou / só se tem WhatsApp / e-mail / Instagram /
+  LinkedIn]".
+· Quando a condição não bate na data do passo, o toque é PULADO, com o motivo
+  registrado na ficha do contato. A cadência segue para o passo seguinte.
+· Quem resolve é o cron, de hora em hora, ANTES de a fila do dia aparecer — assim
+  o "toques de hoje" não conta o que vai sumir. O envio reconfere por garantia.
+· Condição de DADO (tem WhatsApp/e-mail) já valia na inscrição; agora é
+  reconferida na hora do toque, porque o dado muda (enriquecimento, número que se
+  provou sem WhatsApp).
 
-Inclui o conserto de v60 (fila cortada no milésimo e "sem próximo passo").
-
-COMO CONFERIR: rodapé do menu = "v2026.08.06-61" + 7 do commit.
+COMO CONFERIR: rodapé do menu = "v2026.08.06-63" + 7 do commit.
