@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.06-63";
+export const VERSAO_APP = "2026.08.07-64";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "passo condicional na cadencia: so envia se abriu/clicou/tem o canal; resolvido pelo cron antes de a fila do dia aparecer";
+export const VERSAO_NOTAS = "fila de hoje: filtro por passo da cadencia e selo passo N de M em cada linha";

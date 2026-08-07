@@ -1,20 +1,14 @@
 Contatia — versão deste pacote
 ==============================
-v2026.08.06-63
+v2026.08.07-64
 
-⚠ MIGRATION NOVA: 0113_passo_condicional.sql (entregue à parte). Sem ela o app
-   funciona como hoje — as condições simplesmente não são salvas.
+Migrations: nenhuma nova (0111, 0112 e 0113 já entregues).
 
-O que entrou — PASSO CONDICIONAL na cadência:
-· Em cada passo: "Enviar [para todos / só se abriu o e-mail / só se NÃO abriu /
-  só se clicou / só se NÃO clicou / só se tem WhatsApp / e-mail / Instagram /
-  LinkedIn]".
-· Quando a condição não bate na data do passo, o toque é PULADO, com o motivo
-  registrado na ficha do contato. A cadência segue para o passo seguinte.
-· Quem resolve é o cron, de hora em hora, ANTES de a fila do dia aparecer — assim
-  o "toques de hoje" não conta o que vai sumir. O envio reconfere por garantia.
-· Condição de DADO (tem WhatsApp/e-mail) já valia na inscrição; agora é
-  reconferida na hora do toque, porque o dado muda (enriquecimento, número que se
-  provou sem WhatsApp).
+O que entrou agora, na fila de hoje:
+· Filtro por PASSO da cadência ("Todos os passos" → Passo 1, 2, 3…). As opções saem
+  dos passos que estão na fila, não de 1 a 10 no vazio.
+· Selo "3/7" em cada linha (passo 3 de 7), com a cadência no title.
+· O filtro por CADÊNCIA já existia — agora os dois trabalham juntos: "Enquadria,
+  passo 1" é a fila do primeiro contato; "passo 5+" é a de quem não respondeu.
 
-COMO CONFERIR: rodapé do menu = "v2026.08.06-63" + 7 do commit.
+COMO CONFERIR: rodapé do menu = "v2026.08.07-64" + 7 do commit.

@@ -19,6 +19,9 @@ type Task = {
   due_date: string;
   contact_id: string | null;
   cadence?: string | null;
+  // passo da cadência (1-based na tela) e quantos passos ela tem
+  passo?: number | null;
+  passosTotal?: number | null;
   tags?: { id: string; name: string; color: string }[];
   is_future?: boolean;
   hot_now?: { type: string; created_at: string } | null;
@@ -113,6 +116,19 @@ export default function TaskQueue({
   const [cadFilters, setCadFilters] = useState<string[]>([]);   // filtro por VÁRIAS cadências
 
   // ============================================================
+  // FILTRO POR PASSO DA CADÊNCIA
+  //
+  // Primeiro contato e sétimo toque de quem nunca respondeu não se trabalham do mesmo
+  // jeito — nem se priorizam do mesmo jeito quando o limite do dia aperta. A tarefa
+  // sempre soube em que passo estava; a fila é que mostrava tudo igual.
+  //
+  // As opções saem dos passos que ESTÃO na fila (como cadência e responsável): oferecer
+  // "passo 9" quando ninguém está nele só faz filtrar e ver vazio.
+  // ============================================================
+  const passos = Array.from(new Set(allTasks.map((t) => t.passo).filter((p): p is number => !!p))).sort((a, b) => a - b);
+  const [passoFilters, setPassoFilters] = useState<string[]>([]);
+
+  // ============================================================
   // FILTRO POR RESPONSÁVEL
   //
   // As opções saem das tarefas que ESTÃO na fila, não da lista de usuários: oferecer
@@ -130,6 +146,7 @@ export default function TaskQueue({
     if (canalFilters.length && !canalFilters.includes(t.channel)) return false;
     if (tagFilters.length && !(t.tags || []).some((tg) => tagFilters.includes(tg.id))) return false;
     if (cadFilters.length && !cadFilters.includes(t.cadence || "")) return false;
+    if (passoFilters.length && !passoFilters.includes(String(t.passo ?? ""))) return false;
     if (respFilters.length && !respFilters.includes(t.owner_id || "")) return false;
     if (busca) {
       const q = busca.toLowerCase();
@@ -531,6 +548,18 @@ export default function TaskQueue({
             />
           </div>
         )}
+        {passos.length > 1 && (
+          <div className="w-[130px] shrink-0 grow-0">
+            <SmartSelect
+              multiple
+              className="py-1 text-xs"
+              placeholder="Todos os passos"
+              values={passoFilters}
+              onValuesChange={setPassoFilters}
+              options={passos.map((p): SmartOption => ({ value: String(p), label: `Passo ${p}` }))}
+            />
+          </div>
+        )}
         {allTags.length > 0 && (
           <div className="w-[130px] shrink-0 grow-0">
             <SmartSelect
@@ -703,6 +732,16 @@ export default function TaskQueue({
               <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${chanStyle[t.channel]}`}>
                 {channelLabel[t.channel]}
               </span>
+              {/* onde este toque está na sequência: "passo 3 de 7" muda a conversa que
+                  se tem com a pessoa, e é a informação que a fila escondia */}
+              {t.passo ? (
+                <span
+                  className="shrink-0 rounded-lg bg-muted px-1.5 py-1 text-[10px] font-semibold text-subtle"
+                  title={t.cadence ? `${t.cadence} — passo ${t.passo}${t.passosTotal ? ` de ${t.passosTotal}` : ""}` : "Passo da cadência"}
+                >
+                  {t.passosTotal ? `${t.passo}/${t.passosTotal}` : `passo ${t.passo}`}
+                </span>
+              ) : null}
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-2 truncate text-sm font-semibold">
                   {/* O SCORE NA FILA. A ordem já é por score (o servidor ordena assim),

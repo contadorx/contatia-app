@@ -87,7 +87,7 @@ export default async function Today() {
       // O embed de contatos traz `*`: `instagram`/`linkedin` nascem na 0110 e, pedidas
       // pelo nome, derrubariam a FILA INTEIRA enquanto a migration não estivesse
       // aplicada — a tela mais importante do app ficaria vazia sem dizer por quê.
-      .select("id, channel, title, generated_content, due_date, contact_id, enrollment_id, assigned_to, contacts(*)")
+      .select("id, channel, title, generated_content, due_date, contact_id, enrollment_id, assigned_to, step_position, contacts(*)")
       .eq("status", "pending")
       .lte("due_date", in3)
       .order("due_date", { ascending: true })
@@ -144,7 +144,7 @@ export default async function Today() {
 
   const [{ data: enrs }, { data: cts }, { data: evs }] = await Promise.all([
     enrollmentIds.length
-      ? supabase.from("enrollments").select("id, sequences(name)").in("id", enrollmentIds as string[])
+      ? supabase.from("enrollments").select("id, sequence_id, sequences(name)").in("id", enrollmentIds as string[])
       : Promise.resolve({ data: [] as any[] }),
     contactIds.length
       ? supabase.from("contact_tags").select("contact_id, tags(id, name, color)").in("contact_id", contactIds as string[])
@@ -154,7 +154,33 @@ export default async function Today() {
       : Promise.resolve({ data: [] as any[] }),
   ]);
 
-  for (const e of (enrs as any[]) || []) cadenceByEnrollment[e.id] = e.sequences?.name || "";
+  // ============================================================
+  // O PASSO DA CADÊNCIA NA FILA
+  //
+  // A tarefa sempre soube em que passo está (`step_position`), mas isso morria no
+  // banco: na fila todo toque parecia igual. E é uma diferença que muda a decisão —
+  // primeiro contato e sétimo toque de quem nunca respondeu não se trabalham do mesmo
+  // jeito, nem se priorizam do mesmo jeito quando o limite do dia aperta.
+  //
+  // O total de passos vem de uma consulta só (as sequências da fila, não uma por
+  // tarefa), para a linha poder dizer "passo 3 de 7" em vez de um número solto.
+  // ============================================================
+  const sequenciaDoEnrollment: Record<string, string> = {};
+  for (const e of (enrs as any[]) || []) {
+    cadenceByEnrollment[e.id] = e.sequences?.name || "";
+    if (e.sequence_id) sequenciaDoEnrollment[e.id] = e.sequence_id as string;
+  }
+  const seqIds = Array.from(new Set(Object.values(sequenciaDoEnrollment)));
+  const passosPorSequencia: Record<string, number> = {};
+  if (seqIds.length) {
+    const { data: passos } = await supabase
+      .from("sequence_steps")
+      .select("sequence_id")
+      .in("sequence_id", seqIds);
+    for (const p of ((passos as any[]) || [])) {
+      passosPorSequencia[p.sequence_id] = (passosPorSequencia[p.sequence_id] || 0) + 1;
+    }
+  }
   for (const ct of (cts as any[]) || []) {
     if (ct.tags) (tagsByContact[ct.contact_id] ||= []).push(ct.tags);
   }
@@ -361,6 +387,9 @@ export default async function Today() {
   const tasks = sorted.map((t) => ({
     ...t,
     cadence: t.enrollment_id ? cadenceByEnrollment[t.enrollment_id] || null : null,
+    // `step_position` é 0-based no banco; na tela ninguém conta a partir do zero
+    passo: t.step_position != null ? Number(t.step_position) + 1 : null,
+    passosTotal: t.enrollment_id ? passosPorSequencia[sequenciaDoEnrollment[t.enrollment_id]] || null : null,
     tags: t.contact_id ? tagsByContact[t.contact_id] || [] : [],
     is_future: (t.due_date || "") > today,
     hot_now: t.contact_id ? hotNowByContact[t.contact_id] || null : null,
