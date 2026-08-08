@@ -27,6 +27,7 @@ export type AcaoLog =
   | "contact_assign_bulk"
   | "contact_enroll_bulk"
   | "contact_unenroll_bulk"
+  | "fila_auto_envio"
   | "account_tag_bulk"
   | "account_assign_bulk"
   | "meeting_reschedule"
@@ -45,6 +46,8 @@ export const ACAO_LABEL: Record<string, string> = {
   contact_assign_bulk: "Atribuiu contatos em lote",
   contact_enroll_bulk: "Inscreveu em cadência em lote",
   contact_unenroll_bulk: "Tirou da cadência em lote",
+  // sem autor: quem fez foi o cron. O nome diz isso para ninguém procurar culpado.
+  fila_auto_envio: "Fila automática enviou",
   account_tag_bulk: "Aplicou tags em empresas",
   account_assign_bulk: "Atribuiu empresas em lote",
   meeting_reschedule: "Cancelou reunião para remarcar",

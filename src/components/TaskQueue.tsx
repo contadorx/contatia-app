@@ -72,17 +72,35 @@ export default function TaskQueue({
   lastActivity = {},
   allTags = [],
   waMode = "assistido",
+  filaAuto = false,
 }: {
   tasks: Task[];
   hotThreshold: number;
   lastActivity?: LastActivity;
   allTags?: Tag[];
   waMode?: string;
+  /** fila automática ligada (0115): o servidor continua a fila com a aba fechada */
+  filaAuto?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  // ============================================================
+  // A FILA QUE CONTINUA SOZINHA
+  //
+  // Com teto por hora, "Enviar todos" deixa de ser um clique e vira um plano de várias
+  // horas. Antes a tela dizia "100 enviados · 400 na fila — clique de novo", e clicar de
+  // novo devolvia zero até a hora virar: o número estava certo e a leitura era "travou".
+  //
+  // Agora a tela marca a hora em que o teto abre e retoma sozinha. O limite é honesto e
+  // está escrito na mensagem: isto só acontece com esta aba aberta. Fechou, a fila
+  // espera você voltar — é uma retomada no navegador, não um agendamento no servidor.
+  // ============================================================
+  const [retomarEm, setRetomarEm] = useState<number | null>(null);
+  const [retomadas, setRetomadas] = useState(0);
+  const MAX_RETOMADAS = 12;              // ~um turno de trabalho; nunca vira laço eterno
+  const ESPERA_MAX_MS = 3 * 3600_000;    // acima disso não vale prender a aba: avisa e para
   const [focus, setFocus] = useState(0);
   const [editing, setEditing] = useState<Record<string, { subject: string; body: string }>>({});
   // "copiado ✓" por linha: o prefill do Instagram falha em algumas versões do app, e
@@ -254,7 +272,8 @@ export default function TaskQueue({
     start(async () => {
       const res = (await enviarSelecionadas(ids)) as
         { enviados?: number; falhas?: number; ignoradas?: number; restantes?: number;
-          paradoPorTempo?: boolean; detalhe?: string; motivos?: string[]; error?: string } | undefined;
+          paradoPorTempo?: boolean; detalhe?: string; motivos?: string[]; error?: string;
+          paradoPorHora?: boolean; liberaEm?: string | null; avisoHorario?: string | null } | undefined;
       if (!res) { setErr("O envio não retornou resposta (tempo esgotado). Confira “Seus envios de hoje” antes de repetir."); return; }
       if (res.error && !res.enviados) { setErr(res.error); return; }
 
@@ -264,11 +283,16 @@ export default function TaskQueue({
       if (res.ignoradas) partes.push(`${res.ignoradas} marcadas não podiam sair (canal manual, já enviadas ou com data futura)`);
       if (res.restantes) {
         partes.push(
-          res.paradoPorTempo
-            ? `${res.restantes} ficaram para a próxima volta — clique de novo`
-            : `${res.restantes} não saíram`
+          res.paradoPorHora
+            ? `${res.restantes} pararam no teto por hora — voltam a sair ${horaCurta(res.liberaEm)}`
+            : res.paradoPorTempo
+              ? `${res.restantes} ficaram para a próxima volta — clique de novo`
+              : `${res.restantes} não saíram`
         );
       }
+      // A seleção ignora o horário comercial de propósito (quem escolheu foi você) —
+      // mas ignorar em silêncio é como mandar 40 e-mails às 23h sem perceber.
+      if (res.avisoHorario) partes.push(res.avisoHorario);
       setBulkMsg(partes.join(" · ") + ".");
       if (res.motivos?.length) setErr(`Não saíram: ${res.motivos.slice(0, 3).join(" · ")}`);
       setSel(new Set());
@@ -294,6 +318,9 @@ export default function TaskQueue({
             primeiroErro?: string | null; detalhe?: string; error?: string;
             diagnostico?: string | null; motivos?: string[];
             paradoPorLimite?: boolean; paradoPorTempo?: boolean; duracaoMs?: number; msPorEmail?: number | null;
+            paradoPorHora?: boolean; liberaEm?: string | null; foraDoHorario?: boolean; abreEm?: string | null;
+            plano?: string | null; naFila?: number;
+            capacidadeHora?: number | null; usadosHora?: number; folgaHora?: number | null;
             tempos?: { banco: number; smtp: number; copia: number };
             capacidadeHoje?: number; usadosHoje?: number; folgaHoje?: number;
             resumoCapacidade?: string; comoAumentar?: string;
@@ -311,6 +338,16 @@ export default function TaskQueue({
         }
         if (res.error) { setErr(res.error); break; }
 
+        // FORA DO HORÁRIO COMERCIAL: a fila nem começou. Não é falha — é a regra que
+        // você configurou. Some do caminho do erro e vira aviso, com a hora do retorno.
+        if (res.foraDoHorario) {
+          ultima = res;
+          setBulkMsg(null);
+          setErr(res.diagnostico || "A fila está fora do horário de envio configurado.");
+          agendarRetomada(res.abreEm);
+          break;
+        }
+
         ultima = res;
         totalEnviados += res.sent ?? 0;
         totalFalhas += res.failed ?? 0;
@@ -325,6 +362,9 @@ export default function TaskQueue({
 
         // motivos para NÃO dar outra volta
         if (!res.restantes) break;
+        // teto por HORA: a próxima volta agora devolveria zero, mas às HH:MM volta a
+        // sair. Marca a hora e para — a retomada é agendada no fim, com a mensagem.
+        if (res.paradoPorHora) break;
         if (res.paradoPorLimite) break;
         if (!res.sent) break;    // volta inteira sem enviar nada: a próxima repetiria
       }
@@ -344,13 +384,20 @@ export default function TaskQueue({
       if (totalFalhas) partes.push(`${totalFalhas} falharam`);
       if (res.restantes) {
         // "clique de novo" só quando clicar de novo adianta: parada por limite do dia
-        // significa que hoje acabou, e insistir devolveria zero.
+        // significa que hoje acabou, e insistir devolveria zero. Parada por HORA é a
+        // terceira resposta possível — e é a única em que a espera é de minutos.
         partes.push(
-          res.paradoPorLimite
-            ? `${res.restantes} continuam na fila e saem nos próximos dias`
-            : `${res.restantes} ainda na fila — clique de novo para continuar`
+          res.paradoPorHora
+            ? `${res.naFila ?? res.restantes} continuam na fila e voltam a sair ${horaCurta(res.liberaEm)}`
+            : res.paradoPorLimite
+              ? `${res.restantes} continuam na fila e saem nos próximos dias`
+              : `${res.restantes} ainda na fila — clique de novo para continuar`
         );
       }
+      // O PLANO: "60 agora · 100 às 15h · 100 às 16h…". É o que transforma um resto num
+      // cronograma — e o que responde "quando isso termina?" sem ninguém ter que
+      // calcular de cabeça.
+      if (res.plano) partes.push(res.plano);
       if (res.descartadasDaSelecao) {
         partes.push(`${res.descartadasDaSelecao} da sua seleção ficaram de fora (não são e-mail, já saíram, ou vencem depois de hoje)`);
       }
@@ -369,7 +416,12 @@ export default function TaskQueue({
       // do resumo e a pessoa acha que enviou tudo. E vem com a conta do dia + o que
       // fazer, porque "tente amanhã" sozinho não diz se o freio é aquecimento, limite
       // configurado ou caixa de menos.
-      if (res.limiteAtingido) {
+      if (res.paradoPorHora) {
+        // Não vai para o campo de erro: o teto por hora funcionando é o sistema fazendo
+        // o certo. Erro seria o provedor cortar a conexão porque ninguém segurou.
+        agendarRetomada(res.liberaEm);
+      }
+      else if (res.limiteAtingido) {
         setErr(
           [res.limiteAtingido, res.resumoCapacidade, res.comoAumentar ? `Para enviar mais hoje: ${res.comoAumentar}` : ""]
             .filter(Boolean)
@@ -380,6 +432,42 @@ export default function TaskQueue({
       else if (totalFalhas && res.primeiroErro) setErr(`Primeira falha: ${res.primeiroErro}`);
     });
   }
+
+  // "14:07" a partir de um ISO — o formato curto que cabe no meio de uma frase.
+  function horaCurta(iso?: string | null): string {
+    if (!iso) return "na próxima janela";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "na próxima janela";
+    return `às ${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })}`;
+  }
+
+  // Marca a hora de voltar. Recusa esperas longas demais de propósito: prender uma aba
+  // por 14 horas até segunda-feira não é automação, é uma promessa que o navegador não
+  // tem como cumprir (a máquina dorme, a aba é descartada) — e uma promessa dessas some
+  // sem avisar, que é o pior desfecho possível.
+  function agendarRetomada(iso?: string | null) {
+    if (!iso) return;
+    const quando = new Date(iso).getTime();
+    if (isNaN(quando)) return;
+    const espera = quando - Date.now();
+    if (espera > ESPERA_MAX_MS) return;
+    if (retomadas >= MAX_RETOMADAS) return;
+    setRetomarEm(quando + 10_000);   // 10s de folga: o teto é por janela móvel
+  }
+
+  // O relógio da retomada. Não entra em `deps` a `sendAll` (é recriada a cada render, e
+  // isso reiniciaria o timer sem parar); o que precisa disparar a contagem é a HORA.
+  useEffect(() => {
+    if (!retomarEm) return;
+    const ms = Math.max(5_000, retomarEm - Date.now());
+    const t = setTimeout(() => {
+      setRetomarEm(null);
+      setRetomadas((n) => n + 1);
+      sendAll();
+    }, ms);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retomarEm]);
 
   // conclui todos os toques visíveis (fila sequencial por tipo)
   function completeVisible() {
@@ -699,6 +787,28 @@ export default function TaskQueue({
         )}
         {bulkMsg && <span className="text-sm text-signal">{bulkMsg}</span>}
       </div>
+
+      {/* A FILA ESPERANDO A JANELA. Fica visível porque a alternativa é a pessoa achar
+          que o botão morreu — e clicar de novo contra um teto. O "só com esta aba
+          aberta" está escrito: é uma retomada no navegador, não no servidor. */}
+      {retomarEm && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-brand/30 bg-brand-soft/50 px-3 py-2 text-sm">
+          <span className="font-semibold text-brand-dark">
+            ⏱ Fila em espera — retomo {horaCurta(new Date(retomarEm).toISOString())}
+          </span>
+          <span className="text-xs text-subtle">
+            O teto por hora foi atingido.{" "}
+            {filaAuto
+              ? <>A <b>fila automática</b> está ligada: o servidor continua sozinho mesmo se você fechar a aba — esta espera aqui é só para você ver acontecer.</>
+              : <>Continuo a partir daí <b>com esta aba aberta</b>. Para andar com o navegador fechado, ligue a fila automática em Configurações → Canais.</>}
+            {retomadas > 0 ? ` (${retomadas} retomada${retomadas > 1 ? "s" : ""} até agora)` : ""}
+          </span>
+          <button className="text-xs text-subtle underline hover:text-ink" onClick={() => setRetomarEm(null)}>
+            cancelar a espera
+          </button>
+        </div>
+      )}
+
       {err && <div className="rounded-xl bg-danger/10 p-3 text-sm text-danger">{err}</div>}
 
       {tarefasVisiveis.map((t, i) => {

@@ -5,26 +5,36 @@ import { saveDailyCap } from "@/app/dashboard/config/actions";
 
 const PRESETS = [40, 80, 120, 200];
 
-// Ajuste do limite diário alvo + aquecimento, por caixa. O envio sobe gradual até o alvo.
-export default function BoxCapForm({ accountId, initialCap, initialWarmup }: { accountId: string; initialCap: number; initialWarmup: boolean }) {
+// Ajuste do limite diário alvo + aquecimento + teto por hora, por caixa.
+// O envio sobe gradual até o alvo diário; o teto por hora é uma trava fixa do provedor.
+export default function BoxCapForm({
+  accountId, initialCap, initialWarmup, initialHourly,
+}: { accountId: string; initialCap: number; initialWarmup: boolean; initialHourly?: number | null }) {
   const [open, setOpen] = useState(false);
   const [cap, setCap] = useState(String(initialCap || 40));
   const [warmup, setWarmup] = useState(initialWarmup);
+  const [hora, setHora] = useState(initialHourly ? String(initialHourly) : "");
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   function save() {
     setMsg(null);
     start(async () => {
-      const res = await saveDailyCap(accountId, Number(cap) || 40, warmup);
-      setMsg(res?.error ? res.error : "✓ Limite salvo.");
+      const res = (await saveDailyCap(accountId, Number(cap) || 40, warmup, hora.trim() ? Number(hora) : null)) as
+        { ok?: boolean; error?: string; semColunaHora?: boolean };
+      setMsg(
+        res?.error ? res.error
+        : res?.semColunaHora
+          ? "✓ Limite diário salvo. O teto por hora ainda NÃO foi gravado: falta aplicar a migration 0114 no banco."
+          : "✓ Limite salvo."
+      );
     });
   }
 
   if (!open) {
     return (
       <button className="mt-1 ml-3 text-xs font-medium text-subtle hover:text-brand" onClick={() => setOpen(true)}>
-        ⚙ Limite diário: {initialCap || 40}/dia
+        ⚙ Limite: {initialCap || 40}/dia{initialHourly ? ` · ${initialHourly}/h` : ""}
       </button>
     );
   }
@@ -56,6 +66,38 @@ export default function BoxCapForm({ accountId, initialCap, initialWarmup }: { a
       {alerta && (
         <p className="mt-1 text-[11px] text-warn">⚠ Acima de 120/dia numa caixa só, o risco de cair em spam sobe — considere dividir entre caixas.</p>
       )}
+
+      {/* ============================================================
+          TETO POR HORA — o limite que o PROVEDOR aplica
+          Diferente do de cima: o diário é uma escolha nossa (reputação), este é o
+          número que o cPanel do HostGator/Locaweb corta. Estourar não devolve "limite
+          atingido": o servidor recusa conexão pela hora inteira, e o lote quebra em
+          bloco no meio.
+          ============================================================ */}
+      <div className="mt-3 border-t border-line pt-3">
+        <p className="label">Teto por hora desta caixa</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {[30, 50, 100, 200].map((p) => (
+            <button key={p} type="button" onClick={() => setHora(String(p))}
+              className={`rounded-lg border px-2.5 py-1 text-xs ${String(p) === hora ? "border-brand bg-brand text-white" : "border-line hover:bg-muted"}`}>
+              {p}/h
+            </button>
+          ))}
+          <input className="input w-24 py-1 text-sm" type="number" min={1} max={5000} placeholder="sem teto"
+            value={hora} onChange={(e) => setHora(e.target.value)} />
+          {hora && (
+            <button type="button" className="text-xs text-subtle underline hover:text-ink" onClick={() => setHora("")}>
+              limpar
+            </button>
+          )}
+        </div>
+        <p className="mt-1 text-[11px] text-subtle">
+          Vazio = sem teto próprio. O número está no painel da hospedagem (cPanel → &ldquo;Max hourly emails&rdquo;);
+          no HostGator costuma ser <b>500/h por domínio</b>. Se várias caixas suas moram no mesmo servidor,
+          preencha também o <b>teto do workspace</b> logo acima da lista — é ele que soma todas.
+        </p>
+      </div>
+
       {msg && <p className={`mt-2 text-sm ${msg.startsWith("✓") ? "text-signal" : "text-danger"}`}>{msg}</p>}
       <div className="mt-2 flex gap-2">
         <button className="btn-brand py-1 text-xs" onClick={save} disabled={pending}>{pending ? "Salvando..." : "Salvar"}</button>

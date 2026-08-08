@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import SmtpForm from "@/components/SmtpForm";
 import BoxSignatureForm from "@/components/BoxSignatureForm";
 import BoxCapForm from "@/components/BoxCapForm";
+import LimiteEnvioForm from "@/components/LimiteEnvioForm";
 import { DomainHealthPanel } from "@/components/DomainHealthPanel";
 import { BookingSettings } from "@/components/BookingSettings";
 import AccountRowActions from "@/components/AccountRowActions";
@@ -70,7 +71,10 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
   const initialTab = Math.max(0, TAB_IDS.indexOf((searchParams?.tab || "").toLowerCase()));
   const { data: accounts } = await supabase
     .from("email_accounts")
-    .select("id, user_id, is_shared, provider, from_email, display_name, is_active, daily_cap, warmup_stage, created_at, verified, verified_at, smtp_host, smtp_port, smtp_secure, smtp_user, detect_replies, imap_host, signature")
+    // `*` de propósito (mesma lição do envio): nomear as colunas faz a tela INTEIRA
+    // quebrar com "column does not exist" no intervalo entre publicar o app e aplicar a
+    // migration — e Configurações é justamente a tela onde se conserta o resto.
+    .select("*")
     .order("created_at", { ascending: false });
 
   const {
@@ -89,7 +93,10 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("id, name, subscription_status, suspended_at, archived_at, inbound_token, legal_name, cnpj, segment, contact_email, phone, website, logo_url, brand_color, email_signature, whatsapp_mode, whatsapp_risk_ack_at, booking_enabled, booking_duration_min, booking_days, booking_start_hour, booking_end_hour, booking_title")
+    // idem: `*` para a tela não morrer por causa de uma coluna que ainda não subiu.
+    // A RLS já limita a linha ao workspace de quem está logado, e nada disto vai para o
+    // cliente sem passar por um componente que escolhe o que mostrar.
+    .select("*")
     .maybeSingle();
   const inboundToken = (tenant as any)?.inbound_token as string | undefined;
 
@@ -183,6 +190,27 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
           {/* ===================== CANAIS ===================== */}
           <div>
             <SubHead>E-mail</SubHead>
+
+            {/* ============================================================
+                O RITMO DA FILA vem ANTES da lista de caixas de propósito: é o freio que
+                explica "por que só saíram 10" com mais frequência do que o limite
+                diário, e é o único que o provedor aplica sem avisar.
+                ============================================================ */}
+            <Section
+              title="Ritmo da fila (por hora e horário comercial)"
+              desc="Quantos e-mails podem sair por hora somando todas as caixas, e em que horas a fila pode disparar. O limite por hora é o que a sua hospedagem cobra (cPanel → Max hourly emails); estourar não dá erro, o servidor recusa a conexão pela hora inteira."
+            >
+              <LimiteEnvioForm
+                initialHourly={Number((tenant as any)?.hourly_cap) > 0 ? Number((tenant as any).hourly_cap) : null}
+                initialOn={!!(tenant as any)?.envio_horario_on}
+                initialInicio={Number.isFinite(Number((tenant as any)?.envio_hora_inicio)) ? Number((tenant as any).envio_hora_inicio) : 8}
+                initialFim={Number.isFinite(Number((tenant as any)?.envio_hora_fim)) ? Number((tenant as any).envio_hora_fim) : 18}
+                initialDias={String((tenant as any)?.envio_dias || "1,2,3,4,5").split(",").map((d: string) => Number(d.trim())).filter((d: number) => d >= 0 && d <= 6)}
+                somaHoraCaixas={activeBoxes.reduce((s, a) => s + (Number((a as any).hourly_cap) > 0 ? Number((a as any).hourly_cap) : 0), 0)}
+                initialAuto={!!(tenant as any)?.fila_automatica}
+              />
+            </Section>
+
             <Section title="Caixas de envio" desc="As caixas que disparam suas cadências. O envio respeita o limite diário de cada uma (Envio Seguro) e alterna entre elas.">
               {activeBoxes.length >= 2 && (
                 <div className="mb-3 rounded-lg bg-brand-soft p-3 text-xs text-brand-dark">
@@ -235,7 +263,12 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
                           )}
                           <div className="mt-1 flex flex-wrap items-center gap-1">
                             <BoxSignatureForm accountId={a.id} initial={(a.signature as string) || ""} />
-                            <BoxCapForm accountId={a.id} initialCap={Number(a.daily_cap) || 40} initialWarmup={(a.warmup_stage ?? 0) !== -1} />
+                            <BoxCapForm
+                              accountId={a.id}
+                              initialCap={Number(a.daily_cap) || 40}
+                              initialWarmup={(a.warmup_stage ?? 0) !== -1}
+                              initialHourly={Number((a as any).hourly_cap) > 0 ? Number((a as any).hourly_cap) : null}
+                            />
                           </div>
                         </div>
                         <AccountRowActions id={a.id} active={a.is_active} />

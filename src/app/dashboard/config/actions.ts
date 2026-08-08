@@ -269,17 +269,95 @@ export async function saveSignature(signature: string) {
 
 // Define o LIMITE DIÁRIO alvo de uma caixa (o aquecimento sobe gradual até ele) e
 // liga/desliga o aquecimento. Clampa entre 10 e 500 por segurança.
-export async function saveDailyCap(accountId: string, cap: number, warmup: boolean) {
+export async function saveDailyCap(accountId: string, cap: number, warmup: boolean, hourlyCap?: number | null) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   const c = Math.max(10, Math.min(500, Math.round(Number(cap) || 40)));
-  const { error } = await supabase
+  // 0 e vazio significam a MESMA coisa aqui — "sem teto por hora" — e viram null. Um 0
+  // gravado seria lido como "nunca envie", que é o oposto do que a pessoa quis dizer.
+  const h = Number(hourlyCap) > 0 ? Math.min(5000, Math.round(Number(hourlyCap))) : null;
+
+  const patch: Record<string, unknown> = { daily_cap: c, warmup_stage: warmup ? 0 : -1, hourly_cap: h };
+  let { error } = await supabase
     .from("email_accounts")
-    .update({ daily_cap: c, warmup_stage: warmup ? 0 : -1 })
+    .update(patch)
     .eq("id", accountId)
     .eq("tenant_id", tenant_id);
+
+  // 0114 ainda não aplicada: o PostgREST recusa o update INTEIRO por causa da coluna
+  // desconhecida — e o limite diário, que sempre funcionou, deixaria de salvar junto.
+  if (error && ((error as any).code === "PGRST204" || (error as any).code === "42703")) {
+    delete patch.hourly_cap;
+    const r2 = await supabase.from("email_accounts").update(patch).eq("id", accountId).eq("tenant_id", tenant_id);
+    if (r2.error) return { error: msgErro(r2.error) };
+    revalidatePath("/dashboard/config");
+    return { ok: true, semColunaHora: true };
+  }
   if (error) return { error: msgErro(error) };
   revalidatePath("/dashboard/config");
+  return { ok: true };
+}
+
+// ============================================================
+// LIMITE POR HORA DO WORKSPACE + HORÁRIO COMERCIAL DA FILA (0114)
+//
+// Dois freios que o limite diário não cobria:
+//   · hourly_cap: quem hospeda em cPanel (HostGator e afins) é limitado POR HORA, e
+//     estourar não devolve erro — o servidor recusa conexão pela hora inteira;
+//   · horário comercial: prospecção que chega às 3h de domingo é lida como robô.
+//
+// O teto por hora aqui é do WORKSPACE (soma das caixas), porque várias caixas podem
+// morar no mesmo cPanel e dividir o mesmo limite do servidor — nenhuma delas sozinha
+// enxerga isso.
+// ============================================================
+export async function saveLimiteEnvio(input: {
+  hourlyCap?: number | null;
+  horarioOn?: boolean;
+  horaInicio?: number;
+  horaFim?: number;
+  dias?: number[];
+  filaAutomatica?: boolean;
+}) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const h = Number(input.hourlyCap) > 0 ? Math.min(20000, Math.round(Number(input.hourlyCap))) : null;
+  let ini = Math.max(0, Math.min(23, Math.round(Number(input.horaInicio ?? 8))));
+  let fim = Math.max(1, Math.min(24, Math.round(Number(input.horaFim ?? 18))));
+  // O banco tem um check para isto (fim > início). Corrigir aqui também evita mandar a
+  // pessoa de volta ao formulário para consertar algo que dá para consertar sozinho.
+  if (fim <= ini) fim = Math.min(24, ini + 1);
+  const dias = Array.from(new Set((input.dias || [1, 2, 3, 4, 5]).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))).sort();
+  if (!dias.length) return { error: "Escolha pelo menos um dia da semana para a fila enviar." };
+
+  const patch: Record<string, unknown> = {
+    hourly_cap: h,
+    envio_horario_on: !!input.horarioOn,
+    envio_hora_inicio: ini,
+    envio_hora_fim: fim,
+    envio_dias: dias.join(","),
+    fila_automatica: !!input.filaAutomatica,
+  };
+
+  const { error } = await supabase.from("tenants").update(patch).eq("id", tenant_id);
+
+  // Coluna desconhecida: as duas migrations chegam separadas, e a 0115 (fila automática)
+  // é a mais provável de faltar. Em vez de recusar tudo, salva o que dá e diz o que NÃO
+  // foi salvo — senão a pessoa mexe no horário, vê "erro", e não sabe que o horário
+  // teria entrado.
+  if (error && ((error as any).code === "PGRST204" || (error as any).code === "42703")) {
+    delete patch.fila_automatica;
+    const r2 = await supabase.from("tenants").update(patch).eq("id", tenant_id);
+    if (r2.error) {
+      return { error: "A migration 0114 ainda não foi aplicada no banco — o limite por hora e o horário comercial só passam a existir depois dela." };
+    }
+    revalidatePath("/dashboard/config");
+    revalidatePath("/dashboard");
+    return { ok: true, semFilaAutomatica: true };
+  }
+  if (error) return { error: msgErro(error) };
+  revalidatePath("/dashboard/config");
+  revalidatePath("/dashboard");
   return { ok: true };
 }
 

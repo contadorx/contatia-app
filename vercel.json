@@ -22,6 +22,10 @@
     {
       "path": "/api/cron/daily-digest",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/fila-envio",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

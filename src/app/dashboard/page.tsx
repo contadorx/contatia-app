@@ -25,8 +25,12 @@ export default async function Today() {
   const today = diaISO();
   const in3 = diaISOmais(3);
 
-  const { data: tenantRow } = await supabase.from("tenants").select("id, whatsapp_mode").maybeSingle();
+  // `*` de propósito: pedir as colunas pelo nome faz esta consulta falhar INTEIRA quando
+  // uma migration nova ainda não subiu — e aí `whatsapp_mode` cairia sozinho para
+  // "assistido", mudando o comportamento do WhatsApp sem ninguém ter mexido em nada.
+  const { data: tenantRow } = await supabase.from("tenants").select("*").maybeSingle();
   const waMode = ((tenantRow as any)?.whatsapp_mode as string) || "assistido";
+  const filaAuto = !!(tenantRow as any)?.fila_automatica;
 
   // quem está olhando — decide se o painel de envios mostra só os seus ou os da equipe
   const { data: { user } } = await supabase.auth.getUser();
@@ -536,7 +540,7 @@ export default async function Today() {
           Filtre por canal ou responsável para trabalhar por partes.
         </p>
       )}
-      <TaskQueue tasks={tasks} hotThreshold={HOT_THRESHOLD} lastActivity={lastActivity} allTags={(allTags as any[]) || []} waMode={waMode} />
+      <TaskQueue tasks={tasks} hotThreshold={HOT_THRESHOLD} lastActivity={lastActivity} allTags={(allTags as any[]) || []} waMode={waMode} filaAuto={filaAuto} />
     </div>
   );
 }

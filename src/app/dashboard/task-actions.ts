@@ -5,9 +5,10 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { scoreEvent } from "@/lib/scoring";
 import { logAction, recortarItens } from "@/lib/actionLog";
-import { renderTemplate } from "@/lib/cadence";
-import { buildEmailHtml } from "@/lib/richtext";
 import { diaISO } from "@/lib/datas";
+// O motor de envio de e-mail vive fora daqui de propósito — ver o bloco "O MOTOR MOROU
+// AQUI ATÉ A v68", mais abaixo.
+import { enviarUm, type ContextoLote } from "@/lib/envioEmail";
 
 async function ctx() {
   const supabase = createClient();
@@ -92,370 +93,16 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
   return await enviarUm(taskId, override);
 }
 
-// ============================================================
-// CONTEXTO DE LOTE — o que não faz sentido refazer 200 vezes
+// O MOTOR MOROU AQUI ATÉ A v68.
 //
-// Enviando um a um, cada e-mail repetia: 2 consultas de capacidade, 1 da assinatura do
-// workspace, e um aperto de mão SMTP inteiro. Somado, dava ~4 segundos por mensagem —
-// e o lote, com 40 segundos de orçamento, entregava 10. O contexto carrega o que é
-// igual para todas as mensagens da volta e mantém a conexão aberta.
+// Ele saiu para `@/lib/envioEmail` quando o cron da fila (envio automático, sem
+// ninguém logado) precisou do MESMO motor. O motivo é de segurança e está escrito lá:
+// neste arquivo ("use server") toda função exportada vira uma server action chamável
+// pelo navegador — exportar `enviarUm` deixaria o cliente mandar um `lote` forjado,
+// com capacidade inventada, furando o limite diário e o teto por hora.
 //
-// A capacidade é a única parte delicada: ela precisa ANDAR durante o lote, senão as
-// 200 mensagens leriam "folga 80" e passariam do limite. Por isso `usadosNoLote`.
-// ============================================================
-type ContextoLote = {
-  cap: Awaited<ReturnType<typeof import("@/lib/capacidadeEmail").capacidadeDeHoje>>;
-  usadosNoLote: Record<string, number>;
-  transportes: Map<string, any>;
-  // sessão de "Enviados" por caixa, aberta na primeira cópia e reaproveitada.
-  // `null` = já tentamos abrir e não deu — não insiste a cada mensagem.
-  imap: Map<string, any>;
-  assinaturaTenant?: string | null;
-  // ONDE O TEMPO VAI. Duas respostas minhas sobre este problema foram palpite (o
-  // limite da caixa, depois o SMTP). Medido, deixa de ser palpite.
-  tempos: { banco: number; smtp: number; copia: number };
-};
-
-// Abre (uma vez por caixa) a sessão de "Enviados" do lote. Caixa que grava a cópia
-// sozinha no servidor — Gmail, Outlook.com — não entra aqui: o APPEND criaria duplicata.
-async function sessaoEnviadosDoLote(lote: ContextoLote, acct: any) {
-  if (acct.provider === "gmail" || acct.save_to_sent === false) return undefined;
-  if (lote.imap.has(acct.id)) {
-    const s = lote.imap.get(acct.id);
-    return s ? (raw: Buffer) => s.append(raw) : undefined;
-  }
-  const { abrirEnviados } = await import("@/lib/imap");
-  const s = await abrirEnviados(acct);
-  if ((s as any)?.append) {
-    lote.imap.set(acct.id, s);
-    return (raw: Buffer) => (s as any).append(raw);
-  }
-  lote.imap.set(acct.id, null);   // não tenta de novo a cada mensagem
-  return undefined;
-}
-
-async function enviarUm(
-  taskId: string,
-  override?: { subject?: string; body?: string },
-  lote?: ContextoLote
-) {
-  const tInicio = Date.now();
-  const { sendEmail } = await import("@/lib/mailer");
-  const { supabase, tenant_id, user_id } = await ctx();
-  if (!tenant_id) return { error: "Sem workspace." };
-
-  // se veio corpo/assunto editado, persiste na task antes de enviar
-  if (override && (override.subject !== undefined || override.body !== undefined)) {
-    const patch: Record<string, unknown> = {};
-    if (override.subject !== undefined) patch.title = override.subject;
-    if (override.body !== undefined) patch.generated_content = override.body;
-    if (Object.keys(patch).length) {
-      // `body_editado` (0112): texto escrito por gente não pode ser sobrescrito pela
-      // reaplicação do texto da cadência. Se a coluna ainda não existe, grava sem ela —
-      // um PGRST204 aqui impediria o próprio envio.
-      const { error } = await supabase.from("tasks").update({ ...patch, body_editado: true }).eq("id", taskId);
-      if (error && ((error as any).code === "PGRST204" || (error as any).code === "42703")) {
-        await supabase.from("tasks").update(patch).eq("id", taskId);
-      }
-    }
-  }
-
-  const { data: task } = await supabase
-    .from("tasks")
-    // enrollment_id/step_position entram aqui para o rastreio saber DE QUAL PASSO o
-    // e-mail saiu — sem isso, "cliques e aberturas por passo" é impossível de montar
-    // depois: a origem só é conhecida no momento do envio.
-    .select("id, channel, title, generated_content, contact_id, email_account_id, enrollment_id, step_position, condicao, contacts(*)")
-    .eq("id", taskId)
-    .single();
-  if (!task) return { error: "Tarefa não encontrada." };
-  if (task.channel !== "email") return { error: "Tarefa não é de e-mail." };
-
-  // ============================================================
-  // A ÚLTIMA PORTA ANTES DO DESTINATÁRIO
-  //
-  // As tarefas guardam o texto JÁ MONTADO. Quem foi criado enquanto o Radar produzia
-  // nomes quebrados carrega "[object Object]" dentro do corpo, e nenhum conserto no
-  // render alcança o que já está gravado. Só a checagem no envio alcança.
-  //
-  // Recusar é a escolha certa aqui: um e-mail que sai errado não volta, e o custo de
-  // segurar é uma mensagem na tela para quem pode corrigir.
-  // ============================================================
-  {
-    const { textoTemLixo, AVISO_LIXO } = await import("@/lib/nomeValido");
-    if (textoTemLixo((task as any).title) || textoTemLixo((task as any).generated_content)) {
-      return { error: AVISO_LIXO };
-    }
-  }
-  // ---- PASSO CONDICIONAL: reconfere antes de mandar ----
-  // O cron já limpa a fila do dia; isto é a rede para a janela entre uma coisa e outra
-  // (e para quem dispara uma tarefa de amanhã pela ficha).
-  if ((task as any).condicao) {
-    const { avaliarCondicao, rotuloCondicao } = await import("@/lib/condicoes");
-    const r = await avaliarCondicao(supabase, (task as any).condicao, {
-      contactId: (task as any).contact_id,
-      enrollmentId: (task as any).enrollment_id,
-      contato: (task as any).contacts || {},
-    });
-    if (!r.ok) {
-      await supabase.from("tasks").update({ status: "skipped" }).eq("id", taskId).eq("status", "pending");
-      return { error: `Passo condicional (${rotuloCondicao((task as any).condicao)}): ${r.motivo}. Toque pulado.` };
-    }
-  }
-
-  const to = (task as any).contacts?.email as string | undefined;
-  if (!to) {
-    // contato sem e-mail: pula a tarefa (não fica pendente para sempre) — cobre também
-    // tarefas criadas antes do gate de inscrição.
-    await supabase.from("tasks").update({ status: "skipped" }).eq("id", taskId);
-    return { error: "Contato sem e-mail. Tarefa de e-mail pulada." };
-  }
-
-  // não envia para e-mail marcado como inválido/bounce (protege reputação)
-  const estatus = (task as any).contacts?.email_status as string | undefined;
-  if (estatus && ["invalid", "hard_bounce", "complaint"].includes(estatus)) {
-    await supabase.from("tasks").update({ status: "skipped" }).eq("id", taskId);
-    return { error: `E-mail marcado como "${estatus}". Envio bloqueado para proteger sua reputação.` };
-  }
-
-  // proteção de reputação: não envia para e-mail suprimido (bounce/spam/unsubscribe)
-  const { data: supp } = await supabase
-    .from("email_suppressions")
-    .select("reason")
-    .eq("tenant_id", tenant_id)
-    .eq("email", to.toLowerCase())
-    .maybeSingle();
-  if (supp) {
-    // marca a task como pulada para não insistir e proteger o domínio
-    await supabase.from("tasks").update({ status: "skipped" }).eq("id", taskId);
-    return { error: `E-mail na lista de supressão (${(supp as any).reason}). Envio bloqueado para proteger sua reputação.` };
-  }
-
-  // ROTAÇÃO DE CAIXAS: quem sabe quanto cada caixa ainda pode enviar hoje é
-  // capacidadeDeHoje — a MESMA conta que o relatório do lote mostra na tela. Antes esta
-  // conta morava aqui dentro e a tela tinha a sua; quando as duas discordassem, o
-  // operador leria uma capacidade que o envio não honra.
-  const { capacidadeDeHoje } = await import("@/lib/capacidadeEmail");
-  const cap = lote?.cap ?? (await capacidadeDeHoje(supabase));
-  const accts = cap.contas;
-  if (!accts.length) {
-    return { error: "Nenhuma caixa de e-mail conectada. Cadastre a sua em Configurações → Canais." };
-  }
-  const anyWarming = cap.algumaAquecendo;
-  const folgaPorId = new Map(cap.porCaixa.map((c) => [c.conta.id as string, c.folga]));
-  // desconta o que JÁ saiu nesta volta: sem isto o lote leria a folga do começo em
-  // todas as mensagens e passaria direto pelo limite diário.
-  const folgaDe = (a: any) => (folgaPorId.get(a.id) ?? 0) - (lote?.usadosNoLote[a.id] || 0);
-
-  // ESCOLHA POR CAMADAS: minha → do workspace → emprestada (ver lib/caixas).
-  //
-  // Antes isto era "a caixa com maior folga", sem olhar de quem ela é. Numa equipe isso
-  // fazia um gestor sem caixa própria enviar pela caixa PESSOAL de outra pessoa, só
-  // porque ela era a mais nova e portanto a mais vazia — o destinatário via o endereço
-  // da colega e a resposta caía na caixa dela.
-  const { escolherCaixa } = await import("@/lib/caixas");
-  const escolha = escolherCaixa(accts as any[], folgaDe, user_id);
-  let acct: any = escolha.caixa;
-  let bestSlack = escolha.folga;
-
-  // CAIXA DESIGNADA (produto/cadência): se a tarefa foi carimbada com uma caixa e
-  // ela está ativa e com folga hoje, envia POR ELA (mantém a marca certa). Se estiver
-  // inativa ou sem folga, cai no rodízio acima (degradação segura — o e-mail sai).
-  const desiredBoxId = (task as any).email_account_id as string | null;
-  if (desiredBoxId) {
-    const d = (accts as any[]).find((a) => a.id === desiredBoxId);
-    if (d) {
-      const dSlack = folgaDe(d);
-      if (dSlack > 0) { acct = d; bestSlack = dSlack; }
-    }
-  }
-
-  if (!acct || bestSlack <= 0) {
-    return { error: anyWarming
-      ? "Limite de envio de hoje atingido em todas as caixas (algumas ainda em aquecimento). Tente amanhã ou conecte outra caixa."
-      : "Limite diário atingido em todas as caixas (Envio Seguro). Tente amanhã ou conecte outra caixa." };
-  }
-
-  // ---- RASTREIO: links + pixel de abertura, ambos atribuídos ao passo ----
-  let bodyText = task.generated_content || "";
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL ? (process.env.NEXT_PUBLIC_APP_URL || `https://${process.env.VERCEL_URL}`) : "";
-  // a cadência de onde veio a tarefa (para o relatório por passo)
-  let sequenceId: string | null = null;
-  if ((task as any).enrollment_id) {
-    const { data: enr } = await supabase
-      .from("enrollments").select("sequence_id").eq("id", (task as any).enrollment_id).maybeSingle();
-    sequenceId = ((enr as any)?.sequence_id as string) || null;
-  }
-  const atribuicao = {
-    tenantId: tenant_id,
-    contactId: (task as any).contact_id ?? null,
-    enrollmentId: (task as any).enrollment_id ?? null,
-    sequenceId,
-    taskId: (task as any).id ?? null,
-    stepPosition: (task as any).step_position ?? null,
-  };
-  // ORDEM IMPORTA: primeiro a etiqueta {{documento:…}} vira um link /s/{token}, e só
-  // depois o wrapLinks passa. Invertido, o wrapLinks embrulharia o link da proposta
-  // num /l/ e o clique deixaria de contar como ABERTURA de proposta (doc_opened) —
-  // trocaria o sinal forte pelo fraco.
-  try {
-    if (baseUrl) {
-      const { expandirDocumentos, temTagDocumento } = await import("@/lib/docLink");
-      if (temTagDocumento(bodyText)) {
-        bodyText = await expandirDocumentos(supabase, atribuicao, bodyText, baseUrl);
-      }
-    }
-  } catch {
-    /* link de documento não deve bloquear o envio */
-  }
-  try {
-    if (baseUrl) {
-      const { wrapLinks } = await import("@/lib/linktrack");
-      bodyText = await wrapLinks(supabase, { ...atribuicao, body: bodyText, baseUrl });
-    }
-  } catch {
-    /* rastreio de link não deve bloquear o envio */
-  }
-
-  // assinatura do negócio (renderiza {{primeiro_nome}}/{{empresa}} com os dados do contato)
-  const tnt = lote && lote.assinaturaTenant !== undefined
-    ? { email_signature: lote.assinaturaTenant }
-    : ((await supabase.from("tenants").select("email_signature").maybeSingle()).data as any);
-  // assinatura DA CAIXA que enviou; se vazia, cai na assinatura geral do workspace
-  const boxSig = (acct as any)?.signature as string | undefined;
-  const signature = (boxSig && boxSig.trim()) ? boxSig : ((tnt as any)?.email_signature as string | undefined);
-  const contact = (task as any).contacts || {};
-  const sigRendered = signature?.trim() ? renderTemplate(signature, { name: contact.name, company: null, ...contact }) : "";
-  // Monta o corpo final (corpo + assinatura), ciente de HTML: se o corpo OU a
-  // assinatura tiverem formatação, vai como HTML; senão, texto puro (legado).
-  const built = buildEmailHtml(bodyText, sigRendered);
-  let html = built.html;
-
-  // ---- PIXEL DE ABERTURA ----
-  // Só em e-mail HTML. Converter um corpo de texto puro em HTML só para medir seria
-  // piorar o e-mail em nome de um número fraco (ver a nota em @/lib/aberturas).
-  if (html && baseUrl) {
-    try {
-      const { tagDePixel } = await import("@/lib/aberturas");
-      const tag = await tagDePixel(supabase, atribuicao, baseUrl);
-      if (tag) html = html.includes("</body>") ? html.replace("</body>", `${tag}</body>`) : html + tag;
-    } catch {
-      /* rastreio nunca impede o envio */
-    }
-  }
-  bodyText = built.text;
-
-  // ============================================================
-  // RESERVA ANTES DE ENVIAR — a trava contra envio duplicado
-  //
-  // A ordem antiga era: envia → grava cópia em Enviados (até 8s) → marca a tarefa como
-  // feita → registra o evento. Se a função morresse em qualquer ponto dessa janela, o
-  // e-mail estava na rua e a tarefa continuava PENDENTE — então "Enviar todos" mandava
-  // de novo, e de novo. E como o evento também não era gravado, o contador do dia não
-  // subia: o limite diário ficava CEGO e nunca disparava.
-  //
-  // Agora a tarefa é RESERVADA antes do envio, numa atualização condicional
-  // (`status = 'pending'`). Se duas execuções disputarem a mesma tarefa, só uma leva —
-  // o banco decide. Se o envio falhar depois, devolvemos para pendente.
-  //
-  // Em e-mail, mandar duas vezes é pior do que não mandar. Por isso a reserva vem antes.
-  // ============================================================
-  const { data: reservada } = await supabase
-    .from("tasks")
-    .update({ status: "done", completed_at: new Date().toISOString() })
-    .eq("id", taskId)
-    .eq("status", "pending")
-    .select("id")
-    .maybeSingle();
-  if (!reservada) {
-    return { error: "Esta tarefa já foi enviada (ou está sendo enviada agora). Recarregue a fila." };
-  }
-  const devolverParaFila = async () => {
-    await supabase.from("tasks").update({ status: "pending", completed_at: null }).eq("id", taskId);
-  };
-
-  let copia: { copiaEmEnviados?: boolean; erroCopia?: string; copiar?: () => Promise<any> } = {};
-  const tSmtp = Date.now();
-  if (lote) lote.tempos.banco += tSmtp - tInicio;
-  try {
-    copia = await sendEmail(
-      acct as any,
-      { to, subject: task.title || "", text: bodyText, html },
-      {
-        adiarCopia: true,           // a cópia sai do caminho crítico (ver mailer)
-        transport: lote?.transportes.get((acct as any).id),
-        gravarEnviados: lote ? await sessaoEnviadosDoLote(lote, acct) : undefined,
-      }
-    );
-  } catch (e: any) {
-    await devolverParaFila();
-    const { msgSmtp } = await import("@/lib/caixas");
-    const ehAuth = /535|534|Invalid login|Username and Password not accepted|authentication|Incorrect authentication/i.test(String(e?.message || ""));
-
-    // Caixa que reprova no LOGIN é marcada como não validada. Sem isso ela continuaria
-    // no rodízio e derrubaria todo envio que caísse nela — que foi como uma caixa
-    // quebrada virou a remetente de todo mundo sem ninguém perceber. Marcada, ela sai
-    // do rodízio (só volta se não houver alternativa) e fica VERMELHA em Config.
-    if (ehAuth) {
-      await supabase
-        .from("email_accounts")
-        .update({ verified: false, verified_at: new Date().toISOString() })
-        .eq("id", (acct as any).id);
-      revalidatePath("/dashboard/config");
-    }
-    return { error: msgSmtp(e, (acct as any).from_email) };
-  }
-
-  // REGISTRA O ENVIO IMEDIATAMENTE — antes de qualquer outra coisa que possa falhar.
-  // É este registro que alimenta o limite diário; enquanto ele não existe, o envio é
-  // invisível e o limite não conta. A janela de risco agora é uma consulta, não oito
-  // segundos de IMAP.
-  const reg = await scoreEvent(supabase, {
-    tenant_id,
-    contact_id: (task as any).contact_id,
-    type: "email_sent",
-    user_id,
-    email_account_id: (acct as any).id,
-    meta: { to },
-  });
-
-  if (lote) {
-    lote.usadosNoLote[(acct as any).id] = (lote.usadosNoLote[(acct as any).id] || 0) + 1;
-    lote.tempos.smtp += Date.now() - tSmtp;
-  }
-
-  // Agora sim a cópia em "Enviados" (best-effort, fora do caminho crítico).
-  if (copia.copiar) {
-    const tCopia = Date.now();
-    try { copia = { ...(await copia.copiar()) }; } catch { /* nunca derruba o envio */ }
-    if (lote) lote.tempos.copia += Date.now() - tCopia;
-  }
-
-  // A cópia em "Enviados" falhou por login/host de IMAP? Desliga para ESTA caixa.
-  // Sem isso, cada envio pagaria a espera do IMAP de novo — e a pessoa está olhando
-  // a tela. O aviso volta no retorno para ela saber por que a cópia parou de aparecer.
-  let avisoCopia: string | undefined;
-  if (copia.copiaEmEnviados === false && copia.erroCopia) {
-    const permanente = /auth|login|denied|ENOTFOUND|EAI_AGAIN|certificate|Invalid credentials/i.test(copia.erroCopia);
-    if (permanente) {
-      await supabase.from("email_accounts").update({ save_to_sent: false }).eq("id", (acct as any).id);
-      avisoCopia =
-        `O e-mail saiu normalmente, mas não consegui gravar a cópia em "Enviados" (${copia.erroCopia}). ` +
-        `Desliguei a cópia para esta caixa para não atrasar os próximos envios — confira host/porta de IMAP em Configurações → Canais.`;
-    } else {
-      avisoCopia = `O e-mail saiu normalmente, mas a cópia em "Enviados" não foi gravada desta vez (${copia.erroCopia}).`;
-    }
-  }
-
-  // no lote, quem revalida é o final da volta — 200 revalidações não adiantam nada
-  if (!lote) revalidatePath("/dashboard");
-  // Envio sem registro é o pior estado possível: o limite diário deixa de contá-lo e a
-  // pessoa perde a noção de quanto já mandou. Se acontecer, avisa alto.
-  const avisoRegistro = reg?.ok === false
-    ? `ATENÇÃO: o e-mail saiu, mas o registro do envio falhou (${reg.error}). Ele NÃO entra na contagem do dia nem no limite — confira o painel "Seus envios de hoje" antes de continuar.`
-    : undefined;
-  return { ok: true, aviso: [avisoRegistro, avisoCopia].filter(Boolean).join(" ") || undefined, caixa: (acct as any).from_email };
-}
+// Duplicar o motor para o cron seria pior: dois envios com regras que divergem no
+// primeiro conserto feito só de um lado.
 
 // Envia a tarefa de WhatsApp via Evolution API (caixa ativa do tenant), com cap diário.
 export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
@@ -603,6 +250,35 @@ export async function sendAllEmailTasks(selecionadas?: string[]) {
   const today = diaISO();
 
   // ============================================================
+  // HORÁRIO COMERCIAL — a primeira porta, antes de reservar qualquer tarefa
+  //
+  // Esta é a FILA: quem escolhe o que sai é o sistema. Fora do horário configurado ela
+  // não dispara — e não porque "deu erro", mas porque prospecção que chega às 3h da
+  // manhã é lida como robô antes de ser lida por gente.
+  //
+  // A checagem vem ANTES de qualquer update: uma tarefa reservada e devolvida deixa
+  // rastro (completed_at indo e voltando) sem nada ter saído.
+  //
+  // Só a fila é barrada. "Enviar marcadas" e o botão de uma tarefa continuam saindo na
+  // hora do clique — ali quem escolheu foi uma pessoa, e recusar seria o app achando
+  // que sabe mais do que ela.
+  // ============================================================
+  const { capacidadeDeHoje: capHoje } = await import("@/lib/capacidadeEmail");
+  const capInicial = await capHoje(supabase);
+  if (!capInicial.dentroDoHorario) {
+    const { rotuloJanela, quandoTexto } = await import("@/lib/janelaEnvio");
+    const volta = capInicial.abreEm ? quandoTexto(new Date(capInicial.abreEm)) : "no próximo dia útil";
+    return {
+      ok: true, sent: 0, failed: 0, restantes: 0,
+      foraDoHorario: true,
+      abreEm: capInicial.abreEm,
+      diagnostico:
+        `Fora do horário de envio da fila (${rotuloJanela(capInicial.janela)}). A fila volta ${volta}. ` +
+        `Para mandar agora mesmo, marque os toques e use "Enviar marcadas" — a seleção ignora a janela.`,
+    };
+  }
+
+  // ============================================================
   // A SELEÇÃO DA TELA VALE — mas quem decide o que pode sair é o servidor
   //
   // Marcar 260 linhas e ver "10 enviados" com o resto virando "clique de novo" é a
@@ -694,9 +370,10 @@ export async function sendAllEmailTasks(selecionadas?: string[]) {
   let tempoEsgotado = false;
 
   // ---- contexto do lote: capacidade, assinatura e CONEXÕES abertas uma vez só ----
-  const { capacidadeDeHoje: capHoje } = await import("@/lib/capacidadeEmail");
+  // `capInicial` já foi calculada lá em cima (a porta do horário comercial precisou
+  // dela). Calcular de novo aqui seriam 3 consultas repetidas por volta — e, pior, duas
+  // fotos diferentes da mesma capacidade dentro da mesma execução.
   const { transporteDeLote } = await import("@/lib/mailer");
-  const capInicial = await capHoje(supabase);
   const { data: tenantRow } = await supabase.from("tenants").select("email_signature").maybeSingle();
   const lote: ContextoLote = {
     cap: capInicial,
@@ -714,9 +391,22 @@ export async function sendAllEmailTasks(selecionadas?: string[]) {
     catch { /* caixa mal configurada cai no caminho de sempre e reporta o erro dela */ }
   }
 
+  let travouPorHora = false;
+  let liberaEm: string | null = null;
+
   for (; i < ids.length; i++) {
     if (Date.now() - inicio > ORCAMENTO_ENVIO_MS) { tempoEsgotado = true; break; }
-    const res = (await enviarUm(ids[i], undefined, lote)) as { ok?: boolean; error?: string; caixa?: string };
+    const res = (await enviarUm(ids[i], undefined, lote)) as
+      { ok?: boolean; error?: string; caixa?: string; travaHora?: boolean; liberaEm?: string | null };
+    // Teto por hora: parar é obrigatório, e o motivo NÃO é o mesmo de "acabou o dia".
+    // Insistir aqui é o caminho para o provedor cortar a conexão da hora inteira.
+    if (res?.travaHora) {
+      travouPorHora = true;
+      liberaEm = res.liberaEm ?? null;
+      if (res.error) motivos[res.error] = (motivos[res.error] || 0) + 1;
+      if (!primeiroErro) primeiroErro = res.error ?? null;
+      break;
+    }
     if (res?.ok) {
       sent++;
       if (res.caixa) porCaixa[res.caixa] = (porCaixa[res.caixa] || 0) + 1;
@@ -749,8 +439,19 @@ export async function sendAllEmailTasks(selecionadas?: string[]) {
   // A CONTA DO DIA, sempre — é ela que transforma "saíram 10" em resposta.
   // Vem de capacidadeDeHoje, a MESMA função que o envio usa para decidir; duas contas
   // separadas divergiriam e a tela prometeria o que o envio não honra.
-  const { capacidadeDeHoje, comoAumentar } = await import("@/lib/capacidadeEmail");
+  const { capacidadeDeHoje, comoAumentar, projetarFila } = await import("@/lib/capacidadeEmail");
   const cap = await capacidadeDeHoje(supabase);
+
+  // Quantos toques ainda esperam de verdade — não só os desta volta. É esse número que
+  // faz o plano ser um plano ("500 em 5 horas") em vez de um resto ("400 na fila").
+  const { count: pendentesAgora } = await supabase
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("channel", "email")
+    .eq("status", "pending")
+    .lte("due_date", today);
+  const naFila = pendentesAgora ?? restantes;
+  const plano = projetarFila(cap, naFila);
 
   // Nada saiu mesmo tendo o que tentar: o motivo mais frequente é a resposta.
   const maisComum = Object.entries(motivos).sort((a, b) => b[1] - a[1])[0];
@@ -771,6 +472,16 @@ export async function sendAllEmailTasks(selecionadas?: string[]) {
     paradoPorLimite: !!limiteAtingido,
     // parou porque o orçamento de tempo da função acabou: aqui clicar de novo ADIANTA
     paradoPorTempo: tempoEsgotado,
+    // parou pelo teto POR HORA: clicar de novo agora devolve zero, mas às 15:07 (o
+    // `liberaEm`) volta a sair. É a diferença entre "espere um dia" e "espere 6 minutos".
+    paradoPorHora: travouPorHora,
+    liberaEm: liberaEm || cap.liberaEm,
+    capacidadeHora: cap.capHoraGeral,
+    usadosHora: cap.usadosHora,
+    folgaHora: cap.folgaHoraGeral,
+    // o plano completo: quantos agora, quantos em cada hora, quando termina
+    plano,
+    naFila,
     duracaoMs,
     msPorEmail,
     // onde o tempo foi: banco/preparo, SMTP, cópia em "Enviados"
@@ -949,6 +660,7 @@ export async function enviarSelecionadas(ids: string[]): Promise<{
   ok?: boolean; enviados?: number; porCanal?: Record<string, number>; falhas?: number;
   motivos?: string[]; restantes?: number; paradoPorTempo?: boolean; ignoradas?: number;
   detalhe?: string; error?: string;
+  paradoPorHora?: boolean; liberaEm?: string | null; avisoHorario?: string | null;
 }> {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
@@ -1006,6 +718,8 @@ export async function enviarSelecionadas(ids: string[]): Promise<{
   let enviados = 0;
   let falhas = 0;
   let paradoPorTempo = false;
+  let paradoPorHora = false;
+  let liberaEm: string | null = null;
   let i = 0;
 
   for (; i < elegiveis.length; i++) {
@@ -1014,8 +728,19 @@ export async function enviarSelecionadas(ids: string[]): Promise<{
 
     const res =
       t.channel === "email"
-        ? ((await enviarUm(t.id, undefined, lote)) as { ok?: boolean; error?: string })
+        ? ((await enviarUm(t.id, undefined, lote)) as { ok?: boolean; error?: string; travaHora?: boolean; liberaEm?: string | null })
         : ((await sendWhatsAppTask(t.id)) as { ok?: boolean; error?: string });
+
+    // O teto por HORA vale aqui também, mesmo com a seleção sendo um gesto deliberado:
+    // ele não é uma política nossa, é o limite físico do servidor do provedor. Passar
+    // dele não manda mais e-mail — faz o provedor recusar a conexão pela hora inteira.
+    // (O horário comercial é outra coisa: aquele é regra nossa e a seleção ignora.)
+    if ((res as any)?.travaHora) {
+      paradoPorHora = true;
+      liberaEm = (res as any).liberaEm ?? null;
+      if (res?.error) motivos[res.error] = (motivos[res.error] || 0) + 1;
+      break;
+    }
 
     if (res?.ok) {
       enviados++;
@@ -1036,6 +761,8 @@ export async function enviarSelecionadas(ids: string[]): Promise<{
   for (const se of lote.imap.values()) { if (se) { try { await se.fechar(); } catch { /* nada a fazer */ } } }
   revalidatePath("/dashboard");
 
+  const { rotuloJanela } = await import("@/lib/janelaEnvio");
+
   return {
     ok: true,
     enviados,
@@ -1044,6 +771,14 @@ export async function enviarSelecionadas(ids: string[]): Promise<{
     ignoradas,
     restantes: Math.max(0, elegiveis.length - i),
     paradoPorTempo,
+    paradoPorHora,
+    liberaEm,
+    // A seleção passa fora do horário — mas passa AVISADA. Sem a linha, a pessoa manda
+    // 40 e-mails às 23h sem perceber, e descobre pelo resultado deles.
+    avisoHorario:
+      !capInicial.dentroDoHorario && temEmail
+        ? `Enviado fora do horário da fila (${rotuloJanela(capInicial.janela)}) — foi por marcação, então saiu mesmo assim.`
+        : null,
     motivos: Object.entries(motivos).sort((a, b) => b[1] - a[1]).map(([m, n]) => `${n}× ${m}`),
     detalhe: Object.entries(porCanal)
       .map(([c, n]) => `${n} ${c === "email" ? "e-mail" : "WhatsApp"}`)
