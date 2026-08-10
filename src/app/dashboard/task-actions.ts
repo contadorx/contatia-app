@@ -393,11 +393,14 @@ export async function sendAllEmailTasks(selecionadas?: string[]) {
 
   let travouPorHora = false;
   let liberaEm: string | null = null;
+  let trocaramDeCaixa = 0;
+  let avisoTroca: string | null = null;
 
   for (; i < ids.length; i++) {
     if (Date.now() - inicio > ORCAMENTO_ENVIO_MS) { tempoEsgotado = true; break; }
     const res = (await enviarUm(ids[i], undefined, lote)) as
-      { ok?: boolean; error?: string; caixa?: string; travaHora?: boolean; liberaEm?: string | null };
+      { ok?: boolean; error?: string; caixa?: string; travaHora?: boolean; liberaEm?: string | null;
+        trocouDeCaixa?: boolean; aviso?: string };
     // Teto por hora: parar é obrigatório, e o motivo NÃO é o mesmo de "acabou o dia".
     // Insistir aqui é o caminho para o provedor cortar a conexão da hora inteira.
     if (res?.travaHora) {
@@ -410,6 +413,13 @@ export async function sendAllEmailTasks(selecionadas?: string[]) {
     if (res?.ok) {
       sent++;
       if (res.caixa) porCaixa[res.caixa] = (porCaixa[res.caixa] || 0) + 1;
+      // Trocou de remetente porque a caixa designada estava sem folga (ou inativa). O
+      // e-mail saiu — e o destinatário viu OUTRO endereço. Isso não pode passar em
+      // silêncio: foi assim que o lead do Enquadria recebeu um e-mail do BPOx.
+      if (res.trocouDeCaixa) {
+        trocaramDeCaixa++;
+        if (!avisoTroca && res.aviso) avisoTroca = res.aviso;
+      }
       continue;
     }
     failed++;
@@ -493,6 +503,9 @@ export async function sendAllEmailTasks(selecionadas?: string[]) {
     comoAumentar: comoAumentar(cap),
     // a seleção da tela: quantas linhas marcadas não podiam sair agora
     descartadasDaSelecao,
+    // saíram por uma caixa diferente da que estava designada
+    trocaramDeCaixa,
+    avisoTroca,
     // o teto por clique bateu: existe mais fila do que esta volta pegou
     tetoPorClique: ids.length >= TETO_POR_CLIQUE ? TETO_POR_CLIQUE : null,
     primeiroErro,

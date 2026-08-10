@@ -92,7 +92,7 @@ export default async function Today() {
       // O embed de contatos traz `*`: `instagram`/`linkedin` nascem na 0110 e, pedidas
       // pelo nome, derrubariam a FILA INTEIRA enquanto a migration não estivesse
       // aplicada — a tela mais importante do app ficaria vazia sem dizer por quê.
-      .select("id, channel, title, generated_content, due_date, contact_id, enrollment_id, assigned_to, step_position, contacts(*)")
+      .select("id, channel, title, generated_content, due_date, contact_id, enrollment_id, assigned_to, step_position, email_account_id, contacts(*)")
       .eq("status", "pending")
       .lte("due_date", in3)
       .order("due_date", { ascending: true })
@@ -106,7 +106,7 @@ export default async function Today() {
 
   const [contactsCount, { data: boxes }, { data: equipe }] = await Promise.all([
     supabase.from("contacts").select("id", { count: "estimated", head: true }),
-    supabase.from("email_accounts").select("daily_cap, warmup_stage, created_at").eq("is_active", true),
+    supabase.from("email_accounts").select("id, from_email, daily_cap, warmup_stage, created_at").eq("is_active", true),
     supabase.from("profiles").select("id, full_name, email").eq("is_active", true),
   ]);
   const rawTasks = filaBruta;
@@ -162,7 +162,7 @@ export default async function Today() {
   const { emFatias } = await import("@/lib/emFatias");
   const [{ data: enrs, error: errEnr }, { data: cts }, { data: evs }] = await Promise.all([
     emFatias(enrollmentIds as string[], (fatia) =>
-      supabase.from("enrollments").select("id, sequence_id, sequences(name)").in("id", fatia)
+      supabase.from("enrollments").select("id, sequence_id, sequences(name, email_account_id, product_id)").in("id", fatia)
     ),
     emFatias(contactIds as string[], (fatia) =>
       supabase.from("contact_tags").select("contact_id, tags(id, name, color)").in("contact_id", fatia)
@@ -191,10 +191,26 @@ export default async function Today() {
   // tarefa), para a linha poder dizer "passo 3 de 7" em vez de um número solto.
   // ============================================================
   const sequenciaDoEnrollment: Record<string, string> = {};
+  // ============================================================
+  // DE QUAL CAIXA ESTE TOQUE VAI SAIR
+  //
+  // Pergunta que a fila não respondia e custou caro: a cadência do Enquadria estava
+  // saindo pela caixa da Sureya. A caixa é carimbada na tarefa NA INSCRIÇÃO; quem foi
+  // inscrito antes de a cadência ter caixa própria ficou com o campo vazio — e vazio
+  // cai no rodízio, que escolhe a caixa MAIS VAZIA da camada. Ninguém pediu; foi só
+  // aritmética de folga. E não havia onde ver isso antes de apertar enviar.
+  // ============================================================
+  const caixaDaCadencia: Record<string, { id: string | null; produto: boolean }> = {};
   for (const e of (enrs as any[]) || []) {
     cadenceByEnrollment[e.id] = e.sequences?.name || "";
     if (e.sequence_id) sequenciaDoEnrollment[e.id] = e.sequence_id as string;
+    caixaDaCadencia[e.id] = {
+      id: (e.sequences?.email_account_id as string) || null,
+      produto: !!e.sequences?.product_id,
+    };
   }
+  const enderecoDaCaixa: Record<string, string> = {};
+  for (const b of activeBoxes) enderecoDaCaixa[b.id] = (b.from_email as string) || "";
   const seqIds = Array.from(new Set(Object.values(sequenciaDoEnrollment)));
   const passosPorSequencia: Record<string, number> = {};
   if (seqIds.length) {
@@ -411,6 +427,17 @@ export default async function Today() {
     nomePorPerfil.set(p.id as string, (p.full_name as string) || (p.email as string) || "sem nome");
   }
 
+  function remetenteDe(t: any): { email: string | null; origem: "tarefa" | "cadencia" | "produto" | "rodizio" } {
+    if (t.channel !== "email") return { email: null, origem: "rodizio" };
+    if (t.email_account_id) return { email: enderecoDaCaixa[t.email_account_id] || null, origem: "tarefa" };
+    const daCad = t.enrollment_id ? caixaDaCadencia[t.enrollment_id] : undefined;
+    if (daCad?.id) return { email: enderecoDaCaixa[daCad.id] || null, origem: "cadencia" };
+    // produto com pool: a caixa é sorteada no envio entre as do pool — dizer QUAL seria
+    // chute. Dizer que vem do produto já muda a leitura de "sei lá" para "está amarrado".
+    if (daCad?.produto) return { email: null, origem: "produto" };
+    return { email: null, origem: "rodizio" };
+  }
+
   // anexa cadência + tags a cada task; separa "hoje/atrasados" de "próximos"
   const tasks = sorted.map((t) => ({
     ...t,
@@ -423,6 +450,11 @@ export default async function Today() {
     hot_now: t.contact_id ? hotNowByContact[t.contact_id] || null : null,
     owner_id: (t.assigned_to as string) || "",
     owner_name: t.assigned_to ? nomePorPerfil.get(t.assigned_to as string) || "outro usuário" : "sem responsável",
+    // remetente previsto — a mesma ordem de autoridade que o envio aplica:
+    // carimbo da tarefa → caixa da cadência → pool do produto → rodízio.
+    // "previsto" e não "definitivo" de propósito: se a caixa estiver sem folga na hora,
+    // o envio degrada para outra e avisa. Prometer o que não se cumpre seria pior.
+    remetente: remetenteDe(t),
   }));
 
   // re-ordena: quem engajou agora (hot_now) vem no topo absoluto, mantendo o resto por score

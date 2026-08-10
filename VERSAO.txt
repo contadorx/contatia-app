@@ -1,80 +1,80 @@
 Contatia — versão deste pacote
 ==============================
-v2026.08.08-68
+v2026.08.08-69
 
-MIGRATION NOVA: 0115_fila_automatica.sql
-(A 0114, da v67, precisa estar aplicada antes. Sem a 0115 o app não quebra: o cron não
-envia nada e a caixa "fila automática" avisa que não foi gravada.)
-
-ATENÇÃO — vercel.json mudou: entrou o cron /api/cron/fila-envio (*/10 * * * *).
-Ele só passa a existir depois do deploy; confira em Vercel → Settings → Cron Jobs.
+Migrations: NENHUMA nova. (0114 e 0115 continuam necessárias, das versões 67 e 68.)
 
 --------------------------------------------------------------------
-A FILA ANDA SOZINHA, COM O NAVEGADOR FECHADO
+O PROBLEMA: "a cadência do Enquadria saiu pela caixa da Sureya"
 --------------------------------------------------------------------
-A v67 fez a tela retomar sozinha quando a janela da hora abria — mas só com a aba
-aberta. Quem tem 800 toques e 100/h precisaria de 8 horas de aba viva. Ninguém deixa.
+A caixa de envio é CARIMBADA NA TAREFA no momento da inscrição. Quem foi inscrito
+antes de a cadência ter caixa própria ficou com esse campo VAZIO — e vazio cai no
+rodízio, que escolhe assim:
 
-Agora, em Configurações → Canais → "Ritmo da fila":
-  ☑ Deixar a fila andar sozinha (sem a aba aberta)
+   1ª camada: a caixa de quem está enviando   (email_accounts.user_id = você)
+   2ª camada: a caixa do workspace            (user_id NULL)
+   3ª camada: a caixa de outra pessoa, se marcada como compartilhada
+   dentro da camada, ganha a de MAIOR FOLGA no dia.
 
-A cada 10 minutos o servidor envia os toques de e-mail JÁ VENCIDOS, respeitando:
-  · o horário comercial configurado (fora dele não envia — nem "guarda para depois");
-  · o teto por hora (workspace e caixa);
-  · o limite diário de cada caixa, com aquecimento.
-
-WhatsApp, Instagram e LinkedIn NÃO entram. Continuam saindo pela sua mão — automatizar
-disparo nesses canais é o caminho curto para perder a conta.
-
-Nasce DESLIGADO. Envio automático é a única função do sistema que fala com o cliente do
-cliente sem ninguém olhando; isso se liga por escolha explícita.
-
-Se você ligar a fila automática com o horário comercial DESLIGADO, a tela avisa em
-amarelo: sem janela, ela envia de madrugada e no fim de semana.
-
-TUDO QUE SAI ASSIM FICA REGISTRADO em Resultados → Registro, como "Fila automática
-enviou", com quantos saíram, por qual caixa, quantas falharam e por que parou. É a
-única testemunha: ninguém estava olhando na hora.
+Se duas caixas são "do workspace" (user_id NULL), elas ficam na MESMA camada e ganha
+simplesmente a mais vazia do dia. Ninguém escolheu a Sureya — foi aritmética de folga.
+E não havia onde ver isso antes de apertar enviar.
 
 --------------------------------------------------------------------
-MUDANÇA ESTRUTURAL (por que o zip mexe em arquivo antigo)
+1) A CAIXA DA CADÊNCIA PASSA A VALER NO ENVIO
 --------------------------------------------------------------------
-O motor de envio saiu de `app/dashboard/task-actions.ts` para `lib/envioEmail.ts`.
+Antes, amarrar a caixa na cadência só afetava inscrições NOVAS — a fila já criada
+continuava saindo errada, e o único conserto era SQL.
 
-Motivo de segurança: em arquivo "use server", TODA função exportada vira uma server
-action chamável pelo navegador. Exportar o motor para o cron usar deixaria o cliente
-mandar um "lote" forjado — com capacidade inventada — furando o limite diário e o teto
-por hora do próprio workspace. Fora do "use server", o motor é do servidor e invisível
-para o navegador.
+Agora, quando a tarefa não tem carimbo, o envio consulta a cadência (e o produto) na
+hora. Ordem de autoridade:
 
-Duplicar o motor para o cron seria pior: dois envios com regras que divergem no
-primeiro conserto feito só de um lado.
+   1. caixa carimbada na TAREFA (decidida quando o contato entrou)
+   2. caixa da CADÊNCIA / do produto
+   3. rodízio por camadas
 
-O motor ganhou uma SESSÃO INJETADA. Sem sessão = usuário logado, e a RLS resolve o
-escopo (é o caminho de sempre, inalterado). Com sessão = cron, client admin, SEM RLS —
-e por isso todas as consultas do motor passaram a ter o tenant explícito:
-  · a tarefa só é lida com `tenant_id` batendo;
-  · `capacidadeDeHoje(admin, tenantId)` filtra caixas, eventos e tenants;
-  · a assinatura do rodapé é lida com `.eq("id", tenant_id)`.
-Sem esses filtros, um select sem escopo alcançaria a caixa de OUTRO cliente — o e-mail
-sairia com o remetente errado e nada daria erro.
+Efeito prático: você amarra a caixa em Cadências → editar → "Caixa de envio
+(sobrescrever)" e a fila inteira, inclusive o que já estava criado, passa a sair certo.
+Sem SQL, sem reinscrever ninguém.
 
 --------------------------------------------------------------------
-O QUE FOI TESTADO
+2) A FILA MOSTRA DE QUAL CAIXA CADA E-MAIL VAI SAIR
 --------------------------------------------------------------------
-· migration 0115 aplicada 2× num Postgres 16 descartável (idempotente, índice inclusive);
-· capacidade com tenant explícito: os 3 filtros aparecem (email_accounts.tenant_id,
-  tenants.id, events.tenant_id) e SOMEM quando não há tenantId (caminho da RLS intacto);
-· contagem da janela móvel: 100 no dia / 70 na última hora, folga efetiva = menor entre
-  dia e hora;
-· "libera às": conferido contra o cálculo independente — 70 envios com teto 50 libera
-  no 21º mais antigo + 60 min, ao minuto;
-· tsc e next build limpos; a rota /api/cron/fila-envio aparece no build.
+Cada toque de e-mail em Hoje ganhou uma linha abaixo do contato:
 
-O que NÃO deu para testar aqui: o envio real pelo cron (depende do Supabase e do SMTP,
-que este ambiente não alcança). Sugestão de primeira rodada: ligue a fila automática com
-o horário comercial ligado, deixe 2 ou 3 toques vencidos e chame a rota à mão —
-  https://SEU-APP/api/cron/fila-envio?key=SEU_CRON_SECRET
-Ela devolve um JSON com o relatório por workspace (enviados, falhas, por que parou).
+   sai por leandro@... (caixa da cadência)
+   sai por sureya@...  (definida na inscrição)
+   sai por uma das caixas do produto
+   ⚠ sem caixa definida — vai no rodízio (o sistema escolhe a mais vazia do dia)
 
-COMO CONFERIR: rodapé do menu = "v2026.08.08-68" + 7 do commit.
+É "previsto", não "definitivo", de propósito: se a caixa estiver sem folga na hora do
+disparo, o envio degrada para outra — e agora avisa (item 3).
+
+--------------------------------------------------------------------
+3) TROCA DE REMETENTE DEIXA DE SER SILENCIOSA
+--------------------------------------------------------------------
+Quando a caixa designada está inativa ou sem folga, o e-mail continua saindo por outra
+(travar a fila seria pior), mas o relatório passa a dizer:
+
+   ⚠ 12 saíram por uma caixa diferente da designada — Saiu por sureya@...:
+     leandro@... (a caixa da cadência) está sem folga agora.
+
+--------------------------------------------------------------------
+SOBRE "SEUS ENVIOS DE HOJE" CONTABILIZAR PARA ELA
+--------------------------------------------------------------------
+Aquele painel tem duas contas diferentes, e vale saber qual você olhou:
+  · "por pessoa" conta por QUEM CLICOU (events.user_id);
+  · a lista de capacidade conta por CAIXA (quantos saíram de cada endereço).
+Se o nome da Sureya aparece na primeira, foi ela quem disparou. Se o endereço dela
+aparece na segunda com os toques do Enquadria, foi o rodízio — e é isto que a v69
+conserta.
+
+--------------------------------------------------------------------
+JUNTO COM ESTE ZIP: DIAGNOSTICO_caixa_errada.sql
+--------------------------------------------------------------------
+4 consultas de leitura (não escrevem nada) para confirmar a causa em 2 minutos:
+quem é dona de cada caixa, se a cadência tem caixa amarrada, com que caixa as tarefas
+pendentes nasceram, e o que saiu hoje por caixa e por cadência.
+
+COMO CONFERIR: rodapé do menu = "v2026.08.08-69" + 7 do commit.
+Abra Hoje: cada e-mail deve mostrar a linha "sai por ...".

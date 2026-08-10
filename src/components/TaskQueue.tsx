@@ -28,6 +28,8 @@ type Task = {
   // dono da TAREFA (carimbado na inscrição, vindo do responsável do contato)
   owner_id?: string;
   owner_name?: string;
+  // de qual caixa este e-mail deve sair, e quem decidiu isso
+  remetente?: { email: string | null; origem: "tarefa" | "cadencia" | "produto" | "rodizio" };
   contacts: {
     name: string; company: string | null; phone: string | null; email: string | null; score: number | null;
     wa_status?: string | null;
@@ -325,6 +327,7 @@ export default function TaskQueue({
             capacidadeHoje?: number; usadosHoje?: number; folgaHoje?: number;
             resumoCapacidade?: string; comoAumentar?: string;
             descartadasDaSelecao?: number; tetoPorClique?: number | null;
+            trocaramDeCaixa?: number; avisoTroca?: string | null;
             porCaixa?: Record<string, number> } | undefined;
 
         // resposta vazia = função morta por tempo. Antes isso não dizia nada, e a
@@ -398,6 +401,11 @@ export default function TaskQueue({
       // cronograma — e o que responde "quando isso termina?" sem ninguém ter que
       // calcular de cabeça.
       if (res.plano) partes.push(res.plano);
+      // Remetente trocado no meio: o e-mail saiu, mas por outro endereço. É a linha que
+      // faltava quando "a cadência do Enquadria saiu pela caixa do BPOx".
+      if (res.trocaramDeCaixa) {
+        partes.push(`⚠ ${res.trocaramDeCaixa} saíram por uma caixa diferente da designada${res.avisoTroca ? ` — ${res.avisoTroca}` : ""}`);
+      }
       if (res.descartadasDaSelecao) {
         partes.push(`${res.descartadasDaSelecao} da sua seleção ficaram de fora (não são e-mail, já saíram, ou vencem depois de hoje)`);
       }
@@ -878,6 +886,32 @@ export default function TaskQueue({
                       pessoa, repetir o mesmo nome em toda linha é ruído */}
                   {donos.length > 1 && t.owner_name ? <span className="ml-1 opacity-70">· {t.owner_name}</span> : null}
                 </p>
+                {/* ============================================================
+                    O REMETENTE, ANTES DE APERTAR ENVIAR
+                    A cadência do Enquadria estava saindo pela caixa do BPOx e só dava
+                    para descobrir depois, no relatório. Aqui a linha diz de onde vai
+                    sair — e, quando ninguém amarrou a caixa, diz que é o rodízio (que
+                    escolhe a mais vazia do dia, não a mais adequada à marca).
+                    ============================================================ */}
+                {t.channel === "email" && t.remetente && (
+                  <p className="truncate text-[11px] text-subtle">
+                    {t.remetente.email ? (
+                      <>
+                        <span className="opacity-70">sai por</span>{" "}
+                        <b className="font-medium text-ink">{t.remetente.email}</b>
+                        <span className="opacity-70">
+                          {t.remetente.origem === "cadencia" ? " (caixa da cadência)" : " (definida na inscrição)"}
+                        </span>
+                      </>
+                    ) : t.remetente.origem === "produto" ? (
+                      <span className="opacity-70">sai por uma das caixas do produto</span>
+                    ) : (
+                      <span className="text-warn">
+                        sem caixa definida — vai no rodízio (o sistema escolhe a mais vazia do dia)
+                      </span>
+                    )}
+                  </p>
+                )}
               </div>
 
               {t.channel === "whatsapp" && c?.phone && travadoSemWa(t) && (

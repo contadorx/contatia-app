@@ -186,6 +186,19 @@ export async function enviarUm(
     return { error: `E-mail na lista de supressão (${(supp as any).reason}). Envio bloqueado para proteger sua reputação.` };
   }
 
+  // A CADÊNCIA DE ONDE VEIO A TAREFA — resolvida ANTES de escolher a caixa.
+  //
+  // Ela serve para duas coisas: o rastreio por passo (relatório de aberturas/cliques) e,
+  // desde a v69, a escolha do remetente — a cadência passou a ter voz na caixa mesmo
+  // quando a tarefa nasceu sem carimbo. Por isso subiu para cá; antes era consultada só
+  // depois da caixa já ter sido escolhida, quando não servia mais para decidir nada.
+  let sequenceId: string | null = null;
+  if ((task as any).enrollment_id) {
+    const { data: enr } = await supabase
+      .from("enrollments").select("sequence_id").eq("id", (task as any).enrollment_id).eq("tenant_id", tenant_id).maybeSingle();
+    sequenceId = ((enr as any)?.sequence_id as string) || null;
+  }
+
   // ROTAÇÃO DE CAIXAS: quem sabe quanto cada caixa ainda pode enviar hoje é
   // capacidadeDeHoje — a MESMA conta que o relatório do lote mostra na tela. Antes esta
   // conta morava aqui dentro e a tela tinha a sua; quando as duas discordassem, o
@@ -247,12 +260,52 @@ export async function enviarUm(
   // CAIXA DESIGNADA (produto/cadência): se a tarefa foi carimbada com uma caixa e
   // ela está ativa e com folga hoje, envia POR ELA (mantém a marca certa). Se estiver
   // inativa ou sem folga, cai no rodízio acima (degradação segura — o e-mail sai).
-  const desiredBoxId = (task as any).email_account_id as string | null;
+  // ============================================================
+  // DE QUEM É ESTE E-MAIL — a caixa da CADÊNCIA vale mesmo para tarefa antiga
+  //
+  // O problema real: "a cadência do Enquadria saiu pela caixa da Sureya". A caixa é
+  // carimbada na tarefa NO MOMENTO DA INSCRIÇÃO. Quem inscreveu antes de amarrar a
+  // caixa na cadência ficou com `email_account_id = null` na fila inteira — e null cai
+  // no rodízio, que escolhe pela MAIOR FOLGA dentro da camada. Se as duas caixas são
+  // "do workspace" (user_id null), elas estão na mesma camada e ganha a mais vazia.
+  // Ninguém pediu isso; foi só a caixa menos usada do dia.
+  //
+  // Amarrar a caixa na cadência consertava só as inscrições NOVAS — a fila já criada
+  // continuava saindo errada, e não havia nem como ver. Agora a cadência é consultada
+  // no envio quando a tarefa não tem carimbo: mudar a caixa da cadência passa a
+  // consertar o que já está na fila, sem SQL e sem reinscrever ninguém.
+  //
+  // Ordem de autoridade, da mais forte para a mais fraca:
+  //   1. a caixa CARIMBADA NA TAREFA (foi decidida quando o contato entrou);
+  //   2. a caixa da CADÊNCIA / do produto (resolveEmailBox);
+  //   3. o rodízio por camadas (minha → do workspace → emprestada).
+  // ============================================================
+  let desiredBoxId = (task as any).email_account_id as string | null;
+  let origemCaixa: "tarefa" | "cadencia" | "rodizio" = desiredBoxId ? "tarefa" : "rodizio";
+  if (!desiredBoxId && sequenceId) {
+    try {
+      const { resolveEmailBox } = await import("@/lib/caixas");
+      const daCadencia = await resolveEmailBox(supabase, tenant_id, sequenceId);
+      if (daCadencia) { desiredBoxId = daCadencia; origemCaixa = "cadencia"; }
+    } catch {
+      /* não achar a caixa da cadência não pode impedir o envio — cai no rodízio */
+    }
+  }
+
+  // A caixa designada só é DESCARTADA quando não dá para usá-la (inativa ou sem folga).
+  // Quando isso acontece, o remetente muda — e mudar remetente em silêncio é como o
+  // lead do Enquadria recebeu um e-mail de bpox.com.br. Por isso vira aviso.
+  let trocouDeCaixa: string | null = null;
   if (desiredBoxId) {
     const d = (accts as any[]).find((a) => a.id === desiredBoxId);
     if (d) {
       const dSlack = folgaDe(d);
       if (dSlack > 0) { acct = d; bestSlack = dSlack; }
+      else if (origemCaixa !== "rodizio") {
+        trocouDeCaixa = `${(d as any).from_email} (a caixa ${origemCaixa === "tarefa" ? "desta tarefa" : "da cadência"}) está sem folga agora`;
+      }
+    } else if (origemCaixa !== "rodizio") {
+      trocouDeCaixa = `a caixa ${origemCaixa === "tarefa" ? "desta tarefa" : "da cadência"} não está ativa`;
     }
   }
 
@@ -280,13 +333,6 @@ export async function enviarUm(
   // ---- RASTREIO: links + pixel de abertura, ambos atribuídos ao passo ----
   let bodyText = task.generated_content || "";
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL ? (process.env.NEXT_PUBLIC_APP_URL || `https://${process.env.VERCEL_URL}`) : "";
-  // a cadência de onde veio a tarefa (para o relatório por passo)
-  let sequenceId: string | null = null;
-  if ((task as any).enrollment_id) {
-    const { data: enr } = await supabase
-      .from("enrollments").select("sequence_id").eq("id", (task as any).enrollment_id).eq("tenant_id", tenant_id).maybeSingle();
-    sequenceId = ((enr as any)?.sequence_id as string) || null;
-  }
   const atribuicao = {
     tenantId: tenant_id,
     contactId: (task as any).contact_id ?? null,
@@ -457,5 +503,21 @@ export async function enviarUm(
   const avisoRegistro = reg?.ok === false
     ? `ATENÇÃO: o e-mail saiu, mas o registro do envio falhou (${reg.error}). Ele NÃO entra na contagem do dia nem no limite — confira o painel "Seus envios de hoje" antes de continuar.`
     : undefined;
-  return { ok: true, aviso: [avisoRegistro, avisoCopia].filter(Boolean).join(" ") || undefined, caixa: (acct as any).from_email };
+  // Trocar de remetente no meio do caminho é uma decisão do sistema, não sua — e foi
+  // assim que um lead do Enquadria recebeu e-mail de bpox.com.br. Continua sendo o
+  // comportamento certo (degradar e entregar é melhor que travar a fila), mas em voz
+  // alta: quem lê o resultado precisa saber que o endereço mudou e por quê.
+  const avisoCaixa = trocouDeCaixa
+    ? `Saiu por ${(acct as any).from_email}: ${trocouDeCaixa}.`
+    : undefined;
+
+  return {
+    ok: true,
+    aviso: [avisoRegistro, avisoCopia, avisoCaixa].filter(Boolean).join(" ") || undefined,
+    caixa: (acct as any).from_email,
+    // "tarefa" = carimbada na inscrição · "cadencia" = veio da cadência/produto agora ·
+    // "rodizio" = ninguém escolheu, o sistema decidiu pela folga
+    caixaOrigem: origemCaixa,
+    trocouDeCaixa: !!trocouDeCaixa,
+  };
 }

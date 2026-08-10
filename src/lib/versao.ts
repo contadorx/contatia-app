@@ -14,8 +14,8 @@
 // lateral. Se a tela mostra um número e a entrega diz outro, o build é velho — e isso
 // se resolve olhando, não deduzindo pelo texto de uma mensagem.
 // ============================================================
-export const VERSAO_APP = "2026.08.08-68";
+export const VERSAO_APP = "2026.08.08-69";
 
 // O que entrou nesta versão — some do bundle do cliente se ninguém importar, e serve
 // de histórico curto para responder "isto já está no ar?".
-export const VERSAO_NOTAS = "fila automatica: o servidor esvazia a fila de e-mail sozinho (cron a cada 10 min), respeitando horario comercial, teto por hora e limite diario — com o navegador fechado";
+export const VERSAO_NOTAS = "a caixa da cadencia passa a valer no envio mesmo para tarefa antiga; a fila mostra por qual caixa cada e-mail vai sair e avisa quando o remetente troca";
