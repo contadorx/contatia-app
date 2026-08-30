@@ -143,11 +143,11 @@ export async function POST(req: Request, { params }: { params: { token: string }
   // M9: acha o contato consultando direto no banco pela coluna normalizada phone_digits
   // (índice), em vez de carregar a tabela inteira. Se houver mais de um com os mesmos 10
   // dígitos, prefere o de match EXATO (dígitos completos) e, na dúvida, não pausa nada.
-  let contact: { id: string; phone: string | null; score: number | null } | null = null;
+  let contact: { id: string; phone: string | null; score: number | null; opted_out?: boolean | null } | null = null;
   if (last10.length >= 8) {
     const { data: matches } = await admin
       .from("contacts")
-      .select("id, phone, score")
+      .select("id, phone, score, opted_out")
       .eq("tenant_id", tenant_id)
       .eq("phone_digits", last10)
       .limit(5);
@@ -246,6 +246,7 @@ export async function POST(req: Request, { params }: { params: { token: string }
 
   // se é um contato conhecido em cadência ativa → pausa a sequência e pontua
   let marked = 0;
+  let autopiloto: any = null;
   if (contact) {
     const { data: enrs } = await admin
       .from("enrollments")
@@ -253,9 +254,11 @@ export async function POST(req: Request, { params }: { params: { token: string }
       .eq("tenant_id", tenant_id)
       .eq("contact_id", contact.id)
       .eq("status", "active");
+    const inscricoesQueResponderam: string[] = [];
     for (const e of (enrs as any[]) || []) {
       await admin.from("enrollments").update({ status: "replied" }).eq("id", e.id);
       await admin.from("tasks").update({ status: "skipped" }).eq("enrollment_id", e.id).eq("status", "pending");
+      inscricoesQueResponderam.push(e.id);
       marked++;
     }
     if (marked > 0) {
@@ -269,6 +272,19 @@ export async function POST(req: Request, { params }: { params: { token: string }
         .from("contacts")
         .update({ score: (contact.score || 0) + (POINTS["replied"] || 30), last_activity_at: new Date().toISOString() })
         .eq("id", contact.id);
+
+      // AUTOPILOTO (0122): se a cadência que ele respondeu pede, a conversa passa para o
+      // agente agora — sem clique. Fica DEPOIS de pausar a cadência e pontuar, de
+      // propósito: se algo aqui falhar, o essencial já aconteceu.
+      const { entregarAoAgenteSeConfigurado } = await import("@/lib/agente/autopiloto");
+      autopiloto = await entregarAoAgenteSeConfigurado(admin, {
+        tenantId: tenant_id,
+        contactId: contact.id,
+        phone: fromPhone,
+        accountId: account_id,
+        enrollmentIds: inscricoesQueResponderam,
+        contatoOptOut: !!(contact as any).opted_out,
+      });
     }
     // Triagem: classifica a resposta e joga na fila de decisão (mesmo sem cadência ativa).
     try {
@@ -291,5 +307,5 @@ export async function POST(req: Request, { params }: { params: { token: string }
     direcao: "in",
   });
 
-  return NextResponse.json({ ok: true, stored: true, matched: !!contact, marked });
+  return NextResponse.json({ ok: true, stored: true, matched: !!contact, marked, autopiloto });
 }

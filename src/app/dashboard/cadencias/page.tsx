@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import CadenceStart from "@/components/CadenceStart";
 import { SaveAsTemplateButton } from "@/components/TemplateGallery";
 import EditSequenceButton from "@/components/EditSequenceButton";
+import AutopilotoCadencia from "@/components/AutopilotoCadencia";
 import { CadenceReport } from "@/components/CadenceReport";
 import ReaplicarTextos from "@/components/ReaplicarTextos";
 import { listTemplates } from "@/app/dashboard/cadencias/actions";
@@ -45,7 +46,7 @@ export default async function Cadencias({
   let seqQuery = supabase
     .from("sequences")
     // `goal` (0107) NÃO entra nomeado: quebraria a lista inteira antes da migration.
-    .select("id, name, audience, is_active, created_at, created_by, product_id, email_account_id, sequence_steps(channel, position), products(name), email_accounts(from_email)")
+    .select("id, name, audience, is_active, created_at, created_by, product_id, email_account_id, agente_autopiloto, sequence_steps(channel, position), products(name), email_accounts(from_email)")
     .order("created_at", { ascending: false });
   if (!gerente) seqQuery = seqQuery.eq("created_by", user?.id ?? "");
 
@@ -156,6 +157,7 @@ export default async function Cadencias({
                       {OBJETIVO_LABEL[s.goal]}
                     </span>
                   )}
+                  <AutopilotoCadencia id={s.id} ligado={!!s.agente_autopiloto} nome={s.name} />
                   <p className="mt-1 text-sm text-subtle">
                     {s.audience ? `${s.audience} · ` : ""}
                     {steps.length} passo(s):{" "}
