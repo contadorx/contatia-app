@@ -33,6 +33,7 @@ Os arquivos estão em `supabase/migrations/` para o histórico ficar completo:
 - `0118_agente_playbook.sql` — config, playbook, exemplos, lições
 - `0119_agente_motor.sql` — turno, lock e `agent_decisoes`
 - `0120_agente_fechamento_aprendizado.sql` — proposta pendente e origem da venda
+- `0121_agente_quem_somos.sql` — o que a empresa faz e o que o produto é
 
 ## Variáveis de ambiente
 
@@ -55,15 +56,21 @@ Os arquivos estão em `supabase/migrations/` para o histórico ficar completo:
 
 ## A ordem de ligar. Nenhum passo é pulável.
 
-1. **Publicar um playbook** — Agente → Playbook. Exige etapas *e* pelo menos um
-   plano com valor: sem preço, `fechar_venda` não teria contra o que validar.
-2. **Configurar os tetos** — Agente → persona, `valor_max_fechar`, teto de
+1. **Dizer o que a empresa faz** — Agente → *O que a empresa faz*. É a primeira
+   coisa que ele lê em toda conversa e o que responde “o que vocês fazem?”. Em
+   branco, ele é instruído a **não inventar** e passar para um humano.
+   Confira também Config → Identidade e marca (nome, segmento, site): o agente lê
+   de lá, sem duplicar.
+2. **Publicar um playbook** — Agente → Playbook. Exige a **descrição do produto**,
+   etapas *e* pelo menos um plano com valor. Preencha também *Serve para* e
+   *NÃO serve para*: o segundo evita ele qualificar todo mundo como cliente.
+3. **Configurar os tetos** — Agente → persona, `valor_max_fechar`, teto de
    desconto. Sem `valor_max_fechar` ele não fecha nada e degrada tudo para
    reunião, que é o padrão seguro.
-3. **Ligar o agente** — o kill switch exige o passo 1.
-4. **Modo sombra numa conversa** — Conversas → *Sombra*. Ele roda inteiro e
+4. **Ligar o agente** — o kill switch exige o passo 1.
+5. **Modo sombra numa conversa** — Conversas → *Sombra*. Ele roda inteiro e
    **não envia**; os rascunhos ficam em `agent_decisoes`. Leia antes de soltar.
-5. **Passar ao agente** — uma conversa, não a base inteira.
+6. **Passar ao agente** — uma conversa, não a base inteira.
 
 Recomendado na semana 1: autopiloto numa fatia (1 cadência, 20–30 leads/dia).
 

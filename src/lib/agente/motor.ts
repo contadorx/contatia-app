@@ -110,6 +110,15 @@ export async function processarTurno(
   if (!conv) return { agiu: false, erro: "conversa não encontrada", ms: Date.now() - t0 };
 
   const { data: cfg } = await admin.from("agent_config").select("*").eq("tenant_id", input.tenantId).maybeSingle();
+
+  // O perfil da empresa NÃO é duplicado em agent_config: ele já existe em `tenants`,
+  // preenchido em Config → Identidade e marca. Ler de lá é o que impede dois lugares
+  // para a mesma verdade, com um deles ficando velho.
+  const { data: emp } = await admin
+    .from("tenants")
+    .select("name, legal_name, segment, website")
+    .eq("id", input.tenantId)
+    .maybeSingle();
   if (!cfg?.ativo) return { agiu: false, erro: "agente desligado", ms: Date.now() - t0 };
 
   const sombra = conv.status === "sombra" || !input.enviarReal;
@@ -187,6 +196,12 @@ export async function processarTurno(
 
   const ctx: ContextoTurno = {
     persona: { nome: cfg.persona_nome || "Ana", cargo: cfg.persona_cargo || "" },
+    empresa: {
+      nome: (emp as any)?.name || (emp as any)?.legal_name || "a empresa",
+      descricao: cfg.empresa_descricao || null,
+      segmento: (emp as any)?.segment || null,
+      site: (emp as any)?.website || null,
+    },
     contato: {
       nome: (contato as any)?.name || conv.phone,
       empresa: (contato as any)?.company || null,
@@ -204,6 +219,9 @@ export async function processarTurno(
     playbook: pbRow
       ? {
           produto: (pbRow as any).products?.name || "produto",
+          descricao: (pbRow as any).descricao || null,
+          paraQuem: (pbRow as any).para_quem || null,
+          naoServe: (pbRow as any).nao_serve || null,
           etapas: ((pbRow as any).etapas || []).map(String),
           argumentos: ((pbRow as any).argumentos || []).map(String),
           objecoes: ((pbRow as any).objecoes || []).map((o: any) => ({ objecao: String(o?.objecao ?? ""), resposta: String(o?.resposta ?? "") })),

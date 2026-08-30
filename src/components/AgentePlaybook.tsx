@@ -19,6 +19,9 @@ import { salvarPlaybook, publicarPlaybook } from "@/app/dashboard/agente/actions
 export type PlaybookProduto = {
   produtoId: string;
   nome: string;
+  descricao: string;
+  paraQuem: string;
+  naoServe: string;
   preco: number;
   billing: string;
   etapas: any[];
@@ -135,6 +138,9 @@ export default function AgentePlaybook({ produtos }: { produtos: PlaybookProduto
 }
 
 function PlaybookCard({ p, aberto, onToggle, onSalvo }: { p: PlaybookProduto; aberto: boolean; onToggle: () => void; onSalvo: () => void }) {
+  const [descricao, setDescricao] = useState(p.descricao || "");
+  const [paraQuem, setParaQuem] = useState(p.paraQuem || "");
+  const [naoServe, setNaoServe] = useState(p.naoServe || "");
   const [etapas, setEtapas] = useState<string[]>(p.etapas.map(String));
   const [argumentos, setArgumentos] = useState<string[]>(p.argumentos.map(String));
   const [regras, setRegras] = useState<string[]>(p.regrasDuras.map(String));
@@ -153,6 +159,9 @@ function PlaybookCard({ p, aberto, onToggle, onSalvo }: { p: PlaybookProduto; ab
     start(async () => {
       const r = await salvarPlaybook({
         produtoId: p.produtoId,
+        descricao,
+        para_quem: paraQuem,
+        nao_serve: naoServe,
         etapas,
         argumentos,
         regras_duras: regras,
@@ -193,6 +202,7 @@ function PlaybookCard({ p, aberto, onToggle, onSalvo }: { p: PlaybookProduto; ab
             )}
           </p>
           <p className="mt-0.5 text-xs text-subtle">
+            {!descricao.trim() && <span className="text-warn">sem descrição · </span>}
             {etapas.length} etapas · {argumentos.length} argumentos · {objecoes.length} objeções · {precos.length} planos
             {regras.length ? ` · ${regras.length} regras duras` : ""}
           </p>
@@ -215,6 +225,51 @@ function PlaybookCard({ p, aberto, onToggle, onSalvo }: { p: PlaybookProduto; ab
 
       {aberto && (
         <div className="mt-4 space-y-5 border-t border-line pt-4">
+          {/* ============================================================
+              O QUE É vem antes de COMO VENDER.
+              Sem isto, o agente inferia o produto a partir dos argumentos — e inferir
+              produto é onde ele inventa. Publicar passou a exigir a descrição.
+              ============================================================ */}
+          <div className="rounded-lg border border-brand/30 bg-brand-soft/40 p-3">
+            <p className="text-xs font-semibold text-brand-dark">O que é este produto</p>
+            <p className="mt-0.5 text-[11px] text-subtle">
+              Em linguagem simples, antes de qualquer argumento de venda. É o que ele responde quando perguntam
+              “o que é isso?”. Obrigatório para publicar.
+            </p>
+            <textarea
+              className="input mt-2 w-full text-sm"
+              rows={3}
+              placeholder="Ex.: Contabilidade mensal completa para prestadores de serviço: emitimos as notas, fazemos o fechamento e entregamos as obrigações. Tudo pelo app, com um contador responsável."
+              value={descricao}
+              onChange={(e) => setDescricao(e.target.value)}
+            />
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-xs font-semibold text-subtle">Serve para</span>
+                <textarea
+                  className="input mt-1 w-full text-sm" rows={2}
+                  placeholder="Ex.: prestadores de serviço no Simples, 1 a 20 funcionários, que emitem nota todo mês."
+                  value={paraQuem}
+                  onChange={(e) => setParaQuem(e.target.value)}
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-semibold text-subtle">NÃO serve para</span>
+                <textarea
+                  className="input mt-1 w-full text-sm" rows={2}
+                  placeholder="Ex.: indústria, importação, Lucro Real, quem precisa de contador presencial."
+                  value={naoServe}
+                  onChange={(e) => setNaoServe(e.target.value)}
+                />
+                <span className="mt-1 block text-[11px] text-subtle">
+                  O campo mais subestimado: sem ele o agente qualifica todo mundo e vende para quem cancela no
+                  primeiro mês.
+                </span>
+              </label>
+            </div>
+          </div>
+
           <ListaTexto
             titulo="Etapas — a estratégia"
             ajuda="A ordem em que ele conduz. Uma pergunta por mensagem; mensagens curtas, é WhatsApp."
