@@ -105,8 +105,16 @@ export async function sendEmailTask(taskId: string, override?: { subject?: strin
 // primeiro conserto feito só de um lado.
 
 // Envia a tarefa de WhatsApp via Evolution API (caixa ativa do tenant), com cap diário.
+//
+// O MOTOR MORA EM `lib/envioWhatsapp.ts` desde que a fila automática passou a existir.
+// Este arquivo é "use server": tudo que ele exporta vira server action chamável pelo
+// navegador, então o cron não pode importar daqui. E manter dois motores seria o pior
+// dos dois mundos — "dois envios com regras que divergem no primeiro conserto feito só
+// de um lado", que é exatamente o que o e-mail já aprendeu.
+//
+// O que fica AQUI é o que só vale para o clique: o modo do WhatsApp, o texto editado na
+// hora, a escolha da instância DA PESSOA que apertou, e o revalidate da tela.
 export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
-  const { sendText } = await import("@/lib/whatsapp");
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
 
@@ -117,7 +125,7 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
   const { data: tmode } = await supabase.from("tenants").select("whatsapp_mode").eq("id", tenant_id).maybeSingle();
   const { envioAutomatico } = await import("@/lib/waModo");
   if (!envioAutomatico((tmode as any)?.whatsapp_mode)) {
-    return { error: "Neste modo o envio do primeiro toque é manual: abra o link do WhatsApp (botão “Abrir WhatsApp”)." };
+    return { error: "Neste modo o envio do primeiro toque é manual: abra o link do WhatsApp (botão \u201cAbrir WhatsApp\u201d)." };
   }
 
   if (overrideBody !== undefined) {
@@ -130,115 +138,23 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
     }
   }
 
-  const { data: task } = await supabase
-    .from("tasks")
-    .select("id, channel, generated_content, contact_id, enrollment_id, condicao, contacts(*)")
-    .eq("id", taskId)
-    .single();
-  if (!task) return { error: "Tarefa não encontrada." };
-  if (task.channel !== "whatsapp") return { error: "Tarefa não é de WhatsApp." };
-  {
-    // mesma porta do e-mail: no WhatsApp o estrago é ainda mais visível
-    const { textoTemLixo, AVISO_LIXO } = await import("@/lib/nomeValido");
-    if (textoTemLixo((task as any).generated_content)) return { error: AVISO_LIXO };
-  }
-  if ((task as any).condicao) {
-    const { avaliarCondicao, rotuloCondicao } = await import("@/lib/condicoes");
-    const r = await avaliarCondicao(supabase, (task as any).condicao, {
-      contactId: (task as any).contact_id,
-      enrollmentId: (task as any).enrollment_id,
-      contato: (task as any).contacts || {},
-    });
-    if (!r.ok) {
-      await supabase.from("tasks").update({ status: "skipped" }).eq("id", taskId).eq("status", "pending");
-      return { error: `Passo condicional (${rotuloCondicao((task as any).condicao)}): ${r.motivo}. Toque pulado.` };
-    }
-  }
-
-  const phone = (task as any).contacts?.phone as string | undefined;
-  if (!phone) return { error: "Contato sem telefone." };
-
   // instância do PRÓPRIO usuário quando ela existe (ver lib/instanciaWa)
   const { instanciaDoUsuario, SEM_INSTANCIA } = await import("@/lib/instanciaWa");
   const { acc } = await instanciaDoUsuario(supabase, tenant_id, user_id);
   if (!acc) return { error: SEM_INSTANCIA };
 
-  // meia-noite BRT (UTC-3, fixo): o servidor roda em UTC — sem isso o "dia" do cap
-  // diário resetaria às 21h de Brasília e a caixa poderia enviar 2x o limite num dia real.
-  const BRT_OFFSET_MS = 3 * 3600000;
-  const nowBRT = new Date(Date.now() - BRT_OFFSET_MS);
-  const startOfDay = new Date(Date.UTC(nowBRT.getUTCFullYear(), nowBRT.getUTCMonth(), nowBRT.getUTCDate()) + BRT_OFFSET_MS);
-  const { count } = await supabase
-    .from("events")
-    .select("id", { count: "exact", head: true })
-    .eq("type", "whatsapp_sent")
-    .gte("created_at", startOfDay.toISOString());
-  if ((count ?? 0) >= ((acc as any).daily_cap ?? 40)) {
-    return { error: "Limite diário de WhatsApp atingido (anti-ban). Tente amanhã." };
-  }
-
-  const res = await sendText(acc as any, phone, task.generated_content || "");
-  if (res.error) {
-    // "não tem WhatsApp" não é só um erro de envio: é um FATO sobre o contato, e a
-    // descoberta custou uma consulta ao WhatsApp. Marcado, ele some da fila de envio e
-    // aparece na lista de revisão — em vez de reaparecer amanhã com o mesmo erro.
-    const { ehErroSemWhatsapp, marcarSemWhatsapp } = await import("@/lib/semWhatsapp");
-    if (ehErroSemWhatsapp(res.error)) {
-      const r = await marcarSemWhatsapp(supabase, {
-        tenantId: tenant_id,
-        contactId: (task as any).contact_id,
-        phone,
-      });
-      revalidatePath("/dashboard");
-      return {
-        error:
-          res.error +
-          (r.ok
-            ? r.motivo === "fixo"
-              ? " Marquei o contato como sem WhatsApp (o número é fixo) — ele está em Contatos → Sem WhatsApp para você achar um celular."
-              : " Marquei o contato como sem WhatsApp — ele está em Contatos → Sem WhatsApp para revisão."
-            : " (não consegui marcar o contato — ele vai reaparecer nesta fila)"),
-        semWhatsapp: true,
-      };
-    }
-    return { error: res.error };
-  }
-
-  await supabase.from("tasks").update({ status: "done", completed_at: new Date().toISOString() }).eq("id", taskId);
-  await scoreEvent(supabase, { tenant_id, contact_id: (task as any).contact_id, type: "task_done", user_id });
-  // pelo scoreEvent, e não por insert direto: é ele que sabe gravar o autor e que
-  // tolera a coluna user_id ainda não existir (0106 não aplicada).
-  await scoreEvent(supabase, { tenant_id, contact_id: (task as any).contact_id, type: "whatsapp_sent", user_id });
-  // guarda a mensagem enviada na conversa (para a caixa de Respostas mostrar os dois lados)
-  await supabase.from("whatsapp_messages").insert({
-    tenant_id,
-    account_id: (acc as any).id,
-    contact_id: (task as any).contact_id,
-    phone,
-    direction: "out",
-    text: task.generated_content || "",
-  });
-
-  // Estado da conversa (0116): o toque de cadência gasta o orçamento do dia e conta
-  // como follow-up. Quem apertou o botão foi uma pessoa, então o agente cala aqui —
-  // no F4 o disparo automático terá caminho próprio, e é ele que NÃO deve pausar.
-  const { tocarConversa, assumirPorMensagemManual } = await import("@/lib/agente/conversas");
-  await tocarConversa(supabase, {
+  const { enviarTarefaWa } = await import("@/lib/envioWhatsapp");
+  const r = await enviarTarefaWa(supabase, {
     tenantId: tenant_id,
-    accountId: (acc as any).id,
-    contactId: (task as any).contact_id,
-    phone,
-    direcao: "out",
-  });
-  await assumirPorMensagemManual(supabase, {
-    tenantId: tenant_id,
-    accountId: (acc as any).id,
-    phone,
     userId: user_id,
+    taskId,
+    acc: acc as any,
+    // false: quem apertou foi uma pessoa — e é isso que faz o agente calar na conversa.
+    automatico: false,
   });
 
   revalidatePath("/dashboard");
-  return { ok: true };
+  return r;
 }
 
 // Envia TODAS as tarefas de e-mail pendentes de hoje, respeitando o cap diário.

@@ -333,3 +333,138 @@ export async function removerMinhaInstancia(id: string) {
       : undefined,
   };
 }
+
+// ============================================================
+// A FILA AUTOMÁTICA DE WHATSAPP — o interruptor mais perigoso do app
+//
+// Tudo aqui existe para que ligar isso seja DIFÍCIL DE FAZER SEM QUERER. O `fila-envio`
+// do e-mail diz por escrito que automatizar disparo de WhatsApp *"é o caminho curto para
+// perder a conta"*; a frase continua verdadeira, e o que mudou foi só que o dono do
+// número decidiu pagar esse preço.
+//
+// Então: três portas em série (modo automático + número marcado como aquecido À MÃO +
+// este interruptor), cada uma exigindo um ato deliberado e diferente. Nenhuma delas
+// liga sozinha, e nenhuma liga por efeito colateral de outra.
+// ============================================================
+
+export async function setFilaWhatsApp(ligar: boolean) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  // desligar nunca é barrado: o botão de pânico não faz perguntas
+  if (!ligar) {
+    const { error } = await supabase
+      .from("tenants")
+      .update({ fila_wa_automatica: false })
+      .eq("id", tenant_id);
+    if (error) return { error: msgErro(error) };
+    await supabase.from("events").insert({
+      tenant_id,
+      type: "note",
+      meta: { text: "Fila automática de WhatsApp DESLIGADA." },
+    });
+    revalidatePath("/dashboard/config");
+    return { ok: true };
+  }
+
+  const { data: t } = await supabase
+    .from("tenants")
+    .select("whatsapp_mode")
+    .eq("id", tenant_id)
+    .maybeSingle();
+
+  // Porta 1: no assistido e no híbrido o primeiro toque é manual POR DECISÃO. A fila
+  // não pode furar essa decisão pelas costas de quem a tomou.
+  const { envioAutomatico } = await import("@/lib/waModo");
+  if (!envioAutomatico((t as any)?.whatsapp_mode)) {
+    return {
+      error:
+        "Neste modo o primeiro toque é manual por decisão. Para a fila disparar sozinha, o canal precisa estar no modo automático (Evolution) — mude acima, sabendo do risco.",
+    };
+  }
+
+  // Porta 2: precisa de pelo menos um número marcado como aquecido.
+  const { data: chips } = await supabase
+    .from("whatsapp_accounts")
+    .select("id, aquecido, papel, pausado_em")
+    .eq("tenant_id", tenant_id)
+    .eq("is_active", true);
+
+  const lista = ((chips as any[]) || []);
+  if (!lista.length) return { error: "Nenhum número de WhatsApp ativo." };
+  if (!lista.some((c) => c.aquecido)) {
+    return {
+      error:
+        "Nenhum número marcado como aquecido. Marque abaixo o número que vai disparar — e só marque depois de 2 a 4 semanas de uso real dele.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("tenants")
+    .update({ fila_wa_automatica: true })
+    .eq("id", tenant_id);
+  if (error) return { error: msgErro(error) };
+
+  // O registro importa porque a partir de agora o app fala com o cliente do cliente sem
+  // ninguém olhando. "Quem ligou isso, e quando" precisa ter resposta.
+  const { logAction } = await import("@/lib/actionLog");
+  await logAction(supabase, {
+    tenant_id,
+    user_id,
+    action: "fila_wa_ligada",
+    entity: "tenant",
+    entity_id: tenant_id,
+    qtd: 1,
+    detail: "Fila automática de WhatsApp LIGADA.",
+    meta: { chips: lista.map((c) => ({ papel: c.papel, aquecido: c.aquecido })) },
+  });
+
+  revalidatePath("/dashboard/config");
+  return { ok: true };
+}
+
+/** Papel do chip e o marcador de aquecido — os dois só mudam à mão, de propósito. */
+export async function setRitmoChip(id: string, campos: { papel?: string; aquecido?: boolean }) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const patch: Record<string, any> = {};
+  if (campos.papel !== undefined) {
+    if (!["principal", "conversa", "frio"].includes(campos.papel)) return { error: "Papel inválido." };
+    patch.papel = campos.papel;
+  }
+  if (campos.aquecido !== undefined) patch.aquecido = !!campos.aquecido;
+  if (!Object.keys(patch).length) return { ok: true };
+
+  const { error } = await supabase
+    .from("whatsapp_accounts")
+    .update(patch)
+    .eq("tenant_id", tenant_id)
+    .eq("id", id);
+  if (error) return { error: msgErro(error) };
+
+  revalidatePath("/dashboard/config");
+  return { ok: true };
+}
+
+/**
+ * Libera um número que a fila pausou sozinha depois de falhas seguidas.
+ *
+ * Só faça isso depois de olhar a conexão. Liberar sem entender por que falhou é pedir
+ * para as mesmas três falhas acontecerem de novo — e cada rodada de falhas em sequência
+ * é exatamente o padrão que custa o número.
+ */
+export async function liberarChip(id: string) {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  const { error } = await supabase
+    .from("whatsapp_accounts")
+    .update({ pausado_em: null, pausa_motivo: null, falhas_seguidas: 0 })
+    .eq("tenant_id", tenant_id)
+    .eq("id", id);
+  if (error) return { error: msgErro(error) };
+
+  revalidatePath("/dashboard/config");
+  return { ok: true };
+}
