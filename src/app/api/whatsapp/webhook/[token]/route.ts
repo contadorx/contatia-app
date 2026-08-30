@@ -111,6 +111,18 @@ export async function POST(req: Request, { params }: { params: { token: string }
       waId: data?.key?.id || null,
       raw: data || {},
     });
+    // A conversa também anda quando o toque saiu da sua mão. E mais: se o agente
+    // estava conduzindo, ele CALA aqui — você acabou de falar com o lead pelo
+    // celular, e duas vozes no mesmo fio é o pior resultado possível para quem lê.
+    const { tocarConversa, assumirPorMensagemManual } = await import("@/lib/agente/conversas");
+    await tocarConversa(admin, {
+      tenantId: tenant_id,
+      accountId: account_id,
+      phone: fromPhone,
+      direcao: "out",
+    });
+    await assumirPorMensagemManual(admin, { tenantId: tenant_id, accountId: account_id, phone: fromPhone });
+
     return NextResponse.json({ ok: true, fromMe: true, ...r });
   }
 
@@ -217,6 +229,18 @@ export async function POST(req: Request, { params }: { params: { token: string }
     });
     // `last_activity_at` anda (houve movimento no número), mas o score não
     await admin.from("contacts").update({ last_activity_at: new Date().toISOString() }).eq("id", contact.id);
+    // O relógio da conversa anda (houve movimento no número), mas `automatica` impede
+    // que a saudação do robô zere a régua de follow-up — o mesmo cuidado que o score
+    // já toma três linhas acima.
+    const { tocarConversa } = await import("@/lib/agente/conversas");
+    await tocarConversa(admin, {
+      tenantId: tenant_id,
+      accountId: account_id,
+      contactId: contact.id,
+      phone: fromPhone,
+      direcao: "in",
+      automatica: true,
+    });
     return NextResponse.json({ ok: true, stored: true, automatica: true, motivo: auto.motivo });
   }
 
@@ -252,6 +276,20 @@ export async function POST(req: Request, { params }: { params: { token: string }
       await upsertReplyTriage(admin, { tenantId: tenant_id, contactId: contact.id, channel: "whatsapp", text });
     } catch { /* não bloqueia o webhook */ }
   }
+
+  // ESTADO DA CONVERSA — vale inclusive para número DESCONHECIDO (contact_id nulo).
+  // É de propósito: a conversa que ainda não virou contato é justamente a que mais
+  // precisa de estado, e a chave da 0116 é (workspace, chip, telefone) por isso.
+  // Fica por último e não bloqueia nada: a mensagem já está gravada, que é o que não
+  // pode se perder.
+  const { tocarConversa } = await import("@/lib/agente/conversas");
+  await tocarConversa(admin, {
+    tenantId: tenant_id,
+    accountId: account_id,
+    contactId: contact?.id || null,
+    phone: fromPhone,
+    direcao: "in",
+  });
 
   return NextResponse.json({ ok: true, stored: true, matched: !!contact, marked });
 }

@@ -10,6 +10,7 @@ import { BookingSettings } from "@/components/BookingSettings";
 import AccountRowActions from "@/components/AccountRowActions";
 import WebToLeadSnippet from "@/components/WebToLeadSnippet";
 import WhatsAppConnect from "@/components/WhatsAppConnect";
+import FilaWhatsAppForm, { type ChipRitmo } from "@/components/FilaWhatsAppForm";
 import BusinessProfileForm from "@/components/BusinessProfileForm";
 import SignatureForm from "@/components/SignatureForm";
 import ConfigTabs from "@/components/ConfigTabs";
@@ -112,6 +113,33 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
     .from("whatsapp_accounts")
     .select("id, user_id, is_shared, evolution_url, instance, is_active, inbound_token")
     .order("created_at", { ascending: false });
+
+  // ---- ritmo da fila de WhatsApp (0117) ----
+  // Consulta à parte, e o erro é ENGOLIDO de propósito: enquanto a 0117 não for
+  // aplicada as colunas não existem, e a página inteira de Config não pode quebrar por
+  // causa de um painel. Sem as colunas, `chipsRitmo` fica vazio e o painel não aparece.
+  const { data: waRitmo } = await supabase
+    .from("whatsapp_accounts")
+    .select("id, instance, papel, aquecido, falhas_seguidas, pausado_em, pausa_motivo, daily_cap, is_active")
+    .eq("is_active", true)
+    .order("created_at", { ascending: true });
+
+  const chipsRitmo: ChipRitmo[] = ((waRitmo as any[]) || []).map((c) => ({
+    id: c.id,
+    instance: c.instance,
+    papel: c.papel ?? "principal",
+    aquecido: !!c.aquecido,
+    falhasSeguidas: c.falhas_seguidas ?? 0,
+    pausadoEm: c.pausado_em ?? null,
+    pausaMotivo: c.pausa_motivo ?? null,
+    dailyCap: c.daily_cap ?? 40,
+  }));
+
+  const { count: waPendentes } = await supabase
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("channel", "whatsapp")
+    .eq("status", "pending");
 
   const { data: crmConns } = await supabase.from("crm_connections").select("*");
 
@@ -323,6 +351,21 @@ export default async function Config({ searchParams }: { searchParams?: { tab?: 
                   />
                 </div>
               </Section>
+
+              {chipsRitmo.length > 0 && (
+                <Section
+                  title="Fila automática de WhatsApp"
+                  desc="Os toques de WhatsApp vencidos saindo sozinhos, com o navegador fechado. É a função de maior risco do sistema: leia o painel antes de ligar."
+                >
+                  <FilaWhatsAppForm
+                    ligada={!!(tenant as any)?.fila_wa_automatica}
+                    modoAutomatico={waMode === "evolution"}
+                    chips={chipsRitmo}
+                    pendentes={waPendentes ?? 0}
+                    janelaLigada={!!(tenant as any)?.envio_horario_on}
+                  />
+                </Section>
+              )}
             </div>
           </div>
 

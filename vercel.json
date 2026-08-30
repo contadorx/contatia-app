@@ -26,6 +26,18 @@
     {
       "path": "/api/cron/fila-envio",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/fila-wa",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/motor-agente",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/destilador",
+      "schedule": "20 6 * * *"
     }
   ]
 }
