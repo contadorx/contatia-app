@@ -27,10 +27,20 @@ import { CAMPOS_FICHA_PERMITIDOS } from "@/lib/agente/travas";
 
 export type ContextoTurno = {
   persona: { nome: string; cargo: string };
+  /**
+   * QUEM VENDE. Faltava, e a falta aparecia na primeira pergunta de qualquer lead:
+   * "o que vocês fazem?". Sem isto o modelo teria que inferir a empresa a partir dos
+   * argumentos de venda — e inferir é onde ele inventa.
+   */
+  empresa: { nome: string; descricao?: string | null; segmento?: string | null; site?: string | null };
   contato: { nome: string; empresa?: string | null; cargo?: string | null; cidade?: string | null; cnae?: string | null };
   conversa: { etapa?: string | null; objetivo?: string | null; resumo?: string | null; msgsHoje: number; maxMsgsDia: number; followups: number; maxFollowups: number };
   playbook?: {
     produto: string;
+    /** o que o produto É — vem antes de qualquer argumento de por que comprá-lo */
+    descricao?: string | null;
+    paraQuem?: string | null;
+    naoServe?: string | null;
     etapas: string[];
     argumentos: string[];
     objecoes: { objecao: string; resposta: string }[];
@@ -90,11 +100,38 @@ export function montarSystem(c: ContextoTurno): string {
     ""
   );
 
+  // A EMPRESA VEM ANTES DE TUDO. É o que responde "o que vocês fazem?" — e essa é a
+  // primeira pergunta de quase toda conversa fria. Um agente que precisa deduzir isso
+  // dos argumentos de venda responde com o argumento, que soa a propaganda antes da
+  // apresentação.
+  partes.push(`A EMPRESA QUE VOCÊ REPRESENTA: ${c.empresa.nome}`);
+  if (c.empresa.descricao) partes.push(c.empresa.descricao);
+  if (c.empresa.segmento) partes.push(`Segmento: ${c.empresa.segmento}`);
+  if (c.empresa.site) partes.push(`Site: ${c.empresa.site}`);
+  if (!c.empresa.descricao) {
+    partes.push(
+      "ATENÇÃO: ninguém escreveu o que esta empresa faz. Se o lead perguntar, NÃO INVENTE —",
+      "diga que prefere que alguém do time explique direito e use transferir_humano."
+    );
+  }
+  partes.push("");
+
   partes.push(...regrasDuras(c), "");
   partes.push(...conduta(c), "");
 
   if (c.playbook) {
-    partes.push(`PLAYBOOK — ${c.playbook.produto}`, "");
+    partes.push(`O QUE VOCÊ VENDE: ${c.playbook.produto}`, "");
+    if (c.playbook.descricao) partes.push(c.playbook.descricao, "");
+    if (c.playbook.paraQuem) partes.push(`Serve para: ${c.playbook.paraQuem}`, "");
+    if (c.playbook.naoServe) {
+      partes.push(
+        `NÃO serve para: ${c.playbook.naoServe}`,
+        "Se o lead se encaixar aqui, seja honesto e encerre com porta aberta. Vender para quem não é cliente",
+        "custa mais caro que não vender.",
+        ""
+      );
+    }
+    partes.push("COMO CONDUZIR:", "");
     if (c.playbook.etapas.length) {
       partes.push("Etapas da conversa (conduza nesta ordem, sem pular):");
       c.playbook.etapas.forEach((e, i) => partes.push(`  ${i + 1}. ${e}`));

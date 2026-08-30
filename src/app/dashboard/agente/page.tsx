@@ -24,6 +24,10 @@ export const dynamic = "force-dynamic";
 export default async function Agente() {
   const supabase = createClient();
 
+  // O perfil da empresa vem de `tenants` — o agente lê de lá, e a tela mostra o mesmo,
+  // para ninguém preencher duas vezes em lugares diferentes.
+  const { data: empresa } = await supabase.from("tenants").select("name, legal_name, segment, website").maybeSingle();
+
   const [{ data: cfg, error: errCfg }, { data: produtos }, { data: playbooks }, { data: exemplos }, { data: licoes }] =
     await Promise.all([
       supabase.from("agent_config").select("*").maybeSingle(),
@@ -110,6 +114,9 @@ export default async function Agente() {
         nome: p.name,
         preco: Number(p.price) || 0,
         billing: p.billing,
+        descricao: pb?.descricao || "",
+        paraQuem: pb?.para_quem || "",
+        naoServe: pb?.nao_serve || "",
         etapas: (pb?.etapas as any[]) || [],
         argumentos: (pb?.argumentos as any[]) || [],
         objecoes: (pb?.objecoes as any[]) || [],
@@ -153,6 +160,7 @@ export default async function Agente() {
           <AgenteConfig
             cfg={{
               ativo: !!(cfg as any)?.ativo,
+              empresaDescricao: (cfg as any)?.empresa_descricao || "",
               personaNome: (cfg as any)?.persona_nome || "",
               personaCargo: (cfg as any)?.persona_cargo || "",
               modeloDialogo: (cfg as any)?.modelo_dialogo || "claude-haiku-4-5",
@@ -168,6 +176,11 @@ export default async function Agente() {
               tetoDescontoPct: Number((cfg as any)?.teto_desconto_pct ?? 0),
             }}
             playbooksPublicados={publicados}
+            empresa={{
+              nome: ((empresa as any)?.name || (empresa as any)?.legal_name || "") as string,
+              segmento: ((empresa as any)?.segment || "") as string,
+              site: ((empresa as any)?.website || "") as string,
+            }}
           />
 
           <AgentePlaybook produtos={lista} />

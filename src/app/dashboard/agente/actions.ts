@@ -48,6 +48,7 @@ export async function salvarConfigAgente(campos: {
   max_followups_sem_resposta?: number;
   valor_max_fechar?: string | number | null;
   teto_desconto_pct?: string | number | null;
+  empresa_descricao?: string;
 }) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
@@ -55,6 +56,7 @@ export async function salvarConfigAgente(campos: {
   const patch: Record<string, any> = { tenant_id };
   for (const k of [
     "persona_nome", "persona_cargo", "modelo_dialogo", "modelo_negociacao", "wa_dias",
+    "empresa_descricao",
   ] as const) {
     if (campos[k] !== undefined) patch[k] = String(campos[k] ?? "").trim() || null;
   }
@@ -134,6 +136,9 @@ export async function salvarPlaybook(input: {
   objecoes?: any;
   precos?: any;
   regras_duras?: string[];
+  descricao?: string;
+  para_quem?: string;
+  nao_serve?: string;
 }) {
   const { supabase, tenant_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
@@ -156,6 +161,9 @@ export async function salvarPlaybook(input: {
   if (input.objecoes !== undefined) patch.objecoes = input.objecoes;
   if (input.precos !== undefined) patch.precos = input.precos;
   if (input.regras_duras !== undefined) patch.regras_duras = input.regras_duras;
+  for (const k of ["descricao", "para_quem", "nao_serve"] as const) {
+    if (input[k] !== undefined) patch[k] = String(input[k] ?? "").trim() || null;
+  }
 
   const { error } = await supabase
     .from("agent_playbooks")
@@ -181,7 +189,7 @@ export async function publicarPlaybook(produtoId: string, publicar: boolean) {
   if (publicar) {
     const { data: pb } = await supabase
       .from("agent_playbooks")
-      .select("etapas, precos")
+      .select("etapas, precos, descricao")
       .eq("tenant_id", tenant_id)
       .eq("produto_id", produtoId)
       .maybeSingle();
@@ -189,6 +197,12 @@ export async function publicarPlaybook(produtoId: string, publicar: boolean) {
 
     const etapas = ((pb as any).etapas as any[]) || [];
     const precos = ((pb as any).precos as any[]) || [];
+
+    // A descrição entrou na porta de publicação depois do primeiro deploy, quando ficou
+    // claro que um playbook só de tática produz um agente que não sabe dizer o que vende.
+    if (!String((pb as any).descricao || "").trim()) {
+      return { error: "Sem a descrição do produto: o agente não saberia responder “o que é isso?”. Escreva o que o produto é antes de publicar." };
+    }
     if (!etapas.length) return { error: "Sem etapas: o agente não saberia conduzir a conversa. Escreva a estratégia antes de publicar." };
     if (!precos.length) {
       return {

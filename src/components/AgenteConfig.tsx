@@ -29,6 +29,7 @@ const MODELOS = [
 
 export type CfgAgente = {
   ativo: boolean;
+  empresaDescricao: string;
   personaNome: string;
   personaCargo: string;
   modeloDialogo: string;
@@ -44,7 +45,13 @@ export type CfgAgente = {
   tetoDescontoPct: number;
 };
 
-export default function AgenteConfig({ cfg, playbooksPublicados }: { cfg: CfgAgente; playbooksPublicados: number }) {
+export default function AgenteConfig({
+  cfg, playbooksPublicados, empresa,
+}: {
+  cfg: CfgAgente;
+  playbooksPublicados: number;
+  empresa: { nome: string; segmento: string; site: string };
+}) {
   const router = useRouter();
   const [f, setF] = useState(cfg);
   const [dias, setDias] = useState<number[]>(
@@ -61,6 +68,7 @@ export default function AgenteConfig({ cfg, playbooksPublicados }: { cfg: CfgAge
     setMsg(null); setErro(null);
     start(async () => {
       const r = await salvarConfigAgente({
+        empresa_descricao: f.empresaDescricao,
         persona_nome: f.personaNome,
         persona_cargo: f.personaCargo,
         modelo_dialogo: f.modeloDialogo,
@@ -122,6 +130,41 @@ export default function AgenteConfig({ cfg, playbooksPublicados }: { cfg: CfgAge
             ligar está bloqueado até você publicar pelo menos um.
           </p>
         )}
+      </div>
+
+      {/* ---------- a empresa ---------- */}
+      <div className="card p-5">
+        <p className="font-display text-base font-bold">O que a empresa faz</p>
+        <p className="mt-0.5 max-w-2xl text-sm text-subtle">
+          É a primeira coisa que ele lê em toda conversa, e o que responde <b>“o que vocês fazem?”</b> — a pergunta
+          que quase todo lead frio faz antes de qualquer outra. Escreva como você diria a um desconhecido, em uma ou
+          duas frases.
+        </p>
+        <textarea
+          className="input mt-3 w-full text-sm"
+          rows={3}
+          placeholder="Ex.: Cuidamos da contabilidade de pequenas empresas de serviço — fechamento, notas e obrigações — com tudo num app, sem papel."
+          value={f.empresaDescricao}
+          onChange={(e) => set("empresaDescricao", e.target.value)}
+        />
+        {!f.empresaDescricao.trim() && (
+          <p className="mt-2 rounded-lg bg-warn/10 p-3 text-xs text-warn">
+            Enquanto isto estiver vazio, o agente é instruído a <b>não inventar</b>: se perguntarem o que a empresa
+            faz, ele passa a conversa para um humano em vez de arriscar.
+          </p>
+        )}
+
+        <div className="mt-3 rounded-lg bg-muted p-3">
+          <p className="text-[11px] uppercase tracking-wide text-subtle">Ele também lê isto, de Config → Identidade e marca</p>
+          <p className="mt-1 text-xs">
+            <b>{empresa.nome || "— sem nome de empresa —"}</b>
+            {empresa.segmento ? ` · ${empresa.segmento}` : ""}
+            {empresa.site ? ` · ${empresa.site}` : ""}
+          </p>
+          <p className="mt-1 text-[11px] text-subtle">
+            Não preencha de novo aqui: um dado em dois lugares vira um dado velho em algum deles.
+          </p>
+        </div>
       </div>
 
       {/* ---------- identidade ---------- */}
