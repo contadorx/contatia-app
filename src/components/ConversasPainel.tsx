@@ -9,6 +9,7 @@ import {
   devolverConversa,
   encerrarConversa,
   reabrirConversa,
+  passarParaAgente,
 } from "@/app/dashboard/conversas/actions";
 import { DESFECHOS, DESFECHO_LABEL, type Desfecho } from "@/lib/agente/desfechos";
 
@@ -212,6 +213,29 @@ export default function ConversasPainel({
                           title="Você sai de cima dela; ninguém passa a conduzir."
                         >
                           Devolver
+                        </button>
+                      )}
+                      {c.status !== "sombra" && (
+                        <button
+                          className="rounded-lg border border-warn/40 px-2.5 py-1 text-xs font-semibold text-warn hover:bg-warn/10 disabled:opacity-40"
+                          disabled={pending}
+                          onClick={() => run(() => passarParaAgente(c.id, "sombra"))}
+                          title="O agente escreve o que diria, e NÃO envia. Você lê em Agente → Treino antes de soltar."
+                        >
+                          Sombra
+                        </button>
+                      )}
+                      {c.status !== "agente" && (
+                        <button
+                          className="rounded-lg border border-signal/40 px-2.5 py-1 text-xs font-semibold text-signal hover:bg-signal/10 disabled:opacity-40"
+                          disabled={pending}
+                          onClick={() => {
+                            if (confirm("Passar esta conversa para o agente? A partir de agora ele responde sozinho ao lead, sem ninguém olhando.")) {
+                              run(() => passarParaAgente(c.id, "agente"));
+                            }
+                          }}
+                        >
+                          Passar ao agente
                         </button>
                       )}
                       <button

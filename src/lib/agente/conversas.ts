@@ -29,10 +29,11 @@ export type Conversa = {
   followups_sem_resposta: number;
   desfecho: string | null;
   ultima_resposta_em: string | null;
+  due_at: string | null;
 };
 
 const CAMPOS =
-  "id, status, contact_id, msgs_hoje, msgs_hoje_em, followups_sem_resposta, desfecho, ultima_resposta_em";
+  "id, status, contact_id, msgs_hoje, msgs_hoje_em, followups_sem_resposta, desfecho, ultima_resposta_em, due_at";
 
 function acharQuery(admin: any, tenantId: string, phone: string, accountId: string | null) {
   const q = admin.from("agent_conversas").select(CAMPOS).eq("tenant_id", tenantId).eq("phone", phone);
@@ -110,7 +111,7 @@ export async function tocarConversa(
 
       if (!error && criada) {
         // devolve o estado ANTES: uma conversa que acabou de nascer estava zerada
-        return { ...(criada as Conversa), msgs_hoje: 0, msgs_hoje_em: null, followups_sem_resposta: 0, ultima_resposta_em: null };
+        return { ...(criada as Conversa), msgs_hoje: 0, msgs_hoje_em: null, followups_sem_resposta: 0, ultima_resposta_em: null, due_at: null };
       }
 
       // CORRIDA: duas mensagens do mesmo número chegando juntas. O índice único da
@@ -152,6 +153,15 @@ export async function tocarConversa(
       // estava: a venda (ou a recusa) aconteceu de verdade, e apagar isso seria
       // reescrever o histórico só porque houve uma mensagem nova.
       if (antes.status === "encerrada") patch.status = "humano";
+
+      // AGENDA O TURNO DO AGENTE (0119). Só quando ele é quem conduz — e com um atraso
+      // curto e sorteado, nunca zero: o motor confere a janela comercial depois, mas a
+      // primeira coisa que separa atendimento de robô é não responder no mesmo segundo.
+      // Se já havia turno pendente, o instante NÃO é adiado: duas mensagens seguidas do
+      // lead são um turno só, e reagendar a cada uma faria a resposta fugir para sempre.
+      if ((antes.status === "agente" || antes.status === "sombra") && !antes.due_at) {
+        patch.due_at = new Date(Date.now() + 20_000 + Math.floor(Math.random() * 40_000)).toISOString();
+      }
     }
     // Central automática: cai aqui e só o relógio de `ultima_msg_em` anda. Zerar a
     // régua por causa de um "recebemos sua mensagem" faria o sistema achar que o lead

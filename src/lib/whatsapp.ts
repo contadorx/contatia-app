@@ -293,6 +293,35 @@ export async function getMediaBase64(acc: WaAccount, message: any): Promise<{ ba
   }
 }
 
+// ============================================================
+// "digitando…" — POST /chat/sendPresence/{instance}
+//
+// Existe para o agente: mensagem que aparece do nada, instantânea, é a assinatura mais
+// visível de um robô num WhatsApp. O presence antes do texto é barato e muda a leitura
+// da conversa inteira.
+//
+// Falha em silêncio de propósito: se o presence não for, a mensagem ainda tem que ir.
+// Perder o "digitando" é cosmético; perder a resposta não é.
+// ============================================================
+export async function sendPresence(
+  acc: WaAccount,
+  to: string,
+  presence: "composing" | "paused" = "composing",
+  delayMs = 2000
+): Promise<void> {
+  const number = normalizePhone(to);
+  if (!number) return;
+  try {
+    await fetch(`${base(acc.evolution_url)}/chat/sendPresence/${acc.instance}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", apikey: acc.api_key },
+      body: JSON.stringify({ number, presence, delay: delayMs }),
+    });
+  } catch {
+    /* cosmético: nunca bloqueia o envio */
+  }
+}
+
 export { normalizePhone };
 
 // ============================================================

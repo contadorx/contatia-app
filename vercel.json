@@ -30,6 +30,10 @@
     {
       "path": "/api/cron/fila-wa",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/motor-agente",
+      "schedule": "* * * * *"
     }
   ]
 }

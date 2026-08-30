@@ -12,9 +12,9 @@ import { ehDesfecho, type Desfecho } from "@/lib/agente/desfechos";
 // estiver errado. A espec pede três; aqui estão os que fazem sentido ANTES do motor
 // existir (F1): assumir, devolver, encerrar com desfecho.
 //
-// `agente` e `sombra` não aparecem: não há motor para receber a conversa, e um botão
-// que promete condução automática e não entrega é pior que botão nenhum. Eles entram
-// no F2, junto com quem os cumpre.
+// `agente` e `sombra` entraram com o motor (F2). Antes dele não existiam de propósito:
+// um botão que promete condução automática sem ter quem a cumpra é pior que botão
+// nenhum.
 // ============================================================
 
 async function ctx() {
@@ -104,6 +104,53 @@ export async function reabrirConversa(id: string) {
   const { error } = await supabase
     .from("agent_conversas")
     .update({ status: "humano", assumida_por: user_id || null, assumida_em: new Date().toISOString() })
+    .eq("tenant_id", tenant_id)
+    .eq("id", id);
+  if (error) return { error: msgErro(error) };
+
+  revalidatePath("/dashboard/conversas");
+  return { ok: true };
+}
+
+/**
+ * Entrega a conversa ao agente — ou ao ensaio dele.
+ *
+ * `sombra` roda o turno inteiro (contexto, modelo, travas, quebra em balões) e para no
+ * último metro: nada é enviado, tudo fica registrado em `agent_decisoes`. É como se lê o
+ * que ele DIRIA antes de deixá-lo dizer, e é o jeito de calibrar playbook sem gastar a
+ * paciência de um lead real.
+ *
+ * Exige o kill switch geral ligado: entregar uma conversa a um agente desligado a
+ * deixaria muda, esperando um motor que não roda.
+ */
+export async function passarParaAgente(id: string, modo: "agente" | "sombra") {
+  const { supabase, tenant_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+  if (modo !== "agente" && modo !== "sombra") return { error: "Modo inválido." };
+
+  const { data: cfg } = await supabase
+    .from("agent_config")
+    .select("ativo")
+    .eq("tenant_id", tenant_id)
+    .maybeSingle();
+  if (!(cfg as any)?.ativo) {
+    return {
+      error:
+        "O agente está desligado. Ligue em Agente → kill switch (ele exige pelo menos um playbook publicado) antes de entregar conversas a ele.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("agent_conversas")
+    .update({
+      status: modo,
+      assumida_por: null,
+      assumida_em: null,
+      // Dá o primeiro turno já: sem `due_at`, a conversa só andaria quando o lead
+      // escrevesse de novo — e quem acabou de entregar espera ver algo acontecer.
+      due_at: new Date(Date.now() + 30_000).toISOString(),
+      turno_erros: 0,
+    })
     .eq("tenant_id", tenant_id)
     .eq("id", id);
   if (error) return { error: msgErro(error) };
