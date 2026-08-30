@@ -188,6 +188,25 @@ export async function sendQuickWhatsApp(contactId: string, body: string) {
   // via scoreEvent: é ele que tolera a coluna user_id ainda não existir (0106)
   await scoreEvent(supabase, { tenant_id, type: "whatsapp_sent", user_id, contact_id: contactId, meta: { avulso: true } });
   await supabase.from("whatsapp_messages").insert({ tenant_id, account_id: (acc as any).id, contact_id: contactId, phone, direction: "out", text: body });
+  // Toda mensagem que sai atualiza o estado da conversa (0116): gasta o orçamento do
+  // dia e conta como mais um follow-up desde a última resposta dele. E porque quem
+  // escreveu foi uma PESSOA, o agente cala nesta conversa — o "sua mensagem manual
+  // também pausa" da espec, que vale mesmo sem ninguém ter apertado "Assumir".
+  const { tocarConversa, assumirPorMensagemManual } = await import("@/lib/agente/conversas");
+  await tocarConversa(supabase, {
+    tenantId: tenant_id,
+    accountId: (acc as any).id,
+    contactId: contactId,
+    phone: phone,
+    direcao: "out",
+  });
+  await assumirPorMensagemManual(supabase, {
+    tenantId: tenant_id,
+    accountId: (acc as any).id,
+    phone: phone,
+    userId: user_id,
+  });
+
   revalidatePath(`/dashboard/contatos/${contactId}`);
   return { ok: true };
 }

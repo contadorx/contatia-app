@@ -218,6 +218,25 @@ export async function sendWhatsAppTask(taskId: string, overrideBody?: string) {
     direction: "out",
     text: task.generated_content || "",
   });
+
+  // Estado da conversa (0116): o toque de cadência gasta o orçamento do dia e conta
+  // como follow-up. Quem apertou o botão foi uma pessoa, então o agente cala aqui —
+  // no F4 o disparo automático terá caminho próprio, e é ele que NÃO deve pausar.
+  const { tocarConversa, assumirPorMensagemManual } = await import("@/lib/agente/conversas");
+  await tocarConversa(supabase, {
+    tenantId: tenant_id,
+    accountId: (acc as any).id,
+    contactId: (task as any).contact_id,
+    phone,
+    direcao: "out",
+  });
+  await assumirPorMensagemManual(supabase, {
+    tenantId: tenant_id,
+    accountId: (acc as any).id,
+    phone,
+    userId: user_id,
+  });
+
   revalidatePath("/dashboard");
   return { ok: true };
 }

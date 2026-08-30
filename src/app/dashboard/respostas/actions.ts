@@ -333,6 +333,25 @@ export async function replyWhatsApp(input: { contactId?: string | null; phone: s
 
   // ao responder, marca as recebidas dessa conversa como lidas
   await marcarLidas(supabase, tenant_id, input.contactId || null, input.phone);
+  // Toda mensagem que sai atualiza o estado da conversa (0116): gasta o orçamento do
+  // dia e conta como mais um follow-up desde a última resposta dele. E porque quem
+  // escreveu foi uma PESSOA, o agente cala nesta conversa — o "sua mensagem manual
+  // também pausa" da espec, que vale mesmo sem ninguém ter apertado "Assumir".
+  const { tocarConversa, assumirPorMensagemManual } = await import("@/lib/agente/conversas");
+  await tocarConversa(supabase, {
+    tenantId: tenant_id,
+    accountId: (acc as any).id,
+    contactId: input.contactId || null,
+    phone: input.phone,
+    direcao: "out",
+  });
+  await assumirPorMensagemManual(supabase, {
+    tenantId: tenant_id,
+    accountId: (acc as any).id,
+    phone: input.phone,
+    userId: undefined,
+  });
+
 
   revalidatePath("/dashboard/respostas");
   return { ok: true };

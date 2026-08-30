@@ -11,6 +11,8 @@ const groups: { title?: string; items: { href: string; label: string; primary?: 
       { href: "/dashboard", label: "Hoje", primary: true },
       { href: "/dashboard/pipeline", label: "Pipeline", primary: true },
       { href: "/dashboard/respostas", label: "Respostas", primary: true },
+      // Respostas mostra o texto; Conversas mostra o estado. Vizinhas de propósito.
+      { href: "/dashboard/conversas", label: "Conversas", primary: true },
       { href: "/dashboard/reunioes", label: "Reuniões", primary: true },
     ],
   },
