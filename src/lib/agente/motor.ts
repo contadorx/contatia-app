@@ -329,6 +329,10 @@ async function montarAmbiente(
 
   const precos = ((pb as any)?.precos || []).map((p: any) => ({ plano: String(p?.plano ?? ""), valor: Number(p?.valor) || 0 }));
 
+  const { data: prodRow } = await admin
+    .from("agent_playbooks").select("produto_id, products(name)")
+    .eq("tenant_id", input.tenantId).eq("ativo", true).limit(1).maybeSingle();
+
   return {
     admin,
     tenantId: input.tenantId,
@@ -339,8 +343,15 @@ async function montarAmbiente(
     cfg: {
       maxMsgsDia: Number(cfg.max_msgs_dia_por_conversa ?? 6),
       tetoDescontoPct: Number(cfg.teto_desconto_pct ?? 0),
+      // null quando não configurado — e `checarValorFechamento` trata null como
+      // "não fecha nada sozinho", que é o padrão seguro.
+      valorMaxFechar: cfg.valor_max_fechar === null || cfg.valor_max_fechar === undefined ? null : Number(cfg.valor_max_fechar),
       janela,
     },
+    propostaPendente: conv.proposta_pendente ?? null,
+    propostaEm: conv.proposta_em ?? null,
+    produto: { id: (prodRow as any)?.produto_id ?? null, nome: (prodRow as any)?.products?.name ?? null },
+    ultimaDoLead,
     msgsHoje,
     precosTabela: precos.map((p: any) => p.valor).filter((v: number) => v > 0),
     playbook: pb

@@ -3,6 +3,8 @@ import ConfigTabs from "@/components/ConfigTabs";
 import AgenteConfig from "@/components/AgenteConfig";
 import AgentePlaybook, { type PlaybookProduto } from "@/components/AgentePlaybook";
 import AgenteTreino, { type ExemploLinha, type LicaoLinha } from "@/components/AgenteTreino";
+import AgenteRelatorio, { type ResumoAgente } from "@/components/AgenteRelatorio";
+import { custoUsd, modeloConhecido } from "@/lib/agente/custo";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +32,53 @@ export default async function Agente() {
       supabase.from("agent_exemplos").select("id, produto_id, caminho, origem, peso, ativo, created_at").order("created_at", { ascending: false }).limit(200),
       supabase.from("agent_licoes").select("id, texto, evidencia, status, created_at").eq("status", "pendente").order("created_at", { ascending: false }).limit(100),
     ]);
+
+  // ---------- números do relatório ----------
+  // Consultas à parte e com erro engolido: a aba de relatório não pode derrubar a tela
+  // de playbook se a 0119/0120 ainda não subiram.
+  const [{ data: convs }, { data: decisoes }, { data: opps }] = await Promise.all([
+    supabase.from("agent_conversas").select("status, desfecho, etapa_atual"),
+    supabase.from("agent_decisoes").select("modelo, tokens_in, tokens_out, erro").limit(5000),
+    supabase.from("opportunities").select("value_mrr, status").eq("origem", "agente"),
+  ]);
+
+  const listaConvs = (convs as any[]) || [];
+  const listaDec = (decisoes as any[]) || [];
+  const listaOpp = ((opps as any[]) || []).filter((o) => o.status === "won");
+
+  const porStatus: Record<string, number> = {};
+  const porDesfecho: Record<string, number> = {};
+  const etapas: Record<string, { total: number; perdidas: number }> = {};
+  for (const c of listaConvs) {
+    porStatus[c.status] = (porStatus[c.status] || 0) + 1;
+    if (c.desfecho) {
+      porDesfecho[c.desfecho] = (porDesfecho[c.desfecho] || 0) + 1;
+      const e = c.etapa_atual || "(sem etapa)";
+      etapas[e] ||= { total: 0, perdidas: 0 };
+      etapas[e].total++;
+      if (c.desfecho === "silencio" || c.desfecho === "recusa") etapas[e].perdidas++;
+    }
+  }
+
+  const resumo: ResumoAgente = {
+    conversas: listaConvs.length,
+    porStatus,
+    porDesfecho,
+    porEtapa: Object.entries(etapas)
+      .map(([etapa, n]) => ({ etapa, ...n }))
+      .sort((a, b) => b.perdidas / (b.total || 1) - a.perdidas / (a.total || 1)),
+    turnos: listaDec.length,
+    turnosComErro: listaDec.filter((d) => d.erro).length,
+    tokensIn: listaDec.reduce((s, d) => s + (d.tokens_in || 0), 0),
+    tokensOut: listaDec.reduce((s, d) => s + (d.tokens_out || 0), 0),
+    custoUsd: listaDec.reduce((s, d) => s + custoUsd(d.modelo, d.tokens_in || 0, d.tokens_out || 0), 0),
+    vendas: listaOpp.length,
+    receita: listaOpp.reduce((s, o) => s + (Number(o.value_mrr) || 0), 0),
+    reunioes: porDesfecho["reuniao"] || 0,
+    // Só conta como desconhecido quando houve turno COM tokens naquele modelo: um gatilho
+    // (modelo nulo, zero token) não deve pintar o relatório de aviso.
+    modeloDesconhecido: listaDec.some((d) => (d.tokens_in || d.tokens_out) && !modeloConhecido(d.modelo)),
+  };
 
   // MIGRATION AINDA NÃO APLICADA: a tela explica em vez de estourar — mesmo cuidado que
   // Conversas toma com a 0116.
@@ -100,7 +149,7 @@ export default async function Agente() {
       </p>
 
       <div className="mt-6">
-        <ConfigTabs tabs={["Agente", `Playbook (${publicados}/${lista.length})`, "Treino"]}>
+        <ConfigTabs tabs={["Agente", `Playbook (${publicados}/${lista.length})`, "Treino", "Resultados"]}>
           <AgenteConfig
             cfg={{
               ativo: !!(cfg as any)?.ativo,
@@ -128,6 +177,8 @@ export default async function Agente() {
             licoes={licoesLinhas}
             produtos={lista.map((p) => ({ id: p.produtoId, nome: p.nome }))}
           />
+
+          <AgenteRelatorio r={resumo} />
         </ConfigTabs>
       </div>
     </div>

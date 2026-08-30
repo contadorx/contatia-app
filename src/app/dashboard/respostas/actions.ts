@@ -352,6 +352,55 @@ export async function replyWhatsApp(input: { contactId?: string | null; phone: s
     userId: undefined,
   });
 
+  // ============================================================
+  // A CORREÇÃO HUMANA É OURO — e é aqui que ela acontece
+  //
+  // A espec põe isto acima das outras fontes de aprendizado: quando VOCÊ assume uma
+  // conversa que o agente conduzia e responde do seu jeito, o par (o que ele ia dizer →
+  // o que você disse) vale mais que qualquer conversa que deu certo sozinha. É a única
+  // fonte que corrige, em vez de só confirmar.
+  //
+  // Só dispara quando o agente estava mesmo conduzindo. Responder uma conversa que
+  // sempre foi humana não é correção de nada — e encher o banco de exemplos com
+  // conversa comum diluiria justamente o material que ensina.
+  // ============================================================
+  try {
+    const { data: conv } = await supabase
+      .from("agent_conversas")
+      .select("id, status, ultima_msg_direcao")
+      .eq("tenant_id", tenant_id)
+      .eq("phone", input.phone)
+      .maybeSingle();
+
+    if (conv && ((conv as any).status === "agente" || (conv as any).status === "sombra")) {
+      const { data: rascunho } = await supabase
+        .from("agent_decisoes")
+        .select("entrada, saida")
+        .eq("tenant_id", tenant_id)
+        .eq("conversa_id", (conv as any).id)
+        .not("saida", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const caminho = [
+        "Contexto: conversa que o agente conduzia e um humano assumiu.",
+        (rascunho as any)?.entrada ? `O lead disse: ${(rascunho as any).entrada}` : "",
+        (rascunho as any)?.saida ? `O agente ia responder: ${(rascunho as any).saida}` : "",
+        `A pessoa respondeu, e é esta a resposta certa: ${text}`,
+        "Resultado: use o tom e o caminho desta resposta humana, não o do rascunho.",
+      ].filter(Boolean).join("\n");
+
+      await supabase.from("agent_exemplos").insert({
+        tenant_id,
+        caminho,
+        origem: "editado_por_humano",
+        // Peso 8: acima de venda (6) e reunião (4). Correção ensina mais que acerto.
+        peso: 8,
+      });
+    }
+  } catch { /* aprender é bônus; a resposta ao lead já foi */ }
+
 
   revalidatePath("/dashboard/respostas");
   return { ok: true };

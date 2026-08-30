@@ -44,8 +44,15 @@ export type Ambiente = {
   cfg: {
     maxMsgsDia: number;
     tetoDescontoPct: number;
+    valorMaxFechar: number | null;
     janela: Janela;
   };
+  /** a proposta que já está na mesa, se houver — é dela que a cobrança sai */
+  propostaPendente: any;
+  propostaEm: string | null;
+  produto: { id: string | null; nome: string | null };
+  /** a última coisa que o lead disse, para conferir o "sim" sem passar por modelo */
+  ultimaDoLead: string;
   msgsHoje: number;
   precosTabela: number[];
   playbook: { objecoes: { objecao: string; resposta: string }[]; argumentos: string[]; precos: { plano: string; valor: number }[] } | null;
@@ -140,6 +147,35 @@ export const FERRAMENTAS: Anthropic.Tool[] = [
     input_schema: {
       type: "object",
       properties: { motivo: { type: "string" } },
+      required: ["motivo"],
+    },
+  },
+  {
+    name: "propor_fechamento",
+    description:
+      "Apresenta o resumo fechado da proposta (plano, valor, vencimento) e pergunta se pode gerar a cobrança. " +
+      "Use quando o lead demonstrou intenção de contratar. NÃO gera cobrança nenhuma — só apresenta e espera o 'sim'. " +
+      "O valor tem que estar na tabela do playbook e dentro da sua alçada.",
+    input_schema: {
+      type: "object",
+      properties: {
+        plano: { type: "string", description: "O nome do plano, exatamente como está na tabela." },
+        valor: { type: "number", description: "O valor em reais. Só valores da tabela (ou dentro do desconto autorizado)." },
+        vencimento: { type: "string", description: "Data do primeiro vencimento, AAAA-MM-DD." },
+        motivo: { type: "string" },
+      },
+      required: ["plano", "valor", "vencimento", "motivo"],
+    },
+  },
+  {
+    name: "fechar_venda",
+    description:
+      "Gera a cobrança, DEPOIS que o lead confirmou o resumo que você apresentou com propor_fechamento. " +
+      "Só use se a última mensagem dele for uma confirmação clara ('fechado', 'pode mandar'). " +
+      "Se ele disse 'vou pensar', 'talvez' ou qualquer coisa ambígua, NÃO use — pergunte de novo.",
+    input_schema: {
+      type: "object",
+      properties: { motivo: { type: "string", description: "O que ele disse que você entendeu como sim." } },
       required: ["motivo"],
     },
   },
@@ -362,6 +398,164 @@ export async function executar(
         saida: `Encerrada (${desfecho})${texto ? `: ${texto}` : ""}`,
         fecha: true,
         patchConversa: { status: "encerrada", desfecho, due_at: null },
+      };
+    }
+
+    // ----------------------------------------------------------
+    case "propor_fechamento": {
+      const { checarValorFechamento, checarVencimento, textoDaProposta } = await import("@/lib/agente/fechamento");
+
+      const valor = Number(args?.valor);
+      const erroValor = checarValorFechamento(valor, {
+        precosTabela: amb.precosTabela,
+        tetoDescontoPct: amb.cfg.tetoDescontoPct,
+        valorMaxFechar: amb.cfg.valorMaxFechar,
+      });
+      if (erroValor) {
+        // Alçada estourada não é "não": vira reunião. Um lead pronto para assinar
+        // contrato grande não pode ouvir "não posso" — ouve "vou te colocar com o time".
+        return recusa(
+          erroValor.degradaParaReuniao
+            ? `${erroValor.motivo} Ofereça um dos horários livres e use agendar_reuniao.`
+            : erroValor.motivo
+        );
+      }
+
+      const venc = checarVencimento(String(args?.vencimento ?? ""), amb.agora);
+      if (!venc.ok) return recusa(venc.motivo!);
+
+      const proposta = {
+        plano: String(args?.plano ?? "").slice(0, 120),
+        valor,
+        vencimento: venc.dia!,
+        produto_id: amb.produto.id,
+      };
+      if (!proposta.plano) return recusa("diga qual plano.");
+
+      const texto = textoDaProposta(proposta, amb.produto.nome);
+      const cap = checarCapDiario(amb.msgsHoje, amb.cfg.maxMsgsDia);
+      if (!cap.ok) return { ok: false, paraOModelo: cap.motivo!, fecha: true, saida: `(proposta não enviada: ${cap.motivo})` };
+
+      const r = await amb.enviar(texto);
+      if (r.error) return { ok: false, paraOModelo: `Falha ao enviar: ${r.error}`, fecha: true };
+
+      return {
+        ok: true,
+        paraOModelo: "Proposta apresentada. Espere a confirmação dele antes de fechar.",
+        saida: texto,
+        fecha: true,
+        patchConversa: {
+          proposta_pendente: proposta,
+          proposta_em: amb.agora.toISOString(),
+          etapa_atual: "proposta",
+        },
+      };
+    }
+
+    // ----------------------------------------------------------
+    case "fechar_venda": {
+      const { propostaValida, ehConfirmacao, checarValorFechamento } = await import("@/lib/agente/fechamento");
+
+      // 1. existe proposta na mesa, e ela ainda vale?
+      const pv = propostaValida(amb.propostaPendente, amb.propostaEm, amb.agora);
+      if (!pv.ok) return recusa(pv.motivo!);
+      const proposta = pv.proposta!;
+
+      // 2. o lead disse sim de verdade? Conferido em código, nunca pelo modelo: a
+      //    diferença entre "acho que sim" e "fechado" é dinheiro saindo da conta dele.
+      if (!ehConfirmacao(amb.ultimaDoLead)) {
+        return recusa(
+          `a última mensagem dele ("${amb.ultimaDoLead.slice(0, 60)}") não é uma confirmação clara. Pergunte de novo, sem pressionar.`
+        );
+      }
+
+      // 3. o valor da proposta ainda cabe? (a tabela pode ter mudado entre propor e fechar)
+      const erroValor = checarValorFechamento(proposta.valor, {
+        precosTabela: amb.precosTabela,
+        tetoDescontoPct: amb.cfg.tetoDescontoPct,
+        valorMaxFechar: amb.cfg.valorMaxFechar,
+      });
+      if (erroValor) return recusa(`${erroValor.motivo} A proposta na mesa não vale mais; refaça.`);
+
+      // ---- oportunidade ganha ----
+      const { data: etapaGanha } = await amb.admin
+        .from("pipeline_stages").select("id").eq("tenant_id", amb.tenantId).eq("is_won", true).limit(1).maybeSingle();
+
+      const { data: contato } = amb.contactId
+        ? await amb.admin.from("contacts").select("name, email, cnpj, account_id").eq("tenant_id", amb.tenantId).eq("id", amb.contactId).maybeSingle()
+        : { data: null };
+
+      const { data: opp, error: errOpp } = await amb.admin.from("opportunities").insert({
+        tenant_id: amb.tenantId,
+        primary_contact_id: amb.contactId,
+        account_id: (contato as any)?.account_id || null,
+        product_id: amb.produto.id,
+        title: `${amb.produto.nome || "Venda"} — ${proposta.plano}`,
+        value_mrr: proposta.valor,
+        stage_id: (etapaGanha as any)?.id || null,
+        status: "won",
+        origem: "agente",
+      }).select("id").single();
+      if (errOpp) return recusa(`não consegui registrar a venda (${errOpp.message}).`);
+
+      // ---- cobrança ----
+      // A cobrança usa proposta.valor — o número que o LEAD LEU. Nunca um argumento que
+      // o modelo mandou junto; se os dois discordassem, o certo é o que ele leu.
+      let link: string | null = null;
+      let aviso = "";
+      try {
+        const { ensureAsaasCustomer, createAsaasCharge } = await import("@/lib/asaas");
+        const cli = await ensureAsaasCustomer({
+          name: (contato as any)?.name || amb.phone,
+          email: (contato as any)?.email || null,
+          cpfCnpj: (contato as any)?.cnpj || null,
+        });
+        if (cli.error || !cli.id) {
+          aviso = ` (a cobrança não saiu: ${cli.error || "cliente Asaas não criado"})`;
+        } else {
+          const cob = await createAsaasCharge({
+            customerId: cli.id,
+            value: proposta.valor,
+            dueDate: proposta.vencimento,
+            description: `${amb.produto.nome || "Contatia"} — ${proposta.plano}`,
+          });
+          if (cob.error) aviso = ` (a cobrança não saiu: ${cob.error})`;
+          else {
+            link = cob.link || null;
+            await amb.admin.from("opportunities")
+              .update({ asaas_payment_id: cob.id || null, asaas_link: link })
+              .eq("tenant_id", amb.tenantId).eq("id", (opp as any).id);
+          }
+        }
+      } catch (e: any) {
+        aviso = ` (a cobrança não saiu: ${e?.message || e})`;
+      }
+
+      // A VENDA FICA REGISTRADA MESMO SE O ASAAS FALHAR. O lead disse sim; perder esse
+      // fato porque uma API de terceiro caiu seria transformar um problema técnico em
+      // venda esquecida. O aviso avisa; a oportunidade permanece.
+      if (aviso) {
+        await amb.admin.from("events").insert({
+          tenant_id: amb.tenantId, contact_id: amb.contactId, type: "note",
+          meta: { text: `Agente fechou a venda, mas a cobrança falhou.${aviso} Gere manualmente.`, origem: "agente" },
+        });
+      }
+
+      const msg = link
+        ? `Fechado! Aqui está o link para o pagamento: ${link}`
+        : "Fechado! Vou te mandar o link do pagamento em instantes.";
+      const cap = checarCapDiario(amb.msgsHoje, amb.cfg.maxMsgsDia);
+      if (cap.ok) await amb.enviar(msg);
+
+      return {
+        ok: true,
+        paraOModelo: "Venda registrada." + (link ? " Link enviado." : aviso),
+        saida: `Venda fechada: ${proposta.plano} R$ ${proposta.valor}${link ? ` · ${link}` : aviso}`,
+        fecha: true,
+        patchConversa: {
+          status: "encerrada", desfecho: "venda", etapa_atual: "fechado",
+          proposta_pendente: null, proposta_em: null,
+        },
       };
     }
 
