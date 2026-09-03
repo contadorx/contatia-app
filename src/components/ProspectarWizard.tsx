@@ -14,6 +14,7 @@
 // ============================================================
 
 import { useEffect, useRef, useState } from "react";
+import TagDoEnvio from "@/components/TagDoEnvio";
 import Link from "next/link";
 import SmartSelect from "@/components/SmartSelect";
 import { atividadesReceita, buscarNaBase, enviarParaCadastro } from "@/app/dashboard/radar/actions";
@@ -40,10 +41,13 @@ type Etapa = "site" | "email" | "whats";
 type Progresso = { feitos: number; total: number; achou: number; nota?: string };
 
 export default function ProspectarWizard({
-  receitaOk, workerOk, waPronto, sequences,
+  receitaOk, workerOk, waPronto, sequences, tagsExistentes = [],
 }: {
   receitaOk: boolean; workerOk: boolean; waPronto: boolean; sequences: { id: string; name: string }[];
+  tagsExistentes?: string[];
 }) {
+  // a tag desta importação — vai para a empresa e para TODOS os contatos criados
+  const [tagEnvio, setTagEnvio] = useState("");
   const [passo, setPasso] = useState<1 | 2 | 3 | 4>(1);
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
@@ -165,7 +169,7 @@ export default function ProspectarWizard({
     setErro(null); setMsg(null); setGravando(true);
     try {
       const escolhidasEmpresas = resultados.filter((e) => sel.has(e.cnpj));
-      const r: any = await enviarParaCadastro(escolhidasEmpresas, criarSocios ? "empresa_contato" : "empresa");
+      const r: any = await enviarParaCadastro(escolhidasEmpresas, criarSocios ? "empresa_contato" : "empresa", tagEnvio.trim() ? [tagEnvio.trim()] : undefined);
       if (r?.error) { setErro(r.error); return; }
       setGravado({
         empresas: r?.empresasCriadas || 0,
@@ -510,6 +514,12 @@ export default function ProspectarWizard({
           <input type="checkbox" checked={criarSocios} onChange={(e) => setCriarSocios(e.target.checked)} />
           Criar um contato por sócio <span className="text-subtle">(desmarque para gravar só a empresa)</span>
         </label>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-sm text-subtle">Marcar com a tag:</span>
+          <TagDoEnvio valor={tagEnvio} onChange={setTagEnvio} sugestoes={tagsExistentes} />
+          <span className="text-xs text-subtle">vai na empresa e em todos os contatos deste envio</span>
+        </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button className="btn-brand px-5" onClick={gravar} disabled={gravando || !sel.size}>

@@ -245,11 +245,61 @@ export async function reincluirCnpjs(cnpjs: string[]) {
 }
 
 // garante a tag "Radar" e devolve o id (marca as empresas que vieram do Radar)
-async function tagRadarId(supabase: any, tenant_id: string): Promise<string | null> {
-  const { data: t } = await supabase.from("tags").select("id").eq("tenant_id", tenant_id).ilike("name", "Radar").maybeSingle();
-  if (t) return (t as any).id;
-  const { data: c } = await supabase.from("tags").insert({ tenant_id, name: "Radar", color: "#4A3AFF" }).select("id").maybeSingle();
-  return (c as any)?.id || null;
+// ============================================================
+// AS TAGS DO ENVIO
+//
+// Antes existia só `tagRadarId`: uma tag fixa chamada "Radar", aplicada apenas às
+// EMPRESAS. Marcar tudo com a mesma palavra não distingue nada — e a base mostra como
+// o trabalho é de verdade: as tags em uso são de safra e de tier (T1..T4, "Enquadria A",
+// "BPO PRIORITÁRIO"). Uma tag por importação é o que torna a busca por tag útil.
+//
+// `tags.name` é UNIQUE por tenant, então a criação usa upsert com ignoreDuplicates: dois
+// envios simultâneos pedindo a mesma tag nova não brigam, e nenhum dos dois falha.
+// ============================================================
+async function resolverTags(supabase: any, tenant_id: string, nomes: string[]): Promise<string[]> {
+  // dedup já sem diferenciar caixa: pedir ["T2","t2"] é pedir uma tag, não duas
+  const vistos = new Map<string, string>();
+  for (const n of nomes) {
+    const limpo = String(n || "").trim();
+    if (!limpo || limpo.length > 40) continue;
+    const chave = limpo.toLowerCase();
+    if (!vistos.has(chave)) vistos.set(chave, limpo);
+  }
+  if (!vistos.size) return [];
+
+  // ---- o que já existe, SEM diferenciar caixa ----
+  //
+  // Este passo não é economia, é correção. `.in("name", ...)` do PostgREST é sensível a
+  // caixa: com "Radar" na base, digitar "radar" criaria uma SEGUNDA tag — o unique é
+  // (tenant_id, name) e para o Postgres as duas são nomes diferentes. Aí a busca por tag
+  // passa a devolver metade da safra, e ninguém entende por quê.
+  //
+  // O `tagRadarId` que existia aqui antes usava `ilike` justamente por isso; esta versão
+  // preserva esse comportamento para TODAS as tags, não só para "Radar".
+  const { data: existentes } = await supabase.from("tags").select("id, name").eq("tenant_id", tenant_id);
+  const porNome = new Map<string, string>();
+  for (const t of ((existentes as any[]) || [])) {
+    porNome.set(String(t.name || "").trim().toLowerCase(), t.id as string);
+  }
+
+  // ---- cria só as que faltam ----
+  const faltando = Array.from(vistos.entries()).filter(([chave]) => !porNome.has(chave)).map(([, nome]) => nome);
+  if (faltando.length) {
+    // ignoreDuplicates: dois envios simultâneos pedindo a mesma tag nova não brigam,
+    // e nenhum dos dois falha por causa do unique.
+    await supabase
+      .from("tags")
+      .upsert(faltando.map((name) => ({ tenant_id, name, color: "#4A3AFF" })), {
+        onConflict: "tenant_id,name",
+        ignoreDuplicates: true,
+      });
+    const { data: novas } = await supabase.from("tags").select("id, name").eq("tenant_id", tenant_id).in("name", faltando);
+    for (const t of ((novas as any[]) || [])) {
+      porNome.set(String(t.name || "").trim().toLowerCase(), t.id as string);
+    }
+  }
+
+  return Array.from(vistos.keys()).map((chave) => porNome.get(chave)).filter((id): id is string => !!id);
 }
 
 // ============================================================
@@ -504,7 +554,15 @@ export async function exportarRadar(input: any): Promise<{ rows?: any[]; total?:
 // com teto de consultas externas por envio. Se ninguém for encontrado, cai no antigo
 // (um contato com o nome da empresa) — nunca cria zero contato.
 // ============================================================
-export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "empresa_contato" = "empresa") {
+export async function enviarParaCadastro(
+  empresas: any[],
+  modo: "empresa" | "empresa_contato" = "empresa",
+  /**
+   * Tags a aplicar em TUDO que este envio tocar — empresa e contato, criados ou já
+   * existentes. Vazio cai em "Radar", que é o comportamento antigo.
+   */
+  tags?: string[]
+) {
   const { supabase, tenant_id, user_id } = await ctx();
   if (!tenant_id) return { error: "Sem workspace." };
   if (!Array.isArray(empresas) || !empresas.length) return { error: "Nenhuma empresa selecionada." };
@@ -539,11 +597,15 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
   const contaPorCnpj = new Map<string, string>();
   const contaPorNome = new Map<string, string>();
   const contatoTemCnpj = new Set<string>();
+  const contatosPorCnpj = new Map<string, string[]>();
 
   for (const fatia of emFatias(cnpjsSelecionados)) {
     const [{ data: accsCnpj }, { data: ctsCnpj }] = await Promise.all([
       supabase.from("accounts").select("id, name, cnpj").eq("tenant_id", tenant_id).in("cnpj", fatia),
-      supabase.from("contacts").select("cnpj").eq("tenant_id", tenant_id).in("cnpj", fatia),
+      // `id` junto com `cnpj`: o contato que já existe é PULADO na criação, mas ainda
+      // faz parte desta seleção e precisa receber a tag do envio — senão a tag de safra
+      // fica com buraco justamente em quem já estava na base.
+      supabase.from("contacts").select("id, cnpj").eq("tenant_id", tenant_id).in("cnpj", fatia),
     ]);
     for (const a of (accsCnpj as any[]) || []) {
       const d = soDigitos(a.cnpj);
@@ -553,7 +615,12 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
     }
     for (const c of (ctsCnpj as any[]) || []) {
       const d = soDigitos(c.cnpj);
-      if (d.length === 14) contatoTemCnpj.add(d);
+      if (d.length === 14) {
+        contatoTemCnpj.add(d);
+        const lista = contatosPorCnpj.get(d) || [];
+        lista.push(c.id as string);
+        contatosPorCnpj.set(d, lista);
+      }
     }
   }
 
@@ -589,8 +656,18 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
   // fila de descoberta de e-mail (SMTP): cada contato com NOME de pessoa + domínio e
   // SEM e-mail vira um job. É o que dá e-mail próprio ao sócio na esteira do Radar.
   const filaEmail: { tenant_id: string; contact_id: string; name: string; domain: string }[] = [];
-  const tagId = await tagRadarId(supabase, tenant_id); // marca as empresas como vindas do Radar
+  // ---- as tags deste envio ----
+  // O `tier` da busca vira tag junto com a escolhida: ele já existe em `radar_leads` e
+  // na seleção, e era jogado fora na importação. Somar aqui é de graça e é exatamente o
+  // recorte que a cadência vai querer depois.
+  const tiersDaSelecao = Array.from(
+    new Set(empresas.map((e: any) => String(e?.tier ?? "").trim()).filter((t: string) => /^T[1-4]$/i.test(t)).map((t) => t.toUpperCase()))
+  );
+  const nomesDeTag = [...(tags?.length ? tags : ["Radar"]), ...tiersDaSelecao];
+  const tagIds = await resolverTags(supabase, tenant_id, nomesDeTag);
+
   const contasParaMarcar = new Set<string>();
+  const contatosParaMarcar = new Set<string>();
 
   // Resolve os nomes dos sócios de uma empresa para virar contato:
   //  1) se a linha da busca já trouxe e.socios (base do VPS evoluída) → grátis;
@@ -753,7 +830,13 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
     //    empresa"), NÃO criamos contato — o contato real entra depois (descoberta de
     //    e-mail ou cadastro manual, quando houver uma pessoa).
     if (!criarContato) continue;
-    if (contatoTemCnpj.has(cnpj)) { pulados++; continue; }
+    if (contatoTemCnpj.has(cnpj)) {
+      pulados++;
+      // Pulado na criação, marcado na mesma. Ele faz parte desta safra tanto quanto os
+      // que nasceram agora — é o mesmo critério que as empresas já seguiam.
+      for (const id of contatosPorCnpj.get(cnpj) || []) contatosParaMarcar.add(id);
+      continue;
+    }
     if (contatosCriados >= budgetContatos) { limiteAtingido = true; continue; }
 
     // um contato POR SÓCIO; se a empresa não tiver sócio identificado, cai no antigo
@@ -830,6 +913,9 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
         criouAlgum = true;
         contatosCriados++;
         contatoIds.push((novoContato as any).id as string);
+        // TODOS os sócios recebem a tag, não só o primeiro: a tag é de safra e de
+        // segmento, não de papel na empresa.
+        contatosParaMarcar.add((novoContato as any).id as string);
         // sem e-mail + domínio + nome de pessoa → entra na descoberta de e-mail (SMTP)
         // `pessoaJuridica` vem da Receita (identificador 1 = sócio PJ) e é mais
         // confiável que deduzir pelo nome: procurar "felipe@" faz sentido, procurar
@@ -842,10 +928,36 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
     if (criouAlgum) contatoTemCnpj.add(cnpj);
   }
 
-  // marca todas as empresas tocadas com a tag "Radar"
-  if (tagId && contasParaMarcar.size) {
-    const rows = Array.from(contasParaMarcar).map((account_id) => ({ tenant_id, account_id, tag_id: tagId }));
-    await supabase.from("account_tags").upsert(rows, { onConflict: "account_id,tag_id", ignoreDuplicates: true });
+  // ---- marca tudo que este envio tocou: empresa E contato ----
+  //
+  // O contato ficava de fora, e o efeito era invisível até alguém tentar montar uma
+  // cadência por tag: a empresa aparecia, o contato não. Como quem entra em cadência é
+  // o CONTATO, a tag no Radar não servia para nada na prática.
+  //
+  // Em fatias de 500: um envio grande com várias tags multiplica as linhas
+  // (contatos × tags) e o PostgREST tem teto de corpo.
+  const emLotes = <T,>(arr: T[], n = 500): T[][] => {
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+    return out;
+  };
+
+  let tagsAplicadas = 0;
+  if (tagIds.length) {
+    const linhasConta = Array.from(contasParaMarcar).flatMap((account_id) =>
+      tagIds.map((tag_id) => ({ tenant_id, account_id, tag_id }))
+    );
+    for (const lote of emLotes(linhasConta)) {
+      await supabase.from("account_tags").upsert(lote, { onConflict: "account_id,tag_id", ignoreDuplicates: true });
+    }
+
+    const linhasContato = Array.from(contatosParaMarcar).flatMap((contact_id) =>
+      tagIds.map((tag_id) => ({ tenant_id, contact_id, tag_id }))
+    );
+    for (const lote of emLotes(linhasContato)) {
+      await supabase.from("contact_tags").upsert(lote, { onConflict: "contact_id,tag_id", ignoreDuplicates: true });
+    }
+    tagsAplicadas = contatosParaMarcar.size;
   }
 
   // enfileira a descoberta de e-mail dos sócios (o cron /email-discovery drena de
@@ -887,10 +999,93 @@ export async function enviarParaCadastro(empresas: any[], modo: "empresa" | "emp
       (pulados ? `; ${pulados} pulada(s) por já existirem` : "") +
       (limiteAtingido ? "; parou no limite do plano" : "") +
       ".",
-    meta: { empresas: nomesEmpresas, contatosCriados, pulados, limiteAtingido, modo },
+    meta: { empresas: nomesEmpresas, contatosCriados, pulados, limiteAtingido, modo, tags: nomesDeTag, tagsAplicadas },
   });
 
   revalidatePath("/dashboard/contatos");
   revalidatePath("/dashboard/contas");
-  return { ok: true, empresasCriadas, contatosCriados, pulados, limiteAtingido, contatoIds, contaIds, avisoEsteira };
+  return { ok: true, empresasCriadas, contatosCriados, pulados, limiteAtingido, contatoIds, contaIds, avisoEsteira, tagsUsadas: nomesDeTag, tagsAplicadas };
+}
+
+// ============================================================
+// BACKFILL: os contatos que o Radar importou ANTES da tag existir
+//
+// A tag no contato passou a existir agora; os que entraram antes ficaram sem. A
+// informação não se perdeu — ela está em dois lugares que sobreviveram:
+//
+//   · `contacts.origin` começa com "Radar" para todo contato vindo daqui;
+//   · a EMPRESA dele já está marcada em `account_tags` desde sempre.
+//
+// Então o backfill não inventa nada: ele copia para o contato a tag que a empresa dele
+// já carrega. Contato do Radar cuja empresa não tem tag nenhuma recebe "Radar", que é o
+// mínimo verdadeiro sobre ele.
+//
+// AÇÃO EXPLÍCITA, não automática, e não roda em migration: mexe em milhares de linhas de
+// uma base viva. Quem aperta o botão tem que saber que apertou — e o resultado diz
+// exatamente quantas linhas entraram.
+// ============================================================
+export async function backfillTagsDoRadar(limite = 5000) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace." };
+
+  // 1) contatos vindos do Radar
+  const { data: cts, error: e1 } = await supabase
+    .from("contacts")
+    .select("id, account_id")
+    .eq("tenant_id", tenant_id)
+    .like("origin", "Radar%")
+    .limit(limite);
+  if (e1) return { error: msgErro(e1) };
+
+  const contatos = ((cts as any[]) || []);
+  if (!contatos.length) return { ok: true, contatos: 0, linhas: 0, aviso: "Nenhum contato com origem Radar." };
+
+  // 2) as tags que as EMPRESAS desses contatos já têm
+  const accountIds = Array.from(new Set(contatos.map((c) => c.account_id).filter(Boolean)));
+  const tagsPorConta = new Map<string, string[]>();
+  const emFatias = <T,>(arr: T[], n = 300): T[][] => {
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+    return out;
+  };
+  for (const fatia of emFatias(accountIds)) {
+    const { data: ats } = await supabase
+      .from("account_tags").select("account_id, tag_id").eq("tenant_id", tenant_id).in("account_id", fatia);
+    for (const a of ((ats as any[]) || [])) {
+      const lista = tagsPorConta.get(a.account_id) || [];
+      lista.push(a.tag_id);
+      tagsPorConta.set(a.account_id, lista);
+    }
+  }
+
+  // 3) a tag de reserva para quem não herdou nada
+  const [tagRadar] = await resolverTags(supabase, tenant_id, ["Radar"]);
+
+  const linhas: { tenant_id: string; contact_id: string; tag_id: string }[] = [];
+  for (const c of contatos) {
+    const herdadas = (c.account_id && tagsPorConta.get(c.account_id)) || [];
+    const usar = herdadas.length ? herdadas : tagRadar ? [tagRadar] : [];
+    for (const tag_id of usar) linhas.push({ tenant_id, contact_id: c.id, tag_id });
+  }
+  if (!linhas.length) return { ok: true, contatos: contatos.length, linhas: 0, aviso: "Nada a marcar." };
+
+  let gravadas = 0;
+  for (const lote of emFatias(linhas, 500)) {
+    const { error } = await supabase
+      .from("contact_tags")
+      .upsert(lote, { onConflict: "contact_id,tag_id", ignoreDuplicates: true });
+    if (error) return { error: msgErro(error), parcial: gravadas };
+    gravadas += lote.length;
+  }
+
+  await logAction(supabase, {
+    tenant_id, user_id,
+    action: "radar_backfill_tags",
+    entity: "contact",
+    qtd: contatos.length,
+    detail: `Backfill: ${contatos.length} contato(s) do Radar receberam a tag da empresa (${gravadas} vínculo(s)).`,
+  });
+
+  revalidatePath("/dashboard/contatos");
+  return { ok: true, contatos: contatos.length, linhas: gravadas };
 }

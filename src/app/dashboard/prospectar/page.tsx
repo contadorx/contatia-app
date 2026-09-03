@@ -9,6 +9,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export default async function Prospectar() {
+  // tags existentes, para o campo sugerir (mesma fonte da tela do Radar)
+  const { data: tagsRows } = await createClient().from("tags").select("name").order("name");
+  const tagsExistentes = ((tagsRows as any[]) || []).map((t) => t.name as string);
+
   const supabase = createClient();
 
   // O que já está ligado muda o texto de cada passo — em vez de prometer o que não
@@ -39,6 +43,7 @@ export default async function Prospectar() {
       </p>
 
       <ProspectarWizard
+        tagsExistentes={tagsExistentes}
         receitaOk={receitaConfigurada()}
         workerOk={workerConfigurado()}
         waPronto={waPronto}

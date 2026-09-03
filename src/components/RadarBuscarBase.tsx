@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import SmartSelect from "@/components/SmartSelect";
+import TagDoEnvio from "@/components/TagDoEnvio";
 import { atividadesReceita, buscarNaBase, contarNaBase, enviarParaCadastro, descartarCnpjs, reincluirCnpjs, exportarRadar } from "@/app/dashboard/radar/actions";
 import { diaISO } from "@/lib/datas";
 
@@ -36,7 +37,7 @@ function ehSocioPJ(s: SocioApi): boolean {
 // 49 sócio-administrador · 05 administrador · 16 presidente · 10 diretor
 const QUALIF: Record<string, string> = { "49": "sócio-adm.", "05": "administrador", "16": "presidente", "10": "diretor", "22": "sócio", "65": "titular" };
 
-export default function RadarBusca({ configurada }: { configurada: boolean }) {
+export default function RadarBusca({ configurada, tagsExistentes = [] }: { configurada: boolean; tagsExistentes?: string[] }) {
   // filtros
   const [termo, setTermo] = useState("");
   const [sug, setSug] = useState<Atividade[]>([]);
@@ -87,6 +88,8 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
   const [exportando, startExport] = useTransition();
   // como salvar do Radar: "empresa" (padrão, sem contato-fantasma) ou "empresa_contato".
   const [modoSalvar, setModoSalvar] = useState<"empresa" | "empresa_contato">("empresa");
+  // a tag desta importação — vai para a empresa e para TODOS os contatos criados
+  const [tagEnvio, setTagEnvio] = useState("");
 
   const debounce = useRef<any>(null);
 
@@ -232,12 +235,13 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
     setErro(null);
     setMsg(null);
     startEnvio(async () => {
-      const r: any = await enviarParaCadastro(escolhidasRows, modoSalvar);
+      const r: any = await enviarParaCadastro(escolhidasRows, modoSalvar, tagEnvio.trim() ? [tagEnvio.trim()] : undefined);
       if (r.error) { setErro(r.error); return; }
       const partes: string[] = [];
       if (modoSalvar === "empresa_contato") partes.push(`${r.contatosCriados} contato(s) e ${r.empresasCriadas} empresa(s) criadas`);
       else partes.push(`${r.empresasCriadas} empresa(s) criadas`);
       if (r.pulados) partes.push(`${r.pulados} já existia(m)`);
+      if (r.tagsUsadas?.length) partes.push(`tag ${r.tagsUsadas.join(" + ")} em ${r.tagsAplicadas} contato(s)`);
       let sufixo = modoSalvar === "empresa_contato" ? ". Veja em Empresas e Contatos." : ". Veja em Empresas.";
       if (r.limiteAtingido) sufixo += " (parei ao atingir o limite de contatos do seu plano.)";
       setMsg(partes.join(" · ") + sufixo);
@@ -539,6 +543,7 @@ export default function RadarBusca({ configurada }: { configurada: boolean }) {
                   Empresa + sócios
                 </button>
               </div>
+              <TagDoEnvio valor={tagEnvio} onChange={setTagEnvio} sugestoes={tagsExistentes} />
               <button className="text-xs text-subtle hover:text-danger" onClick={() => descartar(Array.from(sel))} disabled={descartando}>
                 {descartando ? "descartando…" : "descartar selecionadas"}
               </button>

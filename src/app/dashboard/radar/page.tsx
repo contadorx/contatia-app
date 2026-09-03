@@ -1,4 +1,5 @@
 import RadarBusca from "@/components/RadarBuscarBase";
+import { createClient } from "@/lib/supabase/server";
 import { receitaConfigurada } from "@/lib/receita";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,13 @@ export const dynamic = "force-dynamic";
 // ============================================================
 export const maxDuration = 60;
 
-export default function Radar() {
+export default async function Radar() {
+  // As tags que já existem, para o campo sugerir em vez de obrigar a digitar de novo.
+  // A página virou async só por isto — é uma consulta pequena e a RLS já a recorta.
+  const supabase = createClient();
+  const { data: tagsRows } = await supabase.from("tags").select("name").order("name");
+  const tagsExistentes = ((tagsRows as any[]) || []).map((t) => t.name as string);
+
   // O Radar está incluído em TODOS os planos (Individual e Equipes) — sem gate.
   return (
     <div>
@@ -25,7 +32,7 @@ export default function Radar() {
       </p>
 
       <div className="mt-6">
-        <RadarBusca configurada={receitaConfigurada()} />
+        <RadarBusca configurada={receitaConfigurada()} tagsExistentes={tagsExistentes} />
       </div>
     </div>
   );
