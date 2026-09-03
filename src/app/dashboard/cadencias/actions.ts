@@ -774,3 +774,58 @@ export async function reaplicarTextos(sequenceId: string): Promise<{
   revalidatePath("/dashboard/cadencias");
   return { ok: true, atualizadas, editadasPuladas: r.editadas, incompleto };
 }
+
+// ============================================================
+// AUTOPILOTO DA CADÊNCIA (0122)
+//
+// Liga: quem responder a esta cadência pelo WhatsApp cai no agente, sem clique.
+//
+// É o interruptor que faz o agente escalar — e, pela mesma razão, o que faz um playbook
+// ruim escalar. Por isso ele confere, na hora de LIGAR, que existe agente ligado e
+// playbook publicado: são as duas condições sem as quais o lead responde e encontra ou
+// silêncio, ou um agente que não sabe o que vende.
+//
+// DESLIGAR nunca é barrado, e não pede confirmação: freio não faz pergunta. As conversas
+// que já estão com o agente continuam com ele — desligar impede novas entregas, não
+// arranca de volta o que já está andando. Para tirar uma conversa específica, o botão é
+// "Assumir", em Conversas.
+// ============================================================
+export async function setAutopilotoCadencia(id: string, ligar: boolean) {
+  const { supabase, tenant_id, user_id } = await ctx();
+  if (!tenant_id) return { error: "Sem workspace atribuído." };
+  if (!(await canUseSequence(supabase, user_id, id))) return { error: "Você não pode editar esta cadência." };
+
+  if (ligar) {
+    const { data: cfg } = await supabase
+      .from("agent_config").select("ativo").eq("tenant_id", tenant_id).maybeSingle();
+    if (!(cfg as any)?.ativo) {
+      return { error: "O agente está desligado. Ligue em Agente antes — senão o lead responde e não encontra ninguém." };
+    }
+    const { count } = await supabase
+      .from("agent_playbooks").select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenant_id).eq("ativo", true);
+    if (!count) {
+      return { error: "Nenhum playbook publicado. Sem ele o agente não sabe o que vende — publique um em Agente → Playbook." };
+    }
+  }
+
+  const { error } = await supabase
+    .from("sequences")
+    .update({ agente_autopiloto: ligar })
+    .eq("id", id)
+    .eq("tenant_id", tenant_id);
+  if (error) return { error: msgErro(error) };
+
+  const { logAction } = await import("@/lib/actionLog");
+  await logAction(supabase, {
+    tenant_id, user_id,
+    action: ligar ? "autopiloto_ligado" : "autopiloto_desligado",
+    entity: "sequence", entity_id: id, qtd: 1,
+    detail: ligar
+      ? "Autopiloto LIGADO: quem responder a esta cadência passa para o agente automaticamente."
+      : "Autopiloto desligado nesta cadência.",
+  });
+
+  revalidatePath("/dashboard/cadencias");
+  return { ok: true };
+}

@@ -34,6 +34,7 @@ Os arquivos estão em `supabase/migrations/` para o histórico ficar completo:
 - `0119_agente_motor.sql` — turno, lock e `agent_decisoes`
 - `0120_agente_fechamento_aprendizado.sql` — proposta pendente e origem da venda
 - `0121_agente_quem_somos.sql` — o que a empresa faz e o que o produto é
+- `0122_autopiloto_por_cadencia.sql` — autopiloto por cadência
 
 ## Variáveis de ambiente
 
@@ -71,6 +72,10 @@ Os arquivos estão em `supabase/migrations/` para o histórico ficar completo:
 5. **Modo sombra numa conversa** — Conversas → *Sombra*. Ele roda inteiro e
    **não envia**; os rascunhos ficam em `agent_decisoes`. Leia antes de soltar.
 6. **Passar ao agente** — uma conversa, não a base inteira.
+7. **Autopiloto numa cadência** — Cadências → botão *Autopiloto*. A partir dele,
+   quem responder àquela cadência pelo WhatsApp cai no agente **sem clique**.
+   Ligue em UMA cadência primeiro. Desligar não tira as conversas que já estão
+   com ele — para isso, *Assumir* em Conversas.
 
 Recomendado na semana 1: autopiloto numa fatia (1 cadência, 20–30 leads/dia).
 
